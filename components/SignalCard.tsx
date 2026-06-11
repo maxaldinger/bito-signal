@@ -101,14 +101,24 @@ export function SignalCard({
             {signal.codebaseHint}
           </span>
         ) : null}
-        {signal.tags.map((tag, i) => (
-          <span
-            key={`${tag}-${i}`}
-            className="rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5 text-[11px] text-ink-400"
-          >
-            {tag}
-          </span>
-        ))}
+        {signal.tags.map((tag, i) =>
+          /kubernetes/i.test(tag) ? (
+            <span
+              key={`${tag}-${i}`}
+              title="K8s shops typically run 10+ services across multiple repos — strong Bito fit."
+              className="rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-sky-400"
+            >
+              ⎈ {tag}
+            </span>
+          ) : (
+            <span
+              key={`${tag}-${i}`}
+              className="rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5 text-[11px] text-ink-400"
+            >
+              {tag}
+            </span>
+          ),
+        )}
       </div>
 
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-ink-700 pt-3">

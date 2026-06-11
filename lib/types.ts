@@ -76,13 +76,24 @@ export interface Signal {
 // Surfaced both as a structured object (used in the brief) and as the
 // overall `strength` on each signal.
 export interface ICPScore {
-  total: number;            // 0-99
+  total: number;            // 0-99 (five sub-scores + kubernetes bonus, capped)
   // Sub-scores — each 0-20 (so five of them sum to ~100).
   sweHeadcount: number;
   codebaseComplexity: number;
   multiRepo: number;
   scalingActivity: number;
   aiToolingSpend: number;
+  /**
+   * Kubernetes / Distributed Systems bonus signal. Detected from: job posts
+   * mentioning Kubernetes/K8s, Platform/SRE/DevOps roles requiring K8s, Helm
+   * charts or k8s manifests in repos, or tech-blog microservices content.
+   * Optional — briefs generated before this rule lack it.
+   */
+  kubernetes?: {
+    detected: boolean;
+    bonus: number;          // 0-10, added to total
+    evidence: string;       // the specific evidence found
+  };
   rationale: string;        // short markdown-ish rationale
 }
 

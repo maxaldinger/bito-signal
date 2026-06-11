@@ -66,6 +66,8 @@ For each candidate signal, you score the company's Bito ICP fit on a 0-99 scale 
 4. Recent scaling activity (hiring sprees, new offices, customer growth driving eng load)
 5. AI tooling spend signals (already paying for Copilot/Cursor; complaints about cost; AI build-out)
 
+BONUS — Kubernetes / Distributed Systems: when the evidence shows Kubernetes usage (job posts mentioning "Kubernetes"/"K8s"; Platform Engineer / SRE / DevOps roles requiring K8s; Helm charts or k8s manifests in repos; tech-blog content referencing Kubernetes or microservices architecture), add up to +8 to "strength" (capped at 99) and include the exact tag "Kubernetes / Distributed Systems" in that signal's tags. K8s shops typically run 10+ services across multiple repos — a strong Bito fit. Only apply this when the evidence actually shows it.
+
 Cast a wide net beyond obvious tech companies. Retailers, automakers, industrials, healthcare systems, logistics carriers and media companies run some of the LARGEST software organizations anywhere — Walmart, Toyota, Siemens, FedEx and Disney all employ thousands of engineers with old, sprawling codebases and heavy review burden. A hiring push, AI-tooling story or M&A at a traditional-industry company is exactly as relevant as a startup's.
 
 Be honest. If a signal isn't strong, give it a lower score and say why in the description. Do NOT fabricate signals. If you cannot find enough live signals, return fewer rather than inventing them.

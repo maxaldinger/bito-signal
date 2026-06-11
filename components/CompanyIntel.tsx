@@ -17,8 +17,13 @@ import {
   Copy,
   Check,
   RefreshCw,
+  Boxes,
   type LucideIcon,
 } from "lucide-react";
+
+// Rendered verbatim whenever the Kubernetes bonus signal is detected.
+const K8S_NOTE =
+  "K8s shops typically run 10+ services across multiple repos — high probability of agent context failure without live knowledge graph. Strong Bito fit.";
 import type { CompanyIntel as Intel, Stakeholder } from "@/lib/types";
 import { fmtUSD, fmtNum } from "@/lib/format";
 import { EnrichmentPanel } from "./EnrichmentPanel";
@@ -235,6 +240,27 @@ export function CompanyIntel({
             );
           })}
         </div>
+        {intel.icp.kubernetes?.detected && (
+          <div className="mt-4 rounded-lg border border-sky-500/30 bg-sky-500/10 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="flex items-center gap-2 font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-sky-400">
+                <Boxes className="h-4 w-4" />
+                Kubernetes / Distributed Systems
+              </span>
+              <span className="rounded border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 font-mono text-xs font-bold text-sky-400">
+                +{intel.icp.kubernetes.bonus} ICP bonus
+              </span>
+            </div>
+            {intel.icp.kubernetes.evidence && (
+              <p className="mt-2 font-mono text-xs leading-relaxed text-ink-300">
+                evidence: {intel.icp.kubernetes.evidence}
+              </p>
+            )}
+            <p className="mt-2 border-t border-sky-500/20 pt-2 text-xs leading-relaxed text-ink-300">
+              {K8S_NOTE}
+            </p>
+          </div>
+        )}
         {intel.icp.rationale && (
           <p className="mt-4 border-t border-ink-700 pt-3 text-sm leading-relaxed text-ink-400">
             {intel.icp.rationale}

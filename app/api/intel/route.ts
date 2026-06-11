@@ -51,8 +51,9 @@ Research checklist (use web_search for each):
 2. Engineering organization: team structure, monorepo/polyrepo hints, languages, open-source footprint, engineering blog posts.
 3. Recent signals: hiring, funding, M&A, scaling pain, AI tooling adoption or commentary.
 4. Named engineering leaders where public (CTO, VP Eng, Head of Platform/DevEx, staff engineers who write/talk publicly).
+5. Kubernetes / distributed-systems evidence: job postings mentioning "Kubernetes" or "K8s"; Platform Engineer / SRE / DevOps roles listing K8s as a requirement; GitHub repos containing Helm charts or k8s manifests; tech-blog content referencing Kubernetes or microservices architecture.
 
-Scoring: ICP sub-scores are each 0-20 (sweHeadcount, codebaseComplexity, multiRepo, scalingActivity, aiToolingSpend); total is 0-99 and should be consistent with the sub-scores. Score honestly — a 2,000-engineer giant or a 10-person startup scores LOW on sweHeadcount.
+Scoring: ICP sub-scores are each 0-20 (sweHeadcount, codebaseComplexity, multiRepo, scalingActivity, aiToolingSpend). The "kubernetes" block is a BONUS signal on top: when you find concrete K8s/distributed-systems evidence (checklist item 5), set detected=true, quote the specific evidence, and award a bonus of +4 (indirect, e.g. one blog mention) to +10 (direct, e.g. multiple K8s-required roles or Helm charts in public repos). K8s shops typically run 10+ services across multiple repos — a strong Bito fit signal. total = the five sub-scores + kubernetes bonus, capped at 99, and must be consistent. Score honestly — a 2,000-engineer giant or a 10-person startup scores LOW on sweHeadcount; set detected=false with bonus 0 when there is no real K8s evidence.
 
 Token cost exposure: estimate what the company likely spends per month on AI dev tooling using REAL public anchors (e.g. Copilot Business ~$19/seat/mo, Copilot Enterprise ~$39/seat/mo, Cursor Business ~$40/seat/mo) times your evidenced engineering-seat estimate. State every assumption in "notes". These are estimates — never present them as fact.
 
@@ -84,6 +85,7 @@ Output ONLY one JSON object — no prose, no code fences:
     "multiRepo": 0-20,
     "scalingActivity": 0-20,
     "aiToolingSpend": 0-20,
+    "kubernetes": { "detected": true|false, "bonus": 0-10, "evidence": "the specific K8s evidence found, or empty string" },
     "rationale": "2-3 sentences explaining the score from evidence"
   },
   "summary": "2-4 sentence executive summary grounded in findings",
@@ -236,6 +238,15 @@ export async function GET(req: NextRequest) {
         multiRepo: clamp(parsed.icp.multiRepo, 0, 20, 0),
         scalingActivity: clamp(parsed.icp.scalingActivity, 0, 20, 0),
         aiToolingSpend: clamp(parsed.icp.aiToolingSpend, 0, 20, 0),
+        // Bonus signal — only kept when detected WITH actual evidence text.
+        kubernetes:
+          parsed.icp.kubernetes?.detected && String(parsed.icp.kubernetes.evidence || "").trim()
+            ? {
+                detected: true,
+                bonus: clamp(parsed.icp.kubernetes.bonus, 0, 10, 0),
+                evidence: String(parsed.icp.kubernetes.evidence).trim(),
+              }
+            : { detected: false, bonus: 0, evidence: "" },
         rationale: String(parsed.icp.rationale || ""),
       },
       generatedAt: new Date().toISOString(),
