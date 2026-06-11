@@ -299,17 +299,17 @@ interface SweepQuery {
 
 const SWEEP_QUERIES: SweepQuery[] = [
   // Tech-native — mid-size companies, software IS the company.
-  { keyword: "developer tools", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 4 },
-  { keyword: "saas", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 4 },
-  { keyword: "fintech", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 4 },
-  { keyword: "artificial intelligence", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 4 },
+  { keyword: "developer tools", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 10 },
+  { keyword: "saas", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 10 },
+  { keyword: "fintech", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 10 },
+  { keyword: "artificial intelligence", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 10 },
   // Traditional industries — big totals, big in-house software orgs.
-  { keyword: "retail", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
-  { keyword: "automotive", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
-  { keyword: "manufacturing", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
-  { keyword: "healthcare", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
-  { keyword: "logistics", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
-  { keyword: "media", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
+  { keyword: "retail", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
+  { keyword: "automotive", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
+  { keyword: "manufacturing", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
+  { keyword: "healthcare", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
+  { keyword: "logistics", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
+  { keyword: "media", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
 ];
 
 interface ApolloAccountRecord {
@@ -320,7 +320,12 @@ interface ApolloAccountRecord {
   linkedin_url?: string;
 }
 
-export async function apolloIcpSweep(): Promise<IcpSweepResult> {
+/**
+ * @param page Which results page to fetch per keyword — callers advance this
+ * between pulls so each pull surfaces NEW organizations (Apollo has tens of
+ * thousands of matches per filter; page 1 alone would repeat forever).
+ */
+export async function apolloIcpSweep(page = 1): Promise<IcpSweepResult> {
   const key = process.env.APOLLO_API_KEY;
   if (!key) {
     return {
@@ -338,7 +343,7 @@ export async function apolloIcpSweep(): Promise<IcpSweepResult> {
     const batches = await Promise.all(
       SWEEP_QUERIES.map(async (q) => {
         const qs = new URLSearchParams({
-          page: "1",
+          page: String(Math.max(1, Math.min(100, page))),
           per_page: String(q.perPage),
         });
         for (const r of q.ranges) qs.append("organization_num_employees_ranges[]", r);

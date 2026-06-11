@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import { apolloIcpSweep, type IcpSweepOrg } from "@/lib/enrich/apollo";
-import { upsertSignals, supabaseConfigured } from "@/lib/supabase";
+import {
+  upsertSignals,
+  supabaseConfigured,
+  fetchRecentAccounts,
+  countSignalsByType,
+} from "@/lib/supabase";
 import type { Signal, SignalTypeId, SegmentId } from "@/lib/types";
 
 // Live feed — we ask claude-sonnet-4 to search the public web for fresh
@@ -109,13 +114,17 @@ const FULL_PROMPT = `Search the public web for 10-14 fresh buying signals that p
 
 ${SHARED_RULES}`;
 
-const bucketPrompt = (type: SearchBucket) =>
-  `Search the public web for 5-8 fresh buying signals in ONE category for Bito's ICP. Each signal must be a DIFFERENT company.
+const bucketPrompt = (type: SearchBucket, exclude: string[]) =>
+  `Search the public web for 8-10 fresh buying signals in ONE category for Bito's ICP. Each signal must be a DIFFERENT company.
 
 CATEGORY: ${BUCKET_BRIEFS[type]}
 
 Every signal's "type" field must be "${type}".
-
+${
+  exclude.length > 0
+    ? `\nALREADY TRACKED — do NOT return these companies again; search specifically for DIFFERENT ones:\n${exclude.join(", ")}\n`
+    : ""
+}
 ${SHARED_RULES}`;
 
 interface ModelSignal {
@@ -228,7 +237,11 @@ export async function GET(req: NextRequest) {
 
   // Apollo-powered bucket: structured org search, no Anthropic involved.
   if (bucket === "icp") {
-    const sweep = await apolloIcpSweep();
+    // Advance one results-page per ~60 cached rows so repeat pulls bring NEW
+    // organizations instead of re-fetching page 1 forever.
+    const cachedIcp = supabaseConfigured() ? await countSignalsByType("icp") : 0;
+    const sweepPage = Math.min(100, Math.floor(cachedIcp / 60) + 1);
+    const sweep = await apolloIcpSweep(sweepPage);
     if (!sweep.configured) {
       // Not an error — just absent. The client treats `skipped` as a quiet no-op
       // so keyless deployments don't show a permanent failure banner.
@@ -262,11 +275,17 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Tell the model which companies we already track so each pull hunts new
+    // ones — without this, repeat scans rediscover the same headline accounts
+    // and dedupe makes pulls look like they "add nothing".
+    const exclude =
+      bucket && supabaseConfigured() ? await fetchRecentAccounts(bucket, 60) : [];
+
     const result = await callClaudeWithWebSearch({
       system: SYSTEM,
-      user: bucket ? bucketPrompt(bucket as SearchBucket) : FULL_PROMPT,
-      maxSearches: bucket ? 4 : Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
-      maxTokens: bucket ? 3500 : 6000,
+      user: bucket ? bucketPrompt(bucket as SearchBucket, exclude) : FULL_PROMPT,
+      maxSearches: bucket ? 5 : Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
+      maxTokens: bucket ? 4500 : 6000,
       temperature: 0.4,
     });
 

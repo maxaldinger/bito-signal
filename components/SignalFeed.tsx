@@ -37,6 +37,8 @@ export function SignalFeed({
   bucketErrors,
   metrics,
   updated,
+  unfilteredCount,
+  onClearFilters,
   onSelectCompany,
   onGetIntel,
   onRetry,
@@ -56,6 +58,9 @@ export function SignalFeed({
   bucketErrors: Partial<Record<SignalTypeId, string>>;
   metrics: { total: number; accounts: number; avgFit: number; hot: number };
   updated: string;
+  /** Rows on the current page BEFORE client-side filters. */
+  unfilteredCount: number;
+  onClearFilters: () => void;
   onSelectCompany: (c: string) => void;
   onGetIntel: (c: string) => void;
   onRetry: () => void;
@@ -120,13 +125,36 @@ export function SignalFeed({
         </div>
       </div>
 
-      {/* Metrics */}
+      {/* Metrics — first card is the whole cache; the rest reflect the
+          current (filtered) view */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="live signals" value={metrics.total} icon={Zap} color="text-neon-400" loading={loading} />
-        <MetricCard label="accounts" value={metrics.accounts} icon={Building} color="text-sky-400" loading={loading} />
-        <MetricCard label="avg icp fit" value={metrics.avgFit} icon={Gauge} color="text-violet-400" loading={loading} />
-        <MetricCard label="hot (≥80)" value={metrics.hot} icon={Flame} color="text-amber-400" loading={loading} />
+        <MetricCard
+          label={cacheMode ? "cached signals" : "live signals"}
+          value={cacheMode ? totalCached : metrics.total}
+          icon={Zap}
+          color="text-neon-400"
+          loading={loading}
+        />
+        <MetricCard label="accounts (view)" value={metrics.accounts} icon={Building} color="text-sky-400" loading={loading} />
+        <MetricCard label="avg icp fit (view)" value={metrics.avgFit} icon={Gauge} color="text-violet-400" loading={loading} />
+        <MetricCard label="hot ≥80 (view)" value={metrics.hot} icon={Flame} color="text-amber-400" loading={loading} />
       </div>
+
+      {/* Filters hiding rows — say so loudly instead of looking like a small pull */}
+      {!loading && unfilteredCount > signals.length && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-500/30 bg-violet-500/10 px-4 py-2.5">
+          <p className="font-mono text-xs text-violet-300">
+            ▸ {unfilteredCount - signals.length} of {unfilteredCount} signals on this
+            page hidden by your filters
+          </p>
+          <button
+            onClick={onClearFilters}
+            className="shrink-0 rounded border border-violet-500/40 px-2.5 py-1 font-mono text-[11px] font-medium text-violet-300 transition-colors hover:bg-violet-500/15"
+          >
+            clear filters
+          </button>
+        </div>
+      )}
 
       {/* Error banner — be honest when scans fail (all or some) */}
       {failedBuckets.length > 0 && !booting && (

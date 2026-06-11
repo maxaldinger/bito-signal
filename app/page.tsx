@@ -379,6 +379,14 @@ export default function Page() {
                 bucketErrors={bucketErrors}
                 metrics={metrics}
                 updated={lastUpdated}
+                unfilteredCount={signals.length}
+                onClearFilters={() => {
+                  setSegments([]);
+                  setTypes([]);
+                  setBands([]);
+                  setMinStrength(0);
+                  setSearch("");
+                }}
                 onSelectCompany={getIntel}
                 onGetIntel={getIntel}
                 onRetry={refresh}

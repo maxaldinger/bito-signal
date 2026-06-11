@@ -112,6 +112,56 @@ export async function upsertSignals(
   }
 }
 
+/** Most recently seen account names for one signal type — used to tell the
+ * model which companies we already track so each pull hunts NEW ones. */
+export async function fetchRecentAccounts(
+  type: SignalTypeId,
+  limit = 60,
+): Promise<string[]> {
+  const cfg = config();
+  if (!cfg) return [];
+  try {
+    const res = await fetch(
+      `${cfg.url}/rest/v1/bito_signals?select=account&type=eq.${encodeURIComponent(type)}&order=last_seen_at.desc&limit=${limit}`,
+      {
+        headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}` },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return [];
+    const rows = (await res.json()) as { account: string }[];
+    return rows.map((r) => r.account);
+  } catch {
+    return [];
+  }
+}
+
+/** Exact row count for one signal type — drives Apollo sweep page rotation. */
+export async function countSignalsByType(type: SignalTypeId): Promise<number> {
+  const cfg = config();
+  if (!cfg) return 0;
+  try {
+    const res = await fetch(
+      `${cfg.url}/rest/v1/bito_signals?select=id&type=eq.${encodeURIComponent(type)}&limit=1`,
+      {
+        headers: {
+          apikey: cfg.key,
+          Authorization: `Bearer ${cfg.key}`,
+          Prefer: "count=exact",
+        },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return 0;
+    const range = res.headers.get("content-range") ?? "";
+    return Number(range.split("/")[1]) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export interface SignalPage {
   configured: boolean;
   ok: boolean;
