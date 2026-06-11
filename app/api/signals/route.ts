@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import { apolloIcpSweep, type IcpSweepOrg } from "@/lib/enrich/apollo";
+import { fetchHNItems } from "@/lib/sources/hn";
+import { fetchGitHubTrendingItems } from "@/lib/sources/github";
+import { fetchGdeltItems } from "@/lib/sources/gdelt";
+import { fetchRssItems } from "@/lib/sources/rss";
+import type { RawItem } from "@/lib/sources/types";
 import {
   upsertSignals,
   supabaseConfigured,
@@ -49,13 +54,11 @@ const VALID_SEGMENTS: SegmentId[] = [
 ];
 const SEGMENT_ENUM = VALID_SEGMENTS.join(" | ");
 
-const SYSTEM = `${BITO_CONTEXT}
+const SYSTEM_CORE = `${BITO_CONTEXT}
 
-You are Bito's GTM intelligence analyst. Your job is to surface concrete, real-world buying signals from the public web that point to SWE-heavy companies likely to need Bito's AI code-review platform.
+You are Bito's GTM intelligence analyst. Your job is to surface concrete, real-world buying signals that point to SWE-heavy companies likely to need Bito's AI code-review platform.
 
-Use the web_search tool aggressively. Every signal you return MUST be backed by a real, recent (last ~60 days when possible), public source — a news article, press release, job board, GitHub release, blog post, podcast transcript, conference talk, etc.
-
-For each candidate signal you find, you score the company's Bito ICP fit on a 0-99 scale using five sub-criteria (each 0-20):
+For each candidate signal, you score the company's Bito ICP fit on a 0-99 scale using five sub-criteria (each 0-20):
 1. SWE headcount in the 50-500 sweet spot (20 = bullseye, taper outside)
 2. Codebase age / complexity (monorepo, polyrepo, legacy modernization, microservices sprawl)
 3. Multi-repo indicators (multiple repos, services, languages — Bito's grounding shines here)
@@ -85,6 +88,16 @@ Output ONLY a single JSON object — no prose, no code fences — matching this 
     }
   ]
 }`;
+
+// Search variant: instructs the model to browse. Grader variant: forbids it —
+// the raw items in the prompt are the only evidence.
+const SYSTEM = `${SYSTEM_CORE}
+
+Use the web_search tool aggressively. Every signal you return MUST be backed by a real, recent (last ~60 days when possible), public source — a news article, press release, job board, GitHub release, blog post, podcast transcript, conference talk, etc.`;
+
+const GRADER_SYSTEM = `${SYSTEM_CORE}
+
+You have NO search tools on this call. The user message contains raw items already fetched from public sources — they are your ONLY evidence. Never invent facts beyond what an item states; when the evidence is thin, score low and keep the description strictly to what the item says.`;
 
 const BUCKET_BRIEFS: Record<SearchBucket, string> = {
   hiring:
@@ -125,6 +138,68 @@ ${
     ? `\nALREADY TRACKED — do NOT return these companies again; search specifically for DIFFERENT ones:\n${exclude.join(", ")}\n`
     : ""
 }
+${SHARED_RULES}`;
+
+// ---------------------------------------------------------------------------
+// FREE discovery path (the default): structured sources fetch raw candidates
+// for $0, then ONE Claude call (NO web_search — tokens only) filters,
+// extracts the company, and scores them. ?deep=1 falls back to the
+// web_search path above for an on-demand deeper scan.
+// ---------------------------------------------------------------------------
+
+async function fetchBucketItems(type: SearchBucket): Promise<{ items: RawItem[]; sourceErrors: string[] }> {
+  const tasks: Promise<{ ok: boolean; error?: string; items: RawItem[] }>[] = (() => {
+    switch (type) {
+      case "hiring":
+        return [
+          fetchGdeltItems('("hiring engineers" OR "engineering hiring" OR "hiring spree" OR "engineering team") software', { limit: 25 }),
+          fetchHNItems("hiring engineers", { minPoints: 5, days: 21, limit: 10 }),
+        ];
+      case "oss":
+        return [
+          fetchGitHubTrendingItems({ limit: 20, days: 30, minStars: 150 }),
+          fetchHNItems("Show HN", { minPoints: 40, days: 10, limit: 12 }),
+        ];
+      case "ma":
+        return [
+          fetchGdeltItems('software (acquires OR acquisition OR "to acquire" OR merger) technology', { limit: 25 }),
+          // NOTE: TechCrunch renamed fundings-exits; /category/venture/ is live.
+          fetchRssItems("https://techcrunch.com/category/venture/feed/", { limit: 20 }),
+        ];
+      case "funding":
+        return [
+          fetchRssItems("https://techcrunch.com/category/venture/feed/", { limit: 20 }),
+          fetchGdeltItems('(raises OR raised) ("Series A" OR "Series B" OR "Series C" OR "Series D") engineering', { limit: 20 }),
+        ];
+      case "ai":
+        return [
+          fetchHNItems('Copilot OR Cursor OR "AI coding"', { minPoints: 20, days: 14, limit: 15 }),
+          fetchGdeltItems('("AI coding" OR "GitHub Copilot" OR "Cursor AI" OR "AI developer tools") (cost OR spend OR adoption OR rollout)', { limit: 20 }),
+        ];
+    }
+  })();
+
+  const settled = await Promise.all(tasks);
+  const sourceErrors = settled.filter((s) => !s.ok && s.error).map((s) => s.error!);
+  // Interleave + cap so the grader input stays small and diverse.
+  const items = settled.flatMap((s) => s.items).slice(0, 40);
+  return { items, sourceErrors };
+}
+
+const graderPrompt = (type: SearchBucket, items: RawItem[], exclude: string[]) =>
+  `Below are RAW items fetched from free public sources (news index, Hacker News, GitHub, RSS). Your job is to GRADE them into Bito buying signals for ONE category — no searching, work only from what's given.
+
+CATEGORY: ${BUCKET_BRIEFS[type]}
+
+For each item that genuinely fits the category AND names a real company, emit one signal (type "${type}"). Extract the company from the headline/snippet (for GitHub repos, the org behind the repo). Skip items with no identifiable company, aggregators, listicles, individuals' side projects, duplicates of the same story, and anything clearly outside the category. It is fine — expected — to return far fewer signals than items. Set "url" to the item's url and "date" to the item's date. Score honestly: these are headline-level candidates, so most belong in the 55-80 range; reserve 80+ for unambiguous, strong ICP fits. Only set sweEstimate if the text itself states team size — never guess.
+${
+  exclude.length > 0
+    ? `\nALREADY TRACKED — skip these companies entirely:\n${exclude.join(", ")}\n`
+    : ""
+}
+RAW ITEMS (JSON):
+${JSON.stringify(items)}
+
 ${SHARED_RULES}`;
 
 interface ModelSignal {
@@ -274,6 +349,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // ?deep=1 opts into the expensive web_search path; default is the free
+  // structured-sources + grader pipeline.
+  const deep = req.nextUrl.searchParams.get("deep") === "1";
+
   try {
     // Tell the model which companies we already track so each pull hunts new
     // ones — without this, repeat scans rediscover the same headline accounts
@@ -281,13 +360,39 @@ export async function GET(req: NextRequest) {
     const exclude =
       bucket && supabaseConfigured() ? await fetchRecentAccounts(bucket, 60) : [];
 
-    const result = await callClaudeWithWebSearch({
-      system: SYSTEM,
-      user: bucket ? bucketPrompt(bucket as SearchBucket, exclude) : FULL_PROMPT,
-      maxSearches: bucket ? 5 : Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
-      maxTokens: bucket ? 4500 : 6000,
-      temperature: 0.4,
-    });
+    let result;
+    let sourceErrors: string[] = [];
+    if (bucket && !deep) {
+      // FREE path: fetch raw candidates from structured sources, grade with
+      // one no-search Claude call (tokens only — zero billed searches).
+      const fetched = await fetchBucketItems(bucket as SearchBucket);
+      sourceErrors = fetched.sourceErrors;
+      if (fetched.items.length === 0) {
+        return NextResponse.json(
+          {
+            error: `No raw candidates from free sources for "${bucket}"${
+              sourceErrors.length ? ` — ${sourceErrors.join("; ")}` : ""
+            }. Try again or use deep=1.`,
+          },
+          { status: 502, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      result = await callClaudeWithWebSearch({
+        system: GRADER_SYSTEM,
+        user: graderPrompt(bucket as SearchBucket, fetched.items, exclude),
+        webSearch: false,
+        maxTokens: 4000,
+        temperature: 0.2,
+      });
+    } else {
+      result = await callClaudeWithWebSearch({
+        system: SYSTEM,
+        user: bucket ? bucketPrompt(bucket as SearchBucket, exclude) : FULL_PROMPT,
+        maxSearches: bucket ? 5 : Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
+        maxTokens: bucket ? 4500 : 6000,
+        temperature: 0.4,
+      });
+    }
 
     const parsed = extractJSON<ModelResponse>(result.text);
     if (!parsed || !Array.isArray(parsed.signals)) {

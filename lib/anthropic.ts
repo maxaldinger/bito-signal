@@ -15,6 +15,11 @@ export interface AnthropicCallOptions {
   user: string;
   // Optional prior assistant/user history.
   history?: { role: "user" | "assistant"; content: string }[];
+  /**
+   * Attach the web_search tool (default true). Set false for pure
+   * reasoning/grading calls — they bill only tokens, no $10/1K searches.
+   */
+  webSearch?: boolean;
   // Max searches the model may issue (default 5).
   maxSearches?: number;
   // Allow/block search domains.
@@ -153,14 +158,14 @@ export async function callClaudeWithWebSearch(
   if (opts.allowedDomains?.length) tool.allowed_domains = opts.allowedDomains;
   if (opts.blockedDomains?.length) tool.blocked_domains = opts.blockedDomains;
 
-  const body = {
+  const body: Record<string, unknown> = {
     model,
     max_tokens: opts.maxTokens ?? 4096,
     temperature: opts.temperature ?? 0.4,
     system: opts.system,
     messages,
-    tools: [tool],
   };
+  if (opts.webSearch !== false) body.tools = [tool];
 
   const res = await fetch(ENDPOINT, {
     method: "POST",
