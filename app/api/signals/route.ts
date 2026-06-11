@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
+import { apolloIcpSweep, type IcpSweepOrg } from "@/lib/enrich/apollo";
 import type { Signal, SignalTypeId, SegmentId } from "@/lib/types";
 
 // Live feed — we ask claude-sonnet-4 to search the public web for fresh
@@ -22,7 +23,9 @@ export const dynamic = "force-dynamic";
 // The full pass can run past 90s — use the platform maximum.
 export const maxDuration = 300;
 
-const VALID_TYPES: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai"];
+const VALID_TYPES: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai", "icp"];
+// Buckets the model searches for; "icp" is served by Apollo, not Anthropic.
+type SearchBucket = Exclude<SignalTypeId, "icp">;
 const VALID_SEGMENTS: SegmentId[] = [
   "saas",
   "fintech",
@@ -67,7 +70,7 @@ Output ONLY a single JSON object — no prose, no code fences — matching this 
   ]
 }`;
 
-const BUCKET_BRIEFS: Record<SignalTypeId, string> = {
+const BUCKET_BRIEFS: Record<SearchBucket, string> = {
   hiring:
     "Engineering hiring announcements: companies posting waves of senior SWE / staff / platform-engineering / DevEx roles in the last 60 days. Use sources like LinkedIn announcements, company engineering blogs, hiring trackers, TechCrunch hiring stories.",
   oss: "Major OSS / GitHub activity: notable releases, new flagship repos, or unusual repo growth from companies with paid commercial products. Use GitHub trending, company engineering blogs, HN front page.",
@@ -95,8 +98,8 @@ const FULL_PROMPT = `Search the public web for 10-14 fresh buying signals that p
 
 ${SHARED_RULES}`;
 
-const bucketPrompt = (type: SignalTypeId) =>
-  `Search the public web for 3-5 fresh buying signals in ONE category for Bito's ICP.
+const bucketPrompt = (type: SearchBucket) =>
+  `Search the public web for 5-8 fresh buying signals in ONE category for Bito's ICP. Each signal must be a DIFFERENT company.
 
 CATEGORY: ${BUCKET_BRIEFS[type]}
 
@@ -153,6 +156,43 @@ function normalizeDate(d: string | undefined): string {
   return new Date(time).toISOString().slice(0, 10);
 }
 
+// Deterministic profile-fit score for Apollo sweep rows, by Bito affinity of
+// the matched keyword. A disclosed rule, not a model guess — every card
+// states the exact filters that produced it.
+const ICP_KEYWORD_STRENGTH: Record<string, number> = {
+  "developer tools": 78,
+  "artificial intelligence": 76,
+  fintech: 74,
+  saas: 72,
+};
+
+const ICP_KEYWORD_SEGMENT: Record<string, SegmentId> = {
+  "developer tools": "devtools",
+  "artificial intelligence": "ai",
+  fintech: "fintech",
+  saas: "saas",
+};
+
+function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
+  return orgs.map((org, i) => ({
+    id: `icp-${i}-${Date.now().toString(36)}`,
+    account: org.name,
+    segment: ICP_KEYWORD_SEGMENT[org.matchedKeyword] ?? "saas",
+    type: "icp" as const,
+    strength: ICP_KEYWORD_STRENGTH[org.matchedKeyword] ?? 70,
+    title: `Profile-fit match: ${org.matchedKeyword} · ${org.employeeBand}`,
+    description:
+      `Surfaced by Apollo org search on Bito's ICP filters — matched "${org.matchedKeyword}" within the ${org.employeeBand} band. ` +
+      `Fit score is a rule-based profile estimate; no event signal yet — run the brief for live research.`,
+    tags: [org.matchedKeyword, org.employeeBand],
+    source: "Apollo org search",
+    url: org.linkedinUrl || org.websiteUrl,
+    date: todayISO(),
+    sweEstimate: undefined, // total headcount ≠ SWE count — never conflate
+    codebaseHint: undefined,
+  }));
+}
+
 export async function GET(req: NextRequest) {
   const typeParam = req.nextUrl.searchParams.get("type")?.trim().toLowerCase();
   const bucket: SignalTypeId | null = (VALID_TYPES as string[]).includes(
@@ -161,12 +201,39 @@ export async function GET(req: NextRequest) {
     ? (typeParam as SignalTypeId)
     : null;
 
+  // Apollo-powered bucket: structured org search, no Anthropic involved.
+  if (bucket === "icp") {
+    const sweep = await apolloIcpSweep(4);
+    if (!sweep.configured) {
+      // Not an error — just absent. The client treats `skipped` as a quiet no-op
+      // so keyless deployments don't show a permanent failure banner.
+      return NextResponse.json(
+        { signals: [], skipped: sweep.error },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    if (!sweep.ok || sweep.orgs.length === 0) {
+      return NextResponse.json(
+        { error: sweep.error || "Apollo ICP sweep returned no organizations." },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(
+      { signals: icpSweepToSignals(sweep.orgs), updated: new Date().toISOString() },
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
+        },
+      },
+    );
+  }
+
   try {
     const result = await callClaudeWithWebSearch({
       system: SYSTEM,
-      user: bucket ? bucketPrompt(bucket) : FULL_PROMPT,
-      maxSearches: bucket ? 3 : Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
-      maxTokens: bucket ? 2500 : 6000,
+      user: bucket ? bucketPrompt(bucket as SearchBucket) : FULL_PROMPT,
+      maxSearches: bucket ? 4 : Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
+      maxTokens: bucket ? 3500 : 6000,
       temperature: 0.4,
     });
 

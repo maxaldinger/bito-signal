@@ -31,7 +31,7 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
-const BUCKETS: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai"];
+const BUCKETS: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai", "icp"];
 
 export default function Page() {
   const [tab, setTab] = useState<TabId>("feed");
@@ -87,6 +87,9 @@ export default function Page() {
               [bucket]:
                 typeof data.error === "string" ? data.error : `HTTP ${res.status}`,
             }));
+          } else if (data.skipped) {
+            // Bucket not configured (e.g. ICP sweep without APOLLO_API_KEY) —
+            // quietly absent rather than a failure banner.
           } else {
             const fresh = Array.isArray(data.signals) ? (data.signals as Signal[]) : [];
             setSignals((prev) => [...prev, ...fresh]);

@@ -6,6 +6,7 @@ import {
   GitMerge,
   TrendingUp,
   Cpu,
+  Crosshair,
   ArrowRight,
   ExternalLink,
   type LucideIcon,
@@ -20,6 +21,7 @@ const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
   ma: GitMerge,
   funding: TrendingUp,
   ai: Cpu,
+  icp: Crosshair,
 };
 
 function StrengthBar({ value, color }: { value: number; color: string }) {

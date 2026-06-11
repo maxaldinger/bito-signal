@@ -82,6 +82,13 @@ export const SIGNAL_TYPES: SignalType[] = [
     color: "#db2777",
     description: "Public commentary on AI tooling spend, adoption or pain",
   },
+  {
+    id: "icp",
+    label: "ICP Sweep (Apollo)",
+    color: "#0d9488",
+    description:
+      "Profile-fit accounts from Apollo org search — headcount + industry match, no event signal",
+  },
 ];
 
 export const SIGNAL_TYPE_MAP: Record<string, SignalType> = Object.fromEntries(

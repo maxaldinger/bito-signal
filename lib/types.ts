@@ -13,7 +13,8 @@ export type SignalTypeId =
   | "oss"      // major OSS / GitHub activity (releases, stars, big repos)
   | "ma"       // M&A creating codebase complexity (merges, acquisitions)
   | "funding"  // funding rounds with explicit engineering build-out
-  | "ai";      // AI tooling spend / public AI tooling commentary
+  | "ai"       // AI tooling spend / public AI tooling commentary
+  | "icp";     // Apollo org-search sweep — profile-fit match, no event
 
 // Company segment — what kind of SWE-heavy org this is.
 export type SegmentId =

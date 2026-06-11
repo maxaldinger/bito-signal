@@ -61,7 +61,7 @@ export function SignalFeed({
   // while remaining buckets are still scanning.
   const booting = loading && signals.length === 0;
   const failedBuckets = Object.keys(bucketErrors) as SignalTypeId[];
-  const allFailed = !loading && failedBuckets.length === 5 && signals.length === 0;
+  const allFailed = !loading && failedBuckets.length >= 5 && signals.length === 0;
   const bucketLabel = (b: SignalTypeId) => SIGNAL_TYPE_MAP[b]?.label ?? b;
 
   return (
@@ -151,7 +151,7 @@ export function SignalFeed({
       {booting ? (
         <div className="space-y-4">
           <p className="font-mono text-xs text-neon-400">
-            ▸ running 5 parallel scans: hiring, OSS, M&A, funding, AI tooling…
+            ▸ running 6 parallel scans: hiring, OSS, M&A, funding, AI tooling + Apollo ICP sweep…
           </p>
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="rounded-lg border border-ink-700 bg-ink-900 p-5">

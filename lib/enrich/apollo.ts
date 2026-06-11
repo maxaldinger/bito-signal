@@ -256,3 +256,131 @@ export async function enrichApollo(
     fetchedAt: new Date().toISOString(),
   };
 }
+
+// ---------------------------------------------------------------------------
+// ICP sweep — org search as a *discovery* source for the signal feed.
+// Filters verified against docs.apollo.io/reference/organization-search:
+// organization_num_employees_ranges[] + q_organization_keyword_tags[].
+// Search consumes no credits and returns thin-but-real org records.
+// ---------------------------------------------------------------------------
+
+export interface IcpSweepOrg {
+  name: string;
+  domain?: string;
+  websiteUrl?: string;
+  linkedinUrl?: string;
+  /** Which ICP keyword filter surfaced this org (e.g. "developer tools"). */
+  matchedKeyword: string;
+  /** The headcount filter band the org matched (e.g. "100-2000 employees"). */
+  employeeBand: string;
+}
+
+export interface IcpSweepResult {
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  orgs: IcpSweepOrg[];
+}
+
+// Total-headcount proxy for Bito's 50-500 SWE sweet spot. Account records
+// returned by search are thin (no per-org headcount/industry), so the filters
+// themselves are the evidence — each card states the keyword + band it matched.
+const ICP_EMPLOYEE_RANGES = ["100,500", "501,2000"];
+const ICP_EMPLOYEE_BAND_LABEL = "100-2000 employees";
+const ICP_KEYWORDS = ["developer tools", "saas", "fintech", "artificial intelligence"];
+
+interface ApolloAccountRecord {
+  name?: string;
+  primary_domain?: string;
+  domain?: string;
+  website_url?: string;
+  linkedin_url?: string;
+}
+
+export async function apolloIcpSweep(perKeyword = 4): Promise<IcpSweepResult> {
+  const key = process.env.APOLLO_API_KEY;
+  if (!key) {
+    return {
+      configured: false,
+      ok: false,
+      error: "APOLLO_API_KEY not set — ICP sweep skipped",
+      orgs: [],
+    };
+  }
+
+  try {
+    // One sub-query per keyword (parallel) so every result carries the exact
+    // filter that surfaced it. Results arrive under BOTH `accounts` and
+    // `organizations` depending on workspace state — read both.
+    const batches = await Promise.all(
+      ICP_KEYWORDS.map(async (keyword) => {
+        const qs = new URLSearchParams({
+          page: "1",
+          per_page: String(Math.min(10, Math.max(1, perKeyword))),
+        });
+        for (const r of ICP_EMPLOYEE_RANGES)
+          qs.append("organization_num_employees_ranges[]", r);
+        qs.append("q_organization_keyword_tags[]", keyword);
+
+        const { status, body } = await apolloJson(
+          `${BASE}/mixed_companies/search?${qs}`,
+          key,
+          "POST",
+        );
+        if (status !== 200) return { keyword, error: statusError(status, "ICP org sweep"), records: [] as ApolloAccountRecord[] };
+        const b = body as
+          | { accounts?: ApolloAccountRecord[]; organizations?: ApolloAccountRecord[] }
+          | undefined;
+        return {
+          keyword,
+          error: undefined,
+          records: [...(b?.accounts ?? []), ...(b?.organizations ?? [])],
+        };
+      }),
+    );
+
+    const errors = batches.filter((b) => b.error).map((b) => `${b.keyword}: ${b.error}`);
+    const seen = new Set<string>();
+    const orgs: IcpSweepOrg[] = [];
+    for (const batch of batches) {
+      for (const a of batch.records) {
+        const name = str(a.name);
+        if (!name) continue;
+        const domain = str(a.primary_domain) ?? str(a.domain);
+        const dedupeKey = (domain ?? name).toLowerCase();
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        orgs.push({
+          name,
+          domain,
+          websiteUrl: str(a.website_url),
+          linkedinUrl: str(a.linkedin_url),
+          matchedKeyword: batch.keyword,
+          employeeBand: ICP_EMPLOYEE_BAND_LABEL,
+        });
+      }
+    }
+
+    if (orgs.length === 0) {
+      return {
+        configured: true,
+        ok: false,
+        error: errors.length > 0 ? errors.join("; ") : "ICP sweep matched no organizations",
+        orgs: [],
+      };
+    }
+    return {
+      configured: true,
+      ok: true,
+      error: errors.length > 0 ? errors.join("; ") : undefined,
+      orgs,
+    };
+  } catch (e) {
+    return {
+      configured: true,
+      ok: false,
+      error: isTimeout(e) ? "Apollo ICP sweep timed out after 15s" : "Apollo ICP sweep failed",
+      orgs: [],
+    };
+  }
+}
