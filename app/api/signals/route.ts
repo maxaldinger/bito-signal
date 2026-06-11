@@ -147,12 +147,29 @@ ${SHARED_RULES}`;
 // web_search path above for an on-demand deeper scan.
 // ---------------------------------------------------------------------------
 
+// GDELT limits ~1 req/5s per IP, and Vercel functions share egress IPs with
+// other tenants — 429s are routine. Retry once after the cool-down before
+// giving up; every bucket also has a non-GDELT source so a miss degrades
+// gracefully instead of emptying the bucket.
+async function gdeltWithRetry(
+  query: string,
+  opts?: { limit?: number; timespan?: string },
+): Promise<{ ok: boolean; error?: string; items: RawItem[] }> {
+  const first = await fetchGdeltItems(query, opts);
+  if (first.ok || !/429|rate limit/i.test(first.error ?? "")) return first;
+  await new Promise((r) => setTimeout(r, 6500));
+  return fetchGdeltItems(query, opts);
+}
+
 async function fetchBucketItems(type: SearchBucket): Promise<{ items: RawItem[]; sourceErrors: string[] }> {
+  // NOTE: HN's Algolia search has no boolean syntax — multi-angle coverage
+  // means multiple simple queries, not "OR" strings (which match the word
+  // "OR" literally and return nothing).
   const tasks: Promise<{ ok: boolean; error?: string; items: RawItem[] }>[] = (() => {
     switch (type) {
       case "hiring":
         return [
-          fetchGdeltItems('("hiring engineers" OR "engineering hiring" OR "hiring spree" OR "engineering team") software', { limit: 25 }),
+          gdeltWithRetry('("hiring engineers" OR "engineering hiring" OR "hiring spree" OR "engineering team") software', { limit: 25 }),
           fetchHNItems("hiring engineers", { minPoints: 5, days: 21, limit: 10 }),
         ];
       case "oss":
@@ -162,19 +179,21 @@ async function fetchBucketItems(type: SearchBucket): Promise<{ items: RawItem[];
         ];
       case "ma":
         return [
-          fetchGdeltItems('software (acquires OR acquisition OR "to acquire" OR merger) technology', { limit: 25 }),
+          gdeltWithRetry('software (acquires OR acquisition OR "to acquire" OR merger) technology', { limit: 25 }),
           // NOTE: TechCrunch renamed fundings-exits; /category/venture/ is live.
           fetchRssItems("https://techcrunch.com/category/venture/feed/", { limit: 20 }),
         ];
       case "funding":
         return [
           fetchRssItems("https://techcrunch.com/category/venture/feed/", { limit: 20 }),
-          fetchGdeltItems('(raises OR raised) ("Series A" OR "Series B" OR "Series C" OR "Series D") engineering', { limit: 20 }),
+          gdeltWithRetry('(raises OR raised) ("Series A" OR "Series B" OR "Series C" OR "Series D") engineering', { limit: 20 }),
         ];
       case "ai":
         return [
-          fetchHNItems('Copilot OR Cursor OR "AI coding"', { minPoints: 20, days: 14, limit: 15 }),
-          fetchGdeltItems('("AI coding" OR "GitHub Copilot" OR "Cursor AI" OR "AI developer tools") (cost OR spend OR adoption OR rollout)', { limit: 20 }),
+          fetchHNItems("Copilot", { minPoints: 15, days: 21, limit: 8 }),
+          fetchHNItems("AI coding", { minPoints: 15, days: 21, limit: 8 }),
+          fetchHNItems("Cursor", { minPoints: 20, days: 21, limit: 6 }),
+          gdeltWithRetry('("AI coding" OR "GitHub Copilot" OR "Cursor AI" OR "AI developer tools") (cost OR spend OR adoption OR rollout)', { limit: 20 }),
         ];
     }
   })();
