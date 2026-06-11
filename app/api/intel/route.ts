@@ -22,8 +22,16 @@ const VALID_SEGMENTS: SegmentId[] = [
   "devtools",
   "marketplace",
   "ai",
+  "retail",
+  "industrial",
+  "auto",
+  "health",
+  "media",
+  "logistics",
+  "defense",
   "enterprise",
 ];
+const SEGMENT_ENUM = VALID_SEGMENTS.join(" | ");
 const VALID_MOTIONS: Motion[] = ["PLG", "Top-Down", "Champion-Led", "Land-and-Expand"];
 const VALID_STAKEHOLDER_TYPES: Stakeholder["type"][] = [
   "feels-pain",
@@ -63,7 +71,7 @@ Output ONLY one JSON object — no prose, no code fences:
 {
   "name": "Canonical Company Name",
   "domain": "company.com",
-  "segment": "saas | fintech | devtools | marketplace | ai | enterprise",
+  "segment": "${SEGMENT_ENUM}",
   "oneLiner": "what they do, one line",
   "hq": "City, Country",
   "employeeBand": "e.g. 200-500",

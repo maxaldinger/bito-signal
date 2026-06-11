@@ -16,14 +16,23 @@ export type SignalTypeId =
   | "ai"       // AI tooling spend / public AI tooling commentary
   | "icp";     // Apollo org-search sweep — profile-fit match, no event
 
-// Company segment — what kind of SWE-heavy org this is.
+// Company segment — what kind of SWE-heavy org this is. Deliberately wider
+// than "tech": retailers, automakers and industrials run some of the largest
+// software organizations anywhere (Walmart, Toyota, Siemens class).
 export type SegmentId =
   | "saas"        // pure SaaS / B2B software
-  | "fintech"     // payments, banking, trading
+  | "fintech"     // payments, banking, trading, insurance
   | "devtools"    // dev infra / platform / open-source
   | "marketplace" // marketplaces, e-commerce platforms
   | "ai"          // AI-native companies
-  | "enterprise"; // large legacy enterprises modernizing
+  | "retail"      // retail & consumer (Walmart, Safeway, Nike)
+  | "industrial"  // industrial & manufacturing (Siemens, GE, Bosch)
+  | "auto"        // automotive & mobility (Toyota, Rivian)
+  | "health"      // healthcare & life sciences (Epic, payers, pharma IT)
+  | "media"       // media & entertainment (Netflix, Disney, Spotify)
+  | "logistics"   // logistics & supply chain (FedEx, Flexport, Maersk)
+  | "defense"     // aerospace & defense (Anduril, primes' software arms)
+  | "enterprise"; // everything else with a large legacy codebase
 
 export interface Segment {
   id: SegmentId;

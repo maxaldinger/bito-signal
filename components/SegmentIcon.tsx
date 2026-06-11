@@ -7,6 +7,13 @@ import {
   Store,
   Sparkles,
   Building2,
+  ShoppingCart,
+  Factory,
+  Car,
+  HeartPulse,
+  Clapperboard,
+  Truck,
+  Shield,
   type LucideIcon,
 } from "lucide-react";
 
@@ -17,6 +24,13 @@ const ICONS: Record<string, LucideIcon> = {
   Store,
   Sparkles,
   Building2,
+  ShoppingCart,
+  Factory,
+  Car,
+  HeartPulse,
+  Clapperboard,
+  Truck,
+  Shield,
 };
 
 export function SegmentIcon({

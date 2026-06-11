@@ -14,7 +14,7 @@ export const SEGMENTS: Segment[] = [
     id: "fintech",
     label: "Fintech / Payments",
     icon: "CircleDollarSign",
-    blurb: "payments, banking, trading — strict review bar, large monorepos",
+    blurb: "payments, banking, trading, insurance — strict review bar, large monorepos",
   },
   {
     id: "devtools",
@@ -23,22 +23,64 @@ export const SEGMENTS: Segment[] = [
     blurb: "platform & developer tools — heavy OSS footprint and PR throughput",
   },
   {
-    id: "marketplace",
-    label: "Marketplace / E-comm",
-    icon: "Store",
-    blurb: "high-throughput marketplaces with sprawling service architectures",
-  },
-  {
     id: "ai",
     label: "AI-Native",
     icon: "Sparkles",
     blurb: "AI / ML companies shipping fast — already token-spending, code-heavy",
   },
   {
+    id: "marketplace",
+    label: "Marketplace / E-comm",
+    icon: "Store",
+    blurb: "high-throughput marketplaces with sprawling service architectures",
+  },
+  {
+    id: "retail",
+    label: "Retail & Consumer",
+    icon: "ShoppingCart",
+    blurb: "Walmart/Safeway-class retailers — huge in-house software & platform orgs",
+  },
+  {
+    id: "industrial",
+    label: "Industrial & Mfg",
+    icon: "Factory",
+    blurb: "Siemens/GE-class industrials — embedded + enterprise software at scale",
+  },
+  {
+    id: "auto",
+    label: "Automotive & Mobility",
+    icon: "Car",
+    blurb: "Toyota/Rivian-class automakers — software-defined-vehicle teams in the thousands",
+  },
+  {
+    id: "health",
+    label: "Healthcare & Life Sci",
+    icon: "HeartPulse",
+    blurb: "EHR vendors, payers, pharma IT — compliance-heavy review processes",
+  },
+  {
+    id: "media",
+    label: "Media & Entertainment",
+    icon: "Clapperboard",
+    blurb: "streaming & gaming platforms — large consumer-scale eng orgs",
+  },
+  {
+    id: "logistics",
+    label: "Logistics & Supply Chain",
+    icon: "Truck",
+    blurb: "carriers, freight tech, supply-chain platforms — ops-critical codebases",
+  },
+  {
+    id: "defense",
+    label: "Aerospace & Defense",
+    icon: "Shield",
+    blurb: "defense tech & primes' software arms — security review is mandatory",
+  },
+  {
     id: "enterprise",
-    label: "Enterprise Modernizing",
+    label: "Enterprise / Other",
     icon: "Building2",
-    blurb: "large enterprises with legacy code modernizing on AI tooling",
+    blurb: "everything else with a large legacy codebase modernizing on AI tooling",
   },
 ];
 

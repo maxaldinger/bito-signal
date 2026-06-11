@@ -282,12 +282,35 @@ export interface IcpSweepResult {
   orgs: IcpSweepOrg[];
 }
 
-// Total-headcount proxy for Bito's 50-500 SWE sweet spot. Account records
-// returned by search are thin (no per-org headcount/industry), so the filters
-// themselves are the evidence — each card states the keyword + band it matched.
-const ICP_EMPLOYEE_RANGES = ["100,500", "501,2000"];
-const ICP_EMPLOYEE_BAND_LABEL = "100-2000 employees";
-const ICP_KEYWORDS = ["developer tools", "saas", "fintech", "artificial intelligence"];
+// Account records returned by search are thin (no per-org headcount/industry),
+// so the filters themselves are the evidence — each card states the keyword +
+// band it matched.
+//
+// Tech-native keywords use a total-headcount proxy for the 50-500 SWE sweet
+// spot. Traditional-industry keywords use a much larger band: a retailer or
+// automaker with 10,000+ total employees is exactly the kind of company whose
+// in-house software org lands in Bito's ICP (Walmart/Toyota/Siemens class).
+interface SweepQuery {
+  keyword: string;
+  ranges: string[];
+  bandLabel: string;
+  perPage: number;
+}
+
+const SWEEP_QUERIES: SweepQuery[] = [
+  // Tech-native — mid-size companies, software IS the company.
+  { keyword: "developer tools", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 4 },
+  { keyword: "saas", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 4 },
+  { keyword: "fintech", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 4 },
+  { keyword: "artificial intelligence", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 4 },
+  // Traditional industries — big totals, big in-house software orgs.
+  { keyword: "retail", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
+  { keyword: "automotive", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
+  { keyword: "manufacturing", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
+  { keyword: "healthcare", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
+  { keyword: "logistics", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
+  { keyword: "media", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 3 },
+];
 
 interface ApolloAccountRecord {
   name?: string;
@@ -297,7 +320,7 @@ interface ApolloAccountRecord {
   linkedin_url?: string;
 }
 
-export async function apolloIcpSweep(perKeyword = 4): Promise<IcpSweepResult> {
+export async function apolloIcpSweep(): Promise<IcpSweepResult> {
   const key = process.env.APOLLO_API_KEY;
   if (!key) {
     return {
@@ -313,33 +336,34 @@ export async function apolloIcpSweep(perKeyword = 4): Promise<IcpSweepResult> {
     // filter that surfaced it. Results arrive under BOTH `accounts` and
     // `organizations` depending on workspace state — read both.
     const batches = await Promise.all(
-      ICP_KEYWORDS.map(async (keyword) => {
+      SWEEP_QUERIES.map(async (q) => {
         const qs = new URLSearchParams({
           page: "1",
-          per_page: String(Math.min(10, Math.max(1, perKeyword))),
+          per_page: String(q.perPage),
         });
-        for (const r of ICP_EMPLOYEE_RANGES)
-          qs.append("organization_num_employees_ranges[]", r);
-        qs.append("q_organization_keyword_tags[]", keyword);
+        for (const r of q.ranges) qs.append("organization_num_employees_ranges[]", r);
+        qs.append("q_organization_keyword_tags[]", q.keyword);
 
         const { status, body } = await apolloJson(
           `${BASE}/mixed_companies/search?${qs}`,
           key,
           "POST",
         );
-        if (status !== 200) return { keyword, error: statusError(status, "ICP org sweep"), records: [] as ApolloAccountRecord[] };
+        if (status !== 200) return { query: q, error: statusError(status, "ICP org sweep"), records: [] as ApolloAccountRecord[] };
         const b = body as
           | { accounts?: ApolloAccountRecord[]; organizations?: ApolloAccountRecord[] }
           | undefined;
         return {
-          keyword,
+          query: q,
           error: undefined,
           records: [...(b?.accounts ?? []), ...(b?.organizations ?? [])],
         };
       }),
     );
 
-    const errors = batches.filter((b) => b.error).map((b) => `${b.keyword}: ${b.error}`);
+    const errors = batches
+      .filter((b) => b.error)
+      .map((b) => `${b.query.keyword}: ${b.error}`);
     const seen = new Set<string>();
     const orgs: IcpSweepOrg[] = [];
     for (const batch of batches) {
@@ -355,8 +379,8 @@ export async function apolloIcpSweep(perKeyword = 4): Promise<IcpSweepResult> {
           domain,
           websiteUrl: str(a.website_url),
           linkedinUrl: str(a.linkedin_url),
-          matchedKeyword: batch.keyword,
-          employeeBand: ICP_EMPLOYEE_BAND_LABEL,
+          matchedKeyword: batch.query.keyword,
+          employeeBand: batch.query.bandLabel,
         });
       }
     }

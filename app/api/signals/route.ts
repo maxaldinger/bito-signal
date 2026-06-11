@@ -33,8 +33,16 @@ const VALID_SEGMENTS: SegmentId[] = [
   "devtools",
   "marketplace",
   "ai",
+  "retail",
+  "industrial",
+  "auto",
+  "health",
+  "media",
+  "logistics",
+  "defense",
   "enterprise",
 ];
+const SEGMENT_ENUM = VALID_SEGMENTS.join(" | ");
 
 const SYSTEM = `${BITO_CONTEXT}
 
@@ -49,6 +57,8 @@ For each candidate signal you find, you score the company's Bito ICP fit on a 0-
 4. Recent scaling activity (hiring sprees, new offices, customer growth driving eng load)
 5. AI tooling spend signals (already paying for Copilot/Cursor; complaints about cost; AI build-out)
 
+Cast a wide net beyond obvious tech companies. Retailers, automakers, industrials, healthcare systems, logistics carriers and media companies run some of the LARGEST software organizations anywhere — Walmart, Toyota, Siemens, FedEx and Disney all employ thousands of engineers with old, sprawling codebases and heavy review burden. A hiring push, AI-tooling story or M&A at a traditional-industry company is exactly as relevant as a startup's.
+
 Be honest. If a signal isn't strong, give it a lower score and say why in the description. Do NOT fabricate signals. If you cannot find enough live signals, return fewer rather than inventing them.
 
 Output ONLY a single JSON object — no prose, no code fences — matching this schema:
@@ -56,7 +66,7 @@ Output ONLY a single JSON object — no prose, no code fences — matching this 
   "signals": [
     {
       "account": "Canonical company name",
-      "segment": "saas | fintech | devtools | marketplace | ai | enterprise",
+      "segment": "${SEGMENT_ENUM}",
       "type": "hiring | oss | ma | funding | ai",
       "strength": 0-99,
       "title": "one-line hook (max ~70 chars)",
@@ -165,6 +175,14 @@ const ICP_KEYWORD_STRENGTH: Record<string, number> = {
   "artificial intelligence": 76,
   fintech: 74,
   saas: 72,
+  // Traditional industries: large in-house software orgs, but SWE share of
+  // total headcount is unverified — score lower until the brief confirms.
+  retail: 66,
+  automotive: 66,
+  manufacturing: 66,
+  healthcare: 66,
+  logistics: 66,
+  media: 66,
 };
 
 const ICP_KEYWORD_SEGMENT: Record<string, SegmentId> = {
@@ -172,6 +190,12 @@ const ICP_KEYWORD_SEGMENT: Record<string, SegmentId> = {
   "artificial intelligence": "ai",
   fintech: "fintech",
   saas: "saas",
+  retail: "retail",
+  automotive: "auto",
+  manufacturing: "industrial",
+  healthcare: "health",
+  logistics: "logistics",
+  media: "media",
 };
 
 function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
@@ -204,7 +228,7 @@ export async function GET(req: NextRequest) {
 
   // Apollo-powered bucket: structured org search, no Anthropic involved.
   if (bucket === "icp") {
-    const sweep = await apolloIcpSweep(4);
+    const sweep = await apolloIcpSweep();
     if (!sweep.configured) {
       // Not an error — just absent. The client treats `skipped` as a quiet no-op
       // so keyless deployments don't show a permanent failure banner.
