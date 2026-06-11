@@ -86,7 +86,7 @@ export function SignalFeed({
 
   // Booting = nothing has landed yet; afterwards cards render progressively
   // while remaining buckets are still scanning.
-  const booting = loading && signals.length === 0;
+  const booting = (loading || pulling) && signals.length === 0;
   const failedBuckets = Object.keys(bucketErrors) as SignalTypeId[];
   const allFailed = !loading && failedBuckets.length >= 5 && signals.length === 0;
   const bucketLabel = (b: SignalTypeId) => SIGNAL_TYPE_MAP[b]?.label ?? b;
@@ -125,19 +125,14 @@ export function SignalFeed({
         </div>
       </div>
 
-      {/* Metrics — first card is the whole cache; the rest reflect the
-          current (filtered) view */}
+      {/* Metrics — all four describe exactly what's rendered on this page
+          right now (after filters). The cache-wide total lives in the
+          pagination bar below. */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard
-          label={cacheMode ? "cached signals" : "live signals"}
-          value={cacheMode ? totalCached : metrics.total}
-          icon={Zap}
-          color="text-neon-400"
-          loading={loading}
-        />
-        <MetricCard label="accounts (view)" value={metrics.accounts} icon={Building} color="text-sky-400" loading={loading} />
-        <MetricCard label="avg icp fit (view)" value={metrics.avgFit} icon={Gauge} color="text-violet-400" loading={loading} />
-        <MetricCard label="hot ≥80 (view)" value={metrics.hot} icon={Flame} color="text-amber-400" loading={loading} />
+        <MetricCard label="signals on page" value={metrics.total} icon={Zap} color="text-neon-400" loading={loading} />
+        <MetricCard label="accounts" value={metrics.accounts} icon={Building} color="text-sky-400" loading={loading} />
+        <MetricCard label="avg icp fit" value={metrics.avgFit} icon={Gauge} color="text-violet-400" loading={loading} />
+        <MetricCard label="hot (≥80)" value={metrics.hot} icon={Flame} color="text-amber-400" loading={loading} />
       </div>
 
       {/* Filters hiding rows — say so loudly instead of looking like a small pull */}
@@ -276,11 +271,24 @@ export function SignalFeed({
             </div>
           ))}
         </div>
+      ) : cacheMode && totalCached === 0 && failedBuckets.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
+          <p className="text-sm text-ink-300">The signal cache is empty.</p>
+          <p className="mt-1 text-xs text-ink-500">
+            Run your first pull — six parallel scans (web + Apollo), about a minute.
+          </p>
+          <button
+            onClick={onPullMore}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg border border-neon-600/50 bg-neon-500/15 px-5 py-2.5 text-sm font-semibold text-neon-300 shadow-glow-sm transition-all hover:bg-neon-500/25"
+          >
+            <DownloadCloud className="h-4 w-4" /> Pull Signals
+          </button>
+        </div>
       ) : sorted.length === 0 && failedBuckets.length === 0 ? (
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
           <p className="text-sm text-ink-400">
-            No live signals match the current filters. Clear a segment, signal-type or
-            team-size filter, or lower the minimum ICP fit.
+            No signals on this page match the current filters. Clear a filter above, or
+            check the next page.
           </p>
         </div>
       ) : (

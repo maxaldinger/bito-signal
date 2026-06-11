@@ -57,7 +57,6 @@ export default function Page() {
   const [refreshing, setRefreshing] = useState(false);
   // Guards against superseded requests mutating newer state.
   const feedReqId = useRef(0);
-  const autoPulled = useRef(false);
 
   // Anchored to the last SUCCESSFUL data load — a failed refresh must not
   // claim "just now". `now` ticks to re-derive the label.
@@ -181,16 +180,14 @@ export default function Page() {
     [scanBuckets],
   );
 
-  // Boot: try the cache first; fall back to ephemeral scanning.
+  // Boot: load what's already cached — scanning ONLY happens when the user
+  // explicitly clicks "Pull More Signals". (Ephemeral mode has no cache, so
+  // it must scan to show anything at all.)
   useEffect(() => {
     (async () => {
-      const { configured, total: cachedTotal } = await loadHistory(1);
+      const { configured } = await loadHistory(1);
       if (!configured) {
         await runEphemeralScan(false);
-      } else if (cachedTotal === 0 && !autoPulled.current) {
-        // First ever load on an empty cache — run the initial pull.
-        autoPulled.current = true;
-        runPull();
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -296,10 +293,12 @@ export default function Page() {
     }
   }, []);
 
+  // Header refresh: re-read the cache (cheap, no scans). Live scanning is
+  // exclusively behind the "Pull More Signals" button.
   const refresh = () => {
     setRefreshing(true);
     const done = () => setTimeout(() => setRefreshing(false), 400);
-    if (cacheMode) runPull().finally(done);
+    if (cacheMode) loadHistory(page).finally(done);
     else {
       setFeedLoading(true);
       runEphemeralScan(true).finally(done);
