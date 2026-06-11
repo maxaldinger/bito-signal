@@ -1,6 +1,21 @@
 import type { Segment, SignalType, SegmentId } from "./types";
 
 // ---------------------------------------------------------------------------
+// Intel regions — the feed, cache, scans and Apollo sweep are all scoped to
+// one region at a time; the header toggle switches between them.
+// ---------------------------------------------------------------------------
+export const REGIONS = [
+  { id: "us", label: "US", blurb: "US / EU headquartered companies" },
+  { id: "in", label: "IN", blurb: "India HQ + India engineering arms (GCCs)" },
+] as const;
+
+export type RegionId = (typeof REGIONS)[number]["id"];
+
+export function isRegionId(v: unknown): v is RegionId {
+  return v === "us" || v === "in";
+}
+
+// ---------------------------------------------------------------------------
 // Bito's ICP segments — the kinds of SWE-heavy orgs we sell into.
 // ---------------------------------------------------------------------------
 export const SEGMENTS: Segment[] = [

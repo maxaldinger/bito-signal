@@ -2,6 +2,42 @@
 
 import { useEffect, useState } from "react";
 import { Search, RefreshCw, Activity, Sun, Moon } from "lucide-react";
+import { REGIONS, type RegionId } from "@/lib/data";
+
+// US / India intel scope — switching reloads the feed for that region.
+function RegionToggle({
+  region,
+  onRegion,
+}: {
+  region: RegionId;
+  onRegion: (r: RegionId) => void;
+}) {
+  return (
+    <div
+      className="flex overflow-hidden rounded-lg border border-ink-700"
+      role="group"
+      aria-label="Intel region"
+    >
+      {REGIONS.map((r) => {
+        const active = region === r.id;
+        return (
+          <button
+            key={r.id}
+            onClick={() => onRegion(r.id)}
+            title={r.blurb}
+            className={`px-2.5 py-2 font-mono text-[11px] font-semibold uppercase transition-colors ${
+              active
+                ? "bg-neon-500/15 text-neon-300"
+                : "text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+            }`}
+          >
+            {r.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function ThemeToggle() {
   // null until mounted — the server doesn't know the stored preference.
@@ -44,12 +80,16 @@ export function Header({
   onRefresh,
   refreshing,
   lastUpdated,
+  region,
+  onRegion,
 }: {
   search: string;
   onSearch: (v: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
   lastUpdated: string;
+  region: RegionId;
+  onRegion: (r: RegionId) => void;
 }) {
   return (
     <header className="sticky top-0 z-50 border-b border-ink-700 bg-ink-950/85 backdrop-blur-xl">
@@ -86,6 +126,7 @@ export function Header({
             <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-neon-400" />
             live · {lastUpdated}
           </div>
+          <RegionToggle region={region} onRegion={onRegion} />
           <ThemeToggle />
           <button
             onClick={onRefresh}

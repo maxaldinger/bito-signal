@@ -10,7 +10,9 @@ import {
   SIGNAL_TYPES,
   SWE_BANDS,
   sweBandOf,
+  isRegionId,
   type SweBandId,
+  type RegionId,
 } from "@/lib/data";
 import type {
   Signal,
@@ -68,6 +70,11 @@ export default function Page() {
   // Guards against superseded requests mutating newer state.
   const feedReqId = useRef(0);
 
+  // Intel region (US / India). The ref mirrors state so long-lived callbacks
+  // never read a stale region; persisted in localStorage.
+  const [region, setRegion] = useState<RegionId>("us");
+  const regionRef = useRef<RegionId>("us");
+
   // Anchored to the last SUCCESSFUL data load — a failed refresh must not
   // claim "just now". `now` ticks to re-derive the label.
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
@@ -97,7 +104,7 @@ export default function Page() {
             const delay = BUCKET_STAGGER_MS[bucket] ?? 0;
             if (delay > 0) await new Promise((r) => setTimeout(r, delay));
             const url =
-              `/api/signals?type=${bucket}` +
+              `/api/signals?type=${bucket}&region=${regionRef.current}` +
               (opts.force ? `&fresh=${Date.now()}` : "");
             const res = await fetch(url, opts.force ? { cache: "no-store" } : {});
             const data = await readJson(res);
@@ -139,7 +146,10 @@ export default function Page() {
     const reqId = ++feedReqId.current;
     setHistoryError(null);
     try {
-      const res = await fetch(`/api/signals/history?page=${p}`, { cache: "no-store" });
+      const res = await fetch(
+        `/api/signals/history?page=${p}&region=${regionRef.current}`,
+        { cache: "no-store" },
+      );
       const data = await readJson(res);
       if (reqId !== feedReqId.current) return { configured: true, total: 0 };
       if (!res.ok) {
@@ -192,11 +202,21 @@ export default function Page() {
     [scanBuckets],
   );
 
-  // Boot: load what's already cached — scanning ONLY happens when the user
-  // explicitly clicks "Pull More Signals". (Ephemeral mode has no cache, so
-  // it must scan to show anything at all.)
+  // Boot: restore the saved region, then load what's already cached —
+  // scanning ONLY happens when the user explicitly clicks "Pull More
+  // Signals". (Ephemeral mode has no cache, so it must scan to show
+  // anything at all.)
   useEffect(() => {
     (async () => {
+      try {
+        const saved = localStorage.getItem("bito-region");
+        if (isRegionId(saved)) {
+          regionRef.current = saved;
+          setRegion(saved);
+        }
+      } catch {
+        /* private mode — default region stands */
+      }
       const { configured } = await loadHistory(1);
       if (!configured) {
         await runEphemeralScan(false);
@@ -204,6 +224,28 @@ export default function Page() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Switching region swaps the whole feed: close any open brief, reload
+  // page 1 of that region's cache.
+  const changeRegion = useCallback(
+    (r: RegionId) => {
+      if (r === regionRef.current) return;
+      regionRef.current = r;
+      setRegion(r);
+      try {
+        localStorage.setItem("bito-region", r);
+      } catch {
+        /* private mode */
+      }
+      clearSelection();
+      setBucketErrors({});
+      setPendingBuckets([]);
+      setFeedLoading(true);
+      loadHistory(1);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [loadHistory],
+  );
 
   useEffect(() => {
     const i = setInterval(() => setNow(Date.now()), 30000);
@@ -336,6 +378,8 @@ export default function Page() {
         onRefresh={refresh}
         refreshing={refreshing || pulling}
         lastUpdated={lastUpdated}
+        region={region}
+        onRegion={changeRegion}
       />
       <div className="flex">
         <Sidebar
@@ -369,6 +413,7 @@ export default function Page() {
                 loading={feedLoading}
                 pulling={pulling}
                 cacheMode={cacheMode}
+                region={region}
                 page={page}
                 totalPages={totalPages}
                 totalCached={total}

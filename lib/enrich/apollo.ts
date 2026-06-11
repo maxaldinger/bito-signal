@@ -9,6 +9,7 @@
 
 import type { ApolloData, EnrichContact, ProviderResult } from "./types";
 import { pickAiDevTools } from "./types";
+import type { RegionId } from "../data";
 
 const BASE = "https://api.apollo.io/api/v1";
 const TIMEOUT_MS = 15_000;
@@ -320,12 +321,20 @@ interface ApolloAccountRecord {
   linkedin_url?: string;
 }
 
+// organization_locations[] filter values per intel region (verified Apollo
+// search param: headquarters location, accepts country names).
+const REGION_LOCATION: Record<RegionId, string> = {
+  us: "United States",
+  in: "India",
+};
+
 /**
  * @param page Which results page to fetch per keyword — callers advance this
  * between pulls so each pull surfaces NEW organizations (Apollo has tens of
  * thousands of matches per filter; page 1 alone would repeat forever).
+ * @param region Scopes the sweep to HQ country (US vs India).
  */
-export async function apolloIcpSweep(page = 1): Promise<IcpSweepResult> {
+export async function apolloIcpSweep(page = 1, region: RegionId = "us"): Promise<IcpSweepResult> {
   const key = process.env.APOLLO_API_KEY;
   if (!key) {
     return {
@@ -348,6 +357,7 @@ export async function apolloIcpSweep(page = 1): Promise<IcpSweepResult> {
         });
         for (const r of q.ranges) qs.append("organization_num_employees_ranges[]", r);
         qs.append("q_organization_keyword_tags[]", q.keyword);
+        qs.append("organization_locations[]", REGION_LOCATION[region]);
 
         const { status, body } = await apolloJson(
           `${BASE}/mixed_companies/search?${qs}`,

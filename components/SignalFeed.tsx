@@ -18,7 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { Signal, SignalTypeId, CompanyIntel as Intel } from "@/lib/types";
-import { SIGNAL_TYPE_MAP } from "@/lib/data";
+import { SIGNAL_TYPE_MAP, type RegionId } from "@/lib/data";
 import { MetricCard } from "./MetricCard";
 import { SignalCard } from "./SignalCard";
 import { AccountPriority } from "./AccountPriority";
@@ -29,6 +29,7 @@ export function SignalFeed({
   loading,
   pulling,
   cacheMode,
+  region,
   page,
   totalPages,
   totalCached,
@@ -56,6 +57,7 @@ export function SignalFeed({
   loading: boolean;
   pulling: boolean;
   cacheMode: boolean;
+  region: RegionId;
   page: number;
   totalPages: number;
   totalCached: number;
@@ -231,7 +233,10 @@ export function SignalFeed({
           {cacheMode ? (
             <>
               <p className="font-mono text-[12px] text-ink-400">
-                <span className="font-semibold text-ink-100">{totalCached}</span> cached
+                <span className="font-semibold text-ink-100">{totalCached}</span> cached{" "}
+                <span className="rounded bg-ink-800 px-1 py-0.5 text-[10px] font-bold uppercase text-ink-300">
+                  {region}
+                </span>{" "}
                 signals · <span className="text-ink-300">{pageSize} results per page</span> ·
                 page <span className="font-semibold text-ink-100">{page}</span>/{totalPages}
               </p>

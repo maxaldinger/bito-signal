@@ -8,6 +8,7 @@
 // and the feed falls back to ephemeral (scan-only) mode.
 
 import type { CompanyIntel, Signal, SegmentId, SignalTypeId } from "./types";
+import type { RegionId } from "./data";
 
 const TIMEOUT_MS = 10_000;
 
@@ -58,8 +59,12 @@ function rowToSignal(r: SignalRow): Signal {
   };
 }
 
-function signalToRow(s: Signal): Omit<SignalRow, "id" | "created_at"> {
+function signalToRow(
+  s: Signal,
+  region: RegionId,
+): Omit<SignalRow, "id" | "created_at"> & { region: RegionId } {
   return {
+    region,
     account: s.account,
     segment: s.segment,
     type: s.type,
@@ -79,6 +84,7 @@ function signalToRow(s: Signal): Omit<SignalRow, "id" | "created_at"> {
 /** Upsert scan results; merge on (account, type). Never throws. */
 export async function upsertSignals(
   signals: Signal[],
+  region: RegionId,
 ): Promise<{ ok: boolean; error?: string }> {
   const cfg = config();
   if (!cfg) return { ok: false, error: "Supabase not configured" };
@@ -95,7 +101,7 @@ export async function upsertSignals(
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates,return=minimal",
         },
-        body: JSON.stringify(signals.map(signalToRow)),
+        body: JSON.stringify(signals.map((s) => signalToRow(s, region))),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       },
     );
@@ -116,13 +122,14 @@ export async function upsertSignals(
  * model which companies we already track so each pull hunts NEW ones. */
 export async function fetchRecentAccounts(
   type: SignalTypeId,
+  region: RegionId,
   limit = 60,
 ): Promise<string[]> {
   const cfg = config();
   if (!cfg) return [];
   try {
     const res = await fetch(
-      `${cfg.url}/rest/v1/bito_signals?select=account&type=eq.${encodeURIComponent(type)}&order=last_seen_at.desc&limit=${limit}`,
+      `${cfg.url}/rest/v1/bito_signals?select=account&type=eq.${encodeURIComponent(type)}&region=eq.${region}&order=last_seen_at.desc&limit=${limit}`,
       {
         headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}` },
         signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -138,12 +145,15 @@ export async function fetchRecentAccounts(
 }
 
 /** Exact row count for one signal type — drives Apollo sweep page rotation. */
-export async function countSignalsByType(type: SignalTypeId): Promise<number> {
+export async function countSignalsByType(
+  type: SignalTypeId,
+  region: RegionId,
+): Promise<number> {
   const cfg = config();
   if (!cfg) return 0;
   try {
     const res = await fetch(
-      `${cfg.url}/rest/v1/bito_signals?select=id&type=eq.${encodeURIComponent(type)}&limit=1`,
+      `${cfg.url}/rest/v1/bito_signals?select=id&type=eq.${encodeURIComponent(type)}&region=eq.${region}&limit=1`,
       {
         headers: {
           apikey: cfg.key,
@@ -239,6 +249,7 @@ export interface SignalPage {
 export async function fetchSignalPage(
   page: number,
   pageSize: number,
+  region: RegionId,
 ): Promise<SignalPage> {
   const cfg = config();
   if (!cfg) {
@@ -251,7 +262,7 @@ export async function fetchSignalPage(
 
   try {
     const res = await fetch(
-      `${cfg.url}/rest/v1/bito_signals?select=*&order=last_seen_at.desc,strength.desc&limit=${size}&offset=${from}`,
+      `${cfg.url}/rest/v1/bito_signals?select=*&region=eq.${region}&order=last_seen_at.desc,strength.desc&limit=${size}&offset=${from}`,
       {
         headers: {
           apikey: cfg.key,

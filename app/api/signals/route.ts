@@ -14,6 +14,7 @@ import {
   countSignalsByType,
 } from "@/lib/supabase";
 import type { Signal, SignalTypeId, SegmentId } from "@/lib/types";
+import { isRegionId, type RegionId } from "@/lib/data";
 
 // Live feed — we ask claude-sonnet-4 to search the public web for fresh
 // buying signals across the five Bito ICP categories, then return them
@@ -109,15 +110,22 @@ const BUCKET_BRIEFS: Record<SearchBucket, string> = {
   ai: "AI tooling spend signals: public commentary (engineering blogs, podcasts, conference talks, Twitter/X threads) about AI dev-tool cost, adoption, or pain. Bonus if the company complains about Copilot/Cursor token cost.",
 };
 
-const SHARED_RULES = `Hard rules:
+// Region scoping — the whole feed is one region at a time.
+const REGION_RULES: Record<RegionId, string> = {
+  us: "Prefer companies headquartered in the US/EU with English-language sources.",
+  in: 'ONLY companies headquartered in India, or a global company\'s India engineering arm / GCC when the signal is specifically about the India org (e.g. "Walmart Global Tech India"). Indian tech press (YourStory, Inc42, ET Tech, Moneycontrol, Entrackr) are first-class sources. Use the India entity\'s name as "account" when the signal is about a GCC.',
+};
+
+const sharedRules = (region: RegionId) => `Hard rules:
 - "account" must be the canonical name of a REAL company — never an aggregator, website, list, or repo name (e.g. "GitHub Trending Projects" is invalid; the company behind the repo is what we want).
 - Recency: prefer events from the last 60 days; never include anything older than 6 months.
 - Never include <cite> tags or any citation markup inside JSON string values — write plain prose; sources belong only in the "url" and "source" fields.
-- Avoid: companies under ~50 engineers, hobby OSS, generic funding news. Prefer companies headquartered in the US/EU with English-language sources.
+- Avoid: companies under ~50 engineers, hobby OSS, generic funding news.
+- REGION: ${REGION_RULES[region]}
 
 Return ONLY the JSON object described in the system prompt.`;
 
-const FULL_PROMPT = `Search the public web for 10-14 fresh buying signals that point to companies in Bito's ICP. Spread the signals across these five buckets — find 2-3 in each where possible:
+const fullPrompt = (region: RegionId) => `Search the public web for 10-14 fresh buying signals that point to companies in Bito's ICP. Spread the signals across these five buckets — find 2-3 in each where possible:
 
 1. ${BUCKET_BRIEFS.hiring}
 2. ${BUCKET_BRIEFS.oss}
@@ -125,9 +133,9 @@ const FULL_PROMPT = `Search the public web for 10-14 fresh buying signals that p
 4. ${BUCKET_BRIEFS.funding}
 5. ${BUCKET_BRIEFS.ai}
 
-${SHARED_RULES}`;
+${sharedRules(region)}`;
 
-const bucketPrompt = (type: SearchBucket, exclude: string[]) =>
+const bucketPrompt = (type: SearchBucket, exclude: string[], region: RegionId) =>
   `Search the public web for 8-10 fresh buying signals in ONE category for Bito's ICP. Each signal must be a DIFFERENT company.
 
 CATEGORY: ${BUCKET_BRIEFS[type]}
@@ -138,7 +146,7 @@ ${
     ? `\nALREADY TRACKED — do NOT return these companies again; search specifically for DIFFERENT ones:\n${exclude.join(", ")}\n`
     : ""
 }
-${SHARED_RULES}`;
+${sharedRules(region)}`;
 
 // ---------------------------------------------------------------------------
 // FREE discovery path (the default): structured sources fetch raw candidates
@@ -161,16 +169,29 @@ async function gdeltWithRetry(
   return fetchGdeltItems(query, opts);
 }
 
-async function fetchBucketItems(type: SearchBucket): Promise<{ items: RawItem[]; sourceErrors: string[] }> {
+async function fetchBucketItems(
+  type: SearchBucket,
+  region: RegionId,
+): Promise<{ items: RawItem[]; sourceErrors: string[] }> {
   // NOTE: HN's Algolia search has no boolean syntax — multi-angle coverage
   // means multiple simple queries, not "OR" strings (which match the word
   // "OR" literally and return nothing).
+  //
+  // India mode swaps in Indian tech press (Inc42 / YourStory — feeds verified
+  // live) and scopes GDELT with sourcecountry:IN. HN/GitHub stay global; the
+  // grader's region rule keeps only India-relevant companies.
+  const inIndia = region === "in";
+  const gd = (q: string, opts?: { limit?: number; timespan?: string }) =>
+    gdeltWithRetry(inIndia ? `${q} sourcecountry:IN` : q, opts);
+
   const tasks: Promise<{ ok: boolean; error?: string; items: RawItem[] }>[] = (() => {
     switch (type) {
       case "hiring":
         return [
-          gdeltWithRetry('("hiring engineers" OR "engineering hiring" OR "hiring spree" OR "engineering team") software', { limit: 25 }),
-          fetchHNItems("hiring engineers", { minPoints: 5, days: 21, limit: 10 }),
+          gd('("hiring engineers" OR "engineering hiring" OR "hiring spree" OR "engineering team") software', { limit: 25 }),
+          inIndia
+            ? fetchRssItems("https://inc42.com/feed/", { limit: 20 })
+            : fetchHNItems("hiring engineers", { minPoints: 5, days: 21, limit: 10 }),
         ];
       case "oss":
         return [
@@ -179,21 +200,27 @@ async function fetchBucketItems(type: SearchBucket): Promise<{ items: RawItem[];
         ];
       case "ma":
         return [
-          gdeltWithRetry('software (acquires OR acquisition OR "to acquire" OR merger) technology', { limit: 25 }),
+          gd('software (acquires OR acquisition OR "to acquire" OR merger) technology', { limit: 25 }),
           // NOTE: TechCrunch renamed fundings-exits; /category/venture/ is live.
-          fetchRssItems("https://techcrunch.com/category/venture/feed/", { limit: 20 }),
+          inIndia
+            ? fetchRssItems("https://inc42.com/feed/", { limit: 20 })
+            : fetchRssItems("https://techcrunch.com/category/venture/feed/", { limit: 20 }),
         ];
       case "funding":
         return [
-          fetchRssItems("https://techcrunch.com/category/venture/feed/", { limit: 20 }),
-          gdeltWithRetry('(raises OR raised) ("Series A" OR "Series B" OR "Series C" OR "Series D") engineering', { limit: 20 }),
+          inIndia
+            ? fetchRssItems("https://yourstory.com/feed", { limit: 20 })
+            : fetchRssItems("https://techcrunch.com/category/venture/feed/", { limit: 20 }),
+          gd('(raises OR raised) ("Series A" OR "Series B" OR "Series C" OR "Series D") engineering', { limit: 20 }),
         ];
       case "ai":
         return [
           fetchHNItems("Copilot", { minPoints: 15, days: 21, limit: 8 }),
           fetchHNItems("AI coding", { minPoints: 15, days: 21, limit: 8 }),
-          fetchHNItems("Cursor", { minPoints: 20, days: 21, limit: 6 }),
-          gdeltWithRetry('("AI coding" OR "GitHub Copilot" OR "Cursor AI" OR "AI developer tools") (cost OR spend OR adoption OR rollout)', { limit: 20 }),
+          ...(inIndia
+            ? [fetchRssItems("https://inc42.com/feed/", { limit: 15 })]
+            : [fetchHNItems("Cursor", { minPoints: 20, days: 21, limit: 6 })]),
+          gd('("AI coding" OR "GitHub Copilot" OR "Cursor AI" OR "AI developer tools") (cost OR spend OR adoption OR rollout)', { limit: 20 }),
         ];
     }
   })();
@@ -205,7 +232,12 @@ async function fetchBucketItems(type: SearchBucket): Promise<{ items: RawItem[];
   return { items, sourceErrors };
 }
 
-const graderPrompt = (type: SearchBucket, items: RawItem[], exclude: string[]) =>
+const graderPrompt = (
+  type: SearchBucket,
+  items: RawItem[],
+  exclude: string[],
+  region: RegionId,
+) =>
   `Below are RAW items fetched from free public sources (news index, Hacker News, GitHub, RSS). Your job is to GRADE them into Bito buying signals for ONE category — no searching, work only from what's given.
 
 CATEGORY: ${BUCKET_BRIEFS[type]}
@@ -219,7 +251,7 @@ ${
 RAW ITEMS (JSON):
 ${JSON.stringify(items)}
 
-${SHARED_RULES}`;
+${sharedRules(region)}`;
 
 interface ModelSignal {
   account: string;
@@ -329,13 +361,18 @@ export async function GET(req: NextRequest) {
     ? (typeParam as SignalTypeId)
     : null;
 
+  const regionParam = req.nextUrl.searchParams.get("region")?.trim().toLowerCase();
+  const region: RegionId = isRegionId(regionParam) ? regionParam : "us";
+
   // Apollo-powered bucket: structured org search, no Anthropic involved.
   if (bucket === "icp") {
     // Advance one results-page per ~60 cached rows so repeat pulls bring NEW
     // organizations instead of re-fetching page 1 forever.
-    const cachedIcp = supabaseConfigured() ? await countSignalsByType("icp") : 0;
+    const cachedIcp = supabaseConfigured()
+      ? await countSignalsByType("icp", region)
+      : 0;
     const sweepPage = Math.min(100, Math.floor(cachedIcp / 60) + 1);
-    const sweep = await apolloIcpSweep(sweepPage);
+    const sweep = await apolloIcpSweep(sweepPage, region);
     if (!sweep.configured) {
       // Not an error — just absent. The client treats `skipped` as a quiet no-op
       // so keyless deployments don't show a permanent failure banner.
@@ -352,7 +389,7 @@ export async function GET(req: NextRequest) {
     }
     const icpSignals = icpSweepToSignals(sweep.orgs);
     const persisted = supabaseConfigured()
-      ? (await upsertSignals(icpSignals)).ok
+      ? (await upsertSignals(icpSignals, region)).ok
       : false;
     return NextResponse.json(
       {
@@ -377,14 +414,16 @@ export async function GET(req: NextRequest) {
     // ones — without this, repeat scans rediscover the same headline accounts
     // and dedupe makes pulls look like they "add nothing".
     const exclude =
-      bucket && supabaseConfigured() ? await fetchRecentAccounts(bucket, 60) : [];
+      bucket && supabaseConfigured()
+        ? await fetchRecentAccounts(bucket, region, 60)
+        : [];
 
     let result;
     let sourceErrors: string[] = [];
     if (bucket && !deep) {
       // FREE path: fetch raw candidates from structured sources, grade with
       // one no-search Claude call (tokens only — zero billed searches).
-      const fetched = await fetchBucketItems(bucket as SearchBucket);
+      const fetched = await fetchBucketItems(bucket as SearchBucket, region);
       sourceErrors = fetched.sourceErrors;
       if (fetched.items.length === 0) {
         return NextResponse.json(
@@ -398,7 +437,7 @@ export async function GET(req: NextRequest) {
       }
       result = await callClaudeWithWebSearch({
         system: GRADER_SYSTEM,
-        user: graderPrompt(bucket as SearchBucket, fetched.items, exclude),
+        user: graderPrompt(bucket as SearchBucket, fetched.items, exclude, region),
         webSearch: false,
         maxTokens: 4000,
         temperature: 0.2,
@@ -406,7 +445,9 @@ export async function GET(req: NextRequest) {
     } else {
       result = await callClaudeWithWebSearch({
         system: SYSTEM,
-        user: bucket ? bucketPrompt(bucket as SearchBucket, exclude) : FULL_PROMPT,
+        user: bucket
+          ? bucketPrompt(bucket as SearchBucket, exclude, region)
+          : fullPrompt(region),
         maxSearches: bucket ? 5 : Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
         maxTokens: bucket ? 4500 : 6000,
         temperature: 0.4,
@@ -480,7 +521,7 @@ export async function GET(req: NextRequest) {
     // Persist into the Supabase cache (upsert on account+type) so pulls
     // accumulate history; non-fatal if unconfigured or down.
     const persisted = supabaseConfigured()
-      ? (await upsertSignals(signals)).ok
+      ? (await upsertSignals(signals, region)).ok
       : false;
 
     return NextResponse.json(
