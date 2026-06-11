@@ -108,18 +108,3 @@ export function sweBandOf(swe?: number): SweBandId | null {
   return band ? band.id : "500+";
 }
 
-// ---------------------------------------------------------------------------
-// Example companies for the quick-search row. The search is open — the model
-// will resolve to canonical names — but these give the user a fast on-ramp.
-// ---------------------------------------------------------------------------
-export const EXAMPLE_COMPANIES = [
-  "Ramp",
-  "Mercury",
-  "Linear",
-  "Vercel",
-  "Notion",
-  "Datadog",
-  "Plaid",
-  "Brex",
-  "Faire",
-];

@@ -10,16 +10,6 @@ import { BITO_CONTEXT } from "@/lib/bito";
 //    tools in the UI (LOU table + Excel export, MEDDPICC scorecard, …).
 export const maxDuration = 180;
 
-// Bito modules scored by the Product Fit tool — exact names matter, the UI
-// renders whatever comes back and reps quote these in proposals.
-const BITO_PRODUCTS = [
-  "AI Code Review Agent (Git PR/MR reviews)",
-  "IDE Code Review (VS Code / JetBrains / Cursor / Windsurf)",
-  "CLI Reviews (bitoreview / Wingman engine)",
-  "Self-Hosted Deployment",
-  "Security & Compliance Reviews",
-];
-
 const LOU_CATEGORIES =
   "Review Throughput | Code Quality & Bugs | Security & Compliance | AI Tooling Cost | Adoption & Process";
 
@@ -32,30 +22,16 @@ interface ModeCfg {
 }
 
 const MODES: Record<string, ModeCfg> = {
-  // ---- chat modes ----
+  // ---- chat mode ----
   ask: {
     type: "text",
     instruction:
-      "Answer the rep's question directly and practically. If the question references a specific company or person, verify with a quick web search before asserting facts.",
-    maxSearches: 2,
-  },
-  email: {
-    type: "text",
-    instruction:
-      "Write a ready-to-send sales email: subject line + tight body (under 130 words) + one clear CTA. If a target company is named, search for one fresh, specific fact to personalize the opener — cite where it came from after the email. Never invent facts about the prospect.",
-    maxSearches: 3,
-  },
-  objections: {
-    type: "text",
-    instruction:
-      "Handle the objection: acknowledge → reframe → evidence → one question to advance the deal. If the objection references a competitor, verify current competitor positioning with a search before contrasting.",
-    maxSearches: 2,
-  },
-  research: {
-    type: "text",
-    instruction:
-      "Run live account research on whatever company, person, or market the rep asks about. Search thoroughly, synthesize into SHORT CAPS sections, and end with 'SO WHAT FOR BITO' — the sales-relevant takeaways. Cite sources inline as [domain.com].",
-    maxSearches: 6,
+      "Answer the rep's request directly and practically — questions, objection handling, email drafts, account research, call prep. " +
+      "For emails: subject line + tight body (under 130 words) + one clear CTA. " +
+      "For objections: acknowledge → reframe → evidence → one question to advance the deal. " +
+      "For account research: search the live web, synthesize into SHORT CAPS sections, end with 'SO WHAT FOR BITO'. " +
+      "Whenever a specific company or person is referenced, verify facts with a quick web search before asserting them — never invent prospect facts.",
+    maxSearches: 5,
   },
 
   // ---- structured tool modes ----
@@ -64,12 +40,6 @@ const MODES: Record<string, ModeCfg> = {
     instruction:
       "Read the meeting notes and extract the prospect's critical business issues. For EACH issue, map whether/how Bito helps — be specific about which Bito capability and what outcome. Only include issues actually present in the notes; never invent issues.",
     schema: `{"issues":[{"issue":"the critical business problem in their words","solution":"Can we help? If so, how? — specific Bito capability + outcome","category":"${LOU_CATEGORIES}","priority":"High|Medium|Low","timeframe":"short phase/timeframe e.g. 'Phase 1 - Pilot (4 weeks)'"}]}`,
-    maxSearches: 1,
-  },
-  fit: {
-    type: "json",
-    instruction: `Assess how well Bito fits this prospect based on the notes. Score the OVERALL fit 0-10 and EACH Bito product 0-10. Products to score (use these exact names): ${BITO_PRODUCTS.join("; ")}. Be honest — if the prospect is a poor fit (tiny team, no code review pain, wrong domain), score low and explain. For each product include 2-3 short reasoning signals taken from the notes.`,
-    schema: `{"overall":{"score":0,"verdict":"Strong Fit|Possible Fit|Not a Fit","summary":"2-3 sentence overall assessment"},"products":[{"name":"exact product name","score":0,"verdict":"Strong Fit|Possible Fit|Not a Fit","rationale":"1-2 sentences","signals":["short reason","short reason"]}],"redFlags":[{"severity":"high|medium|low","title":"short title","detail":"1-2 sentences"}]}`,
     maxSearches: 1,
   },
   threading: {

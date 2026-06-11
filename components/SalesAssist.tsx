@@ -11,7 +11,6 @@ import {
   Trash2,
   Copy,
   ChevronDown,
-  AlertTriangle,
   Users,
   Lightbulb,
   FileSpreadsheet,
@@ -23,17 +22,13 @@ import type { LiveCitation } from "@/lib/types";
 // ---------------------------------------------------------------------------
 const MODES: { id: string; label: string; dot: string }[] = [
   { id: "ask", label: "Ask Anything", dot: "#9aa3b2" },
-  { id: "email", label: "Cold Email", dot: "#10b981" },
-  { id: "objections", label: "Objections", dot: "#ef4444" },
-  { id: "research", label: "Live Research", dot: "#38bdf8" },
   { id: "lou", label: "LOU", dot: "#06b6d4" },
-  { id: "fit", label: "Product Fit", dot: "#14b8a6" },
   { id: "meddpicc", label: "MEDDPICC", dot: "#f59e0b" },
   { id: "threading", label: "Threading", dot: "#8b5cf6" },
   { id: "proposal", label: "Proposal", dot: "#ec4899" },
   { id: "deck", label: "Deck", dot: "#a855f7" },
 ];
-const CHAT_MODES = new Set(["ask", "email", "objections", "research"]);
+const CHAT_MODES = new Set(["ask"]);
 
 const TONES = ["Direct", "Consultative", "Concise", "Technical"];
 const PERSONAS = [
@@ -122,28 +117,22 @@ type Msg = {
 const QUICK = [
   {
     label: "Draft a cold email",
-    mode: "email",
     prompt:
       "Draft a cold email to a VP of Engineering at a 200-engineer fintech that just raised a Series C and is hiring platform engineers. Angle: review bottleneck at scale.",
   },
   {
     label: '"We already have Copilot"',
-    mode: "objections",
     prompt:
       'Prospect says: "We already pay for GitHub Copilot — why would we add Bito?" Handle it.',
   },
-  { label: "Research an account", mode: "research", prompt: "" },
+  {
+    label: "Prep a discovery call",
+    prompt:
+      "Plan a 30-minute first discovery call with a Head of Platform at a Series C marketplace company — agenda, the five questions that matter, and what good answers sound like.",
+  },
 ];
 
-function ChatTool({
-  mode,
-  setMode,
-  ctx,
-}: {
-  mode: string;
-  setMode: (m: string) => void;
-  ctx: Ctx;
-}) {
+function ChatTool({ ctx }: { ctx: Ctx }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
@@ -153,7 +142,7 @@ function ChatTool({
   // assistant message into a fresh conversation.
   const generation = useRef(0);
 
-  const send = async (text: string, modeOverride?: string) => {
+  const send = async (text: string) => {
     const content = text.trim();
     if (!content || loading) return;
     const gen = generation.current;
@@ -164,7 +153,7 @@ function ChatTool({
     setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
 
     const data = await postAssist({
-      mode: modeOverride ?? mode,
+      mode: "ask",
       tone: ctx.tone,
       persona: ctx.persona,
       messages: [...history, { role: "user", content }].map((m) => ({
@@ -196,8 +185,7 @@ function ChatTool({
   };
 
   const quick = (q: (typeof QUICK)[number]) => {
-    setMode(q.mode);
-    if (q.prompt) send(q.prompt, q.mode);
+    if (q.prompt) send(q.prompt);
     else inputRef.current?.focus();
   };
 
@@ -264,7 +252,7 @@ function ChatTool({
           {loading && (
             <div className="flex items-center gap-2 font-mono text-xs text-neon-400">
               <Loader2 className="h-4 w-4 animate-spin" />
-              {mode === "research" ? "▸ searching the live web…" : "▸ thinking…"}
+              ▸ thinking…
             </div>
           )}
           <div ref={endRef} />
@@ -285,11 +273,7 @@ function ChatTool({
               }
             }}
             rows={2}
-            placeholder={
-              mode === "research"
-                ? "Company, person, or market to research… (Shift+Enter for newline)"
-                : "What do you need? (Shift+Enter for newline)"
-            }
+            placeholder="What do you need? (Shift+Enter for newline)"
             className="flex-1 resize-none bg-transparent px-2 py-1.5 font-mono text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none"
           />
           {messages.length > 0 && (
@@ -337,7 +321,6 @@ const PRIO_COLOR: Record<string, string> = {
 
 function LouTool({ ctx }: { ctx: Ctx }) {
   const [notes, setNotes] = useState("");
-  const [company, setCompany] = useState("");
   const [meetingDate, setMeetingDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -351,7 +334,6 @@ function LouTool({ ctx }: { ctx: Ctx }) {
     setError("");
     const data = await postAssist({
       mode: "lou",
-      account: company,
       notes,
       tone: ctx.tone,
       persona: ctx.persona,
@@ -400,7 +382,6 @@ function LouTool({ ctx }: { ctx: Ctx }) {
         { width: 22 },
       ];
 
-      const name = company.trim() || "Prospect";
       const fmt = (iso: string) => {
         const d = iso ? new Date(`${iso}T00:00:00`) : new Date();
         return d.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
@@ -411,7 +392,7 @@ function LouTool({ ctx }: { ctx: Ctx }) {
 
       ws.mergeCells("B2:F2");
       const title = ws.getCell("B2");
-      title.value = `Letter of Understanding: ${name}`;
+      title.value = "Letter of Understanding";
       title.fill = solid(BRAND);
       title.font = { name: "Calibri", size: 20, bold: true, color: { argb: WHITE } };
       title.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
@@ -420,7 +401,7 @@ function LouTool({ ctx }: { ctx: Ctx }) {
       ws.mergeCells("B3:F3");
       const intro = ws.getCell("B3");
       intro.value =
-        `On ${fmt(meetingDate)}, Bito met with ${name} to understand their critical business issues and how Bito can help. ` +
+        `On ${fmt(meetingDate)}, Bito met with your team to understand your critical business issues and how Bito can help. ` +
         `Please correct anything we got wrong, add anything we missed, and provide any additional context.`;
       intro.font = { name: "Calibri", size: 11, color: { argb: "FF334155" } };
       intro.alignment = { horizontal: "left", vertical: "middle", wrapText: true };
@@ -478,7 +459,7 @@ function LouTool({ ctx }: { ctx: Ctx }) {
       );
       const a = document.createElement("a");
       a.href = url;
-      a.download = `bito-lou-${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/^-|-$/g, "") || "prospect"}.xlsx`;
+      a.download = `bito-lou-${meetingDate || "draft"}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -494,12 +475,6 @@ function LouTool({ ctx }: { ctx: Ctx }) {
         <ToolHeader
           title="Letter of Understanding Builder"
           desc="Paste meeting notes or a transcript to generate a structured LOU table you can edit and export to a branded Excel file."
-        />
-        <input
-          value={company}
-          onChange={(e) => setCompany(e.target.value)}
-          placeholder="Company / prospect name (e.g. Lattice)"
-          className={`${inputCls} mb-3 w-full px-3.5 py-2.5`}
         />
         <textarea
           value={notes}
@@ -523,17 +498,6 @@ function LouTool({ ctx }: { ctx: Ctx }) {
         desc="Review and edit the table, then export a branded Excel file ready to send."
       />
       <div className="mb-3 flex flex-wrap items-end gap-3">
-        <label className="flex min-w-[200px] flex-1 flex-col gap-1">
-          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
-            company / prospect
-          </span>
-          <input
-            value={company}
-            onChange={(e) => setCompany(e.target.value)}
-            placeholder="e.g. Lattice"
-            className={inputCls}
-          />
-        </label>
         <label className="flex flex-col gap-1">
           <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
             meeting date
@@ -628,135 +592,6 @@ function Cell({ value, onChange }: { value: string; onChange: (v: string) => voi
       rows={Math.max(2, Math.ceil((value?.length || 0) / 38))}
       className="w-full resize-none rounded-md border border-transparent bg-transparent p-1.5 text-sm leading-relaxed text-ink-200 hover:border-ink-700 focus:border-neon-600/50 focus:bg-ink-950 focus:outline-none"
     />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Product Fit tool
-// ---------------------------------------------------------------------------
-interface FitProduct { name: string; score: number; verdict: string; rationale: string; signals: string[]; }
-interface FitResult {
-  overall: { score: number; verdict: string; summary: string };
-  products: FitProduct[];
-  redFlags: { severity: string; title: string; detail: string }[];
-}
-function verdictColor(v: string) {
-  if (/strong/i.test(v)) return "text-neon-400";
-  if (/possible/i.test(v)) return "text-amber-400";
-  return "text-red-400";
-}
-function verdictBg(v: string) {
-  if (/strong/i.test(v)) return "bg-neon-500/10 border-neon-600/30";
-  if (/possible/i.test(v)) return "bg-amber-500/10 border-amber-500/30";
-  return "bg-red-500/10 border-red-500/30";
-}
-
-function FitTool({ ctx }: { ctx: Ctx }) {
-  const [notes, setNotes] = useState("");
-  const [result, setResult] = useState<FitResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const run = async () => {
-    if (!notes.trim()) return;
-    setLoading(true);
-    setError("");
-    const data = await postAssist({ mode: "fit", notes, tone: ctx.tone, persona: ctx.persona }).catch(() => ({ error: "Network error." }));
-    setLoading(false);
-    if (data.data?.overall) setResult(data.data);
-    else setError(data.error || "Could not analyze.");
-  };
-
-  return (
-    <div>
-      <ToolHeader
-        title="Product Fit Analysis"
-        desc="Analyze meeting notes across Bito's modules: Git PR reviews, IDE reviews, CLI reviews, self-hosted deployment, and security & compliance reviews."
-      />
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        rows={6}
-        placeholder="Paste meeting notes, requirements, pain points, or discovery call details..."
-        className={notesArea}
-      />
-      {error && <div className="mt-3"><Notice text={error} /></div>}
-      <div className="mt-3">
-        <GenerateButton onClick={run} loading={loading} disabled={!notes.trim()} label="Analyze Product Fit" />
-      </div>
-
-      {result && (
-        <div className="mt-6 space-y-4">
-          <div className={`flex items-start gap-4 rounded-xl border p-5 ${verdictBg(result.overall.verdict)}`}>
-            <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-xl border border-ink-700 bg-ink-900">
-              <span className={`font-mono text-2xl font-bold ${verdictColor(result.overall.verdict)}`}>
-                {result.overall.score}
-              </span>
-              <span className="text-[9px] font-medium uppercase text-ink-400">{result.overall.verdict}</span>
-            </div>
-            <div>
-              <h4 className="font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-ink-200">
-                overall product fit
-              </h4>
-              <p className="mt-1 text-sm leading-relaxed text-ink-300">{result.overall.summary}</p>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-ink-700 bg-ink-900 p-5">
-            <h4 className="mb-4 font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-ink-200">
-              product fit scores
-            </h4>
-            <div className="space-y-3">
-              {result.products.map((p, i) => (
-                <div key={i} className="rounded-lg border border-ink-700 bg-ink-950/60 p-4">
-                  <div className="flex items-center justify-between">
-                    <h5 className="text-sm font-semibold text-ink-100">{p.name}</h5>
-                    <span className={`font-mono text-sm font-bold ${verdictColor(p.verdict)}`}>
-                      {p.verdict} · {p.score}
-                    </span>
-                  </div>
-                  <div className="my-2 h-1.5 overflow-hidden rounded-full bg-ink-800">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-neon-600 to-neon-400"
-                      style={{ width: `${p.score * 10}%` }}
-                    />
-                  </div>
-                  <p className="text-xs leading-relaxed text-ink-400">{p.rationale}</p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {p.signals?.map((s, j) => (
-                      <span key={j} className="rounded border border-ink-700 bg-ink-900 px-1.5 py-0.5 text-[11px] text-ink-400">
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {result.redFlags?.length > 0 && (
-            <div className="rounded-xl border border-ink-700 bg-ink-900 p-5">
-              <h4 className="mb-3 flex items-center gap-2 font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-ink-200">
-                <AlertTriangle className="h-4 w-4 text-red-400" /> red flags
-              </h4>
-              <div className="space-y-2">
-                {result.redFlags.map((f, i) => (
-                  <div key={i} className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
-                    <p className="text-sm font-semibold text-red-300">
-                      <span className="mr-2 rounded bg-red-500/20 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-red-300">
-                        {f.severity}
-                      </span>
-                      {f.title}
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-red-300/80">{f.detail}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -1305,11 +1140,9 @@ export function SalesAssist() {
       <div className="border-t border-ink-700 pt-6">
         {/* key=mode resets each tool's internal state when switching modes */}
         {CHAT_MODES.has(mode) ? (
-          <ChatTool key="chat" mode={mode} setMode={setMode} ctx={ctx} />
+          <ChatTool key="chat" ctx={ctx} />
         ) : mode === "lou" ? (
           <LouTool key="lou" ctx={ctx} />
-        ) : mode === "fit" ? (
-          <FitTool key="fit" ctx={ctx} />
         ) : mode === "threading" ? (
           <ThreadingTool key="threading" ctx={ctx} />
         ) : mode === "proposal" ? (

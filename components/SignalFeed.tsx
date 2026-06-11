@@ -14,7 +14,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { Signal } from "@/lib/types";
-import { EXAMPLE_COMPANIES } from "@/lib/data";
 import { MetricCard } from "./MetricCard";
 import { SignalCard } from "./SignalCard";
 import { AccountPriority } from "./AccountPriority";
@@ -86,18 +85,6 @@ export function SignalFeed({
             <Sparkles className="h-4 w-4" />
             Get Intel
           </button>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="font-mono text-[11px] text-ink-500">try:</span>
-          {EXAMPLE_COMPANIES.map((c) => (
-            <button
-              key={c}
-              onClick={() => onGetIntel(c)}
-              className="rounded border border-ink-700 bg-ink-950 px-2.5 py-1 font-mono text-xs text-ink-400 transition-colors hover:border-neon-600/40 hover:text-neon-300"
-            >
-              {c}
-            </button>
-          ))}
         </div>
       </div>
 
