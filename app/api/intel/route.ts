@@ -57,6 +57,8 @@ Outreach angle: one concrete angle tied to a specific live signal you found, wit
 
 Citations: list every distinct source you actually used.
 
+Never include <cite> tags or any citation markup inside JSON string values — write plain prose; sources belong only in the "citations" array.
+
 Output ONLY one JSON object — no prose, no code fences:
 {
   "name": "Canonical Company Name",

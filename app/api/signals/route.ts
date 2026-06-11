@@ -77,7 +77,11 @@ const BUCKET_BRIEFS: Record<SignalTypeId, string> = {
   ai: "AI tooling spend signals: public commentary (engineering blogs, podcasts, conference talks, Twitter/X threads) about AI dev-tool cost, adoption, or pain. Bonus if the company complains about Copilot/Cursor token cost.",
 };
 
-const SHARED_RULES = `Avoid: companies under ~50 engineers, hobby OSS, generic funding news. Prefer companies headquartered in the US/EU with English-language sources.
+const SHARED_RULES = `Hard rules:
+- "account" must be the canonical name of a REAL company — never an aggregator, website, list, or repo name (e.g. "GitHub Trending Projects" is invalid; the company behind the repo is what we want).
+- Recency: prefer events from the last 60 days; never include anything older than 6 months.
+- Never include <cite> tags or any citation markup inside JSON string values — write plain prose; sources belong only in the "url" and "source" fields.
+- Avoid: companies under ~50 engineers, hobby OSS, generic funding news. Prefer companies headquartered in the US/EU with English-language sources.
 
 Return ONLY the JSON object described in the system prompt.`;
 

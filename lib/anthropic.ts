@@ -38,6 +38,19 @@ export interface AnthropicCallResult {
   raw: unknown;              // pass-through for debugging
 }
 
+/**
+ * Remove citation markup the model sometimes bakes into output as literal
+ * text (e.g. `<cite index="21-1,21-3">…</cite>`). The structured citation
+ * system only attaches to plain-text blocks, so when the model writes JSON it
+ * can imitate the markup inside string values — which would otherwise render
+ * raw in the UI.
+ */
+export function stripCiteMarkup(s: string): string {
+  return s
+    .replace(/<\/?(?:antml:)?cite[^>]*>/gi, "")
+    .replace(/ {2,}/g, " ");
+}
+
 /** Strip ```json … ``` fences and trim, then attempt to extract the first JSON object. */
 export function extractJSON<T = unknown>(text: string): T | null {
   if (!text) return null;
@@ -182,12 +195,15 @@ export async function callClaudeWithWebSearch(
 function extractFromResponse(data: AnthropicResponse): AnthropicCallResult {
   const blocks = Array.isArray(data.content) ? data.content : [];
 
-  // 1. Concatenate the model's spoken text.
-  const text = blocks
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text as string)
-    .join("\n")
-    .trim();
+  // 1. Concatenate the model's spoken text (cite markup stripped — see
+  //    stripCiteMarkup; it would otherwise leak into UI strings and JSON).
+  const text = stripCiteMarkup(
+    blocks
+      .filter((b) => b.type === "text" && typeof b.text === "string")
+      .map((b) => b.text as string)
+      .join("\n")
+      .trim(),
+  );
 
   // 2. Citations come from two places:
   //    - inline `citations` arrays on text blocks, and
