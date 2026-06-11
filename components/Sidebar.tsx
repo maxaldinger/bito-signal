@@ -1,7 +1,7 @@
 "use client";
 
 import { Radio, Sparkles, type LucideIcon } from "lucide-react";
-import { SEGMENTS, SIGNAL_TYPES } from "@/lib/data";
+import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
 import type { SegmentId, SignalTypeId } from "@/lib/types";
 import { SegmentIcon } from "./SegmentIcon";
 
@@ -18,6 +18,10 @@ export function Sidebar({
   segmentCounts,
   activeSegment,
   onSegment,
+  sweBandCounts,
+  unknownSweCount,
+  activeSweBand,
+  onSweBand,
   signalCounts,
   activeSignalType,
   onSignalType,
@@ -29,6 +33,10 @@ export function Sidebar({
   segmentCounts: Record<SegmentId, number>;
   activeSegment: SegmentId | null;
   onSegment: (s: SegmentId | null) => void;
+  sweBandCounts: Record<SweBandId, number>;
+  unknownSweCount: number;
+  activeSweBand: SweBandId | null;
+  onSweBand: (b: SweBandId | null) => void;
   signalCounts: Record<SignalTypeId, number>;
   activeSignalType: SignalTypeId | null;
   onSignalType: (s: SignalTypeId | null) => void;
@@ -97,6 +105,53 @@ export function Sidebar({
             );
           })}
         </div>
+
+        <div className="my-4 border-t border-ink-700" />
+
+        {/* Engineering team size */}
+        <h3 className="mb-3 px-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+          eng team size
+        </h3>
+        <div className="flex flex-col gap-0.5">
+          {SWE_BANDS.map((band) => {
+            const active = activeSweBand === band.id;
+            return (
+              <button
+                key={band.id}
+                onClick={() => onSweBand(active ? null : band.id)}
+                className={`group flex items-center justify-between rounded-lg px-2 py-2 transition-colors ${
+                  active ? "bg-ink-800" : "hover:bg-ink-800/60"
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span
+                    className={`font-mono text-xs ${
+                      active ? "text-neon-400" : "text-ink-500 group-hover:text-ink-400"
+                    }`}
+                  >
+                    ▸
+                  </span>
+                  <span
+                    className={`font-mono text-sm tabular-nums ${
+                      active ? "text-ink-50" : "text-ink-300"
+                    }`}
+                  >
+                    {band.label} SWEs
+                  </span>
+                </span>
+                <span className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-ink-400 group-hover:bg-ink-900">
+                  {sweBandCounts[band.id] ?? 0}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {activeSweBand !== null && unknownSweCount > 0 && (
+          <p className="mt-2 px-1 font-mono text-[10px] leading-relaxed text-ink-500">
+            {unknownSweCount} signal{unknownSweCount === 1 ? "" : "s"} without a
+            size estimate hidden
+          </p>
+        )}
 
         <div className="my-4 border-t border-ink-700" />
 

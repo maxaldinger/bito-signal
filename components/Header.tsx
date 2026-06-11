@@ -1,6 +1,42 @@
 "use client";
 
-import { Search, RefreshCw, Activity } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Search, RefreshCw, Activity, Sun, Moon } from "lucide-react";
+
+function ThemeToggle() {
+  // null until mounted — the server doesn't know the stored preference.
+  const [theme, setTheme] = useState<"light" | "dark" | null>(null);
+
+  useEffect(() => {
+    setTheme(
+      document.documentElement.classList.contains("dark") ? "dark" : "light",
+    );
+  }, []);
+
+  const toggle = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.classList.toggle("dark", next === "dark");
+    try {
+      localStorage.setItem("bito-theme", next);
+    } catch {
+      /* private mode — toggle still works for the session */
+    }
+    setTheme(next);
+  };
+
+  const isDark = theme === "dark";
+  return (
+    <button
+      onClick={toggle}
+      aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
+      title={`Switch to ${isDark ? "light" : "dark"} mode`}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 px-2.5 py-2 font-mono text-[11px] font-medium text-ink-400 transition-colors hover:border-neon-600/40 hover:text-neon-300"
+    >
+      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      <span className="hidden sm:inline">{isDark ? "light" : "dark"}</span>
+    </button>
+  );
+}
 
 export function Header({
   search,
@@ -50,6 +86,7 @@ export function Header({
             <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-neon-400" />
             live · {lastUpdated}
           </div>
+          <ThemeToggle />
           <button
             onClick={onRefresh}
             aria-label="Refresh signals"

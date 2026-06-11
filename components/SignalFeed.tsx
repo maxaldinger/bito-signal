@@ -165,8 +165,8 @@ export function SignalFeed({
       ) : sorted.length === 0 && !error ? (
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
           <p className="text-sm text-ink-400">
-            No live signals match the current filters. Clear a segment / signal-type
-            filter or lower the minimum ICP fit.
+            No live signals match the current filters. Clear a segment, signal-type or
+            team-size filter, or lower the minimum ICP fit.
           </p>
         </div>
       ) : (

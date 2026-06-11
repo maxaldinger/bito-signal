@@ -7,7 +7,13 @@ import { Sidebar, type TabId } from "@/components/Sidebar";
 import { SignalFeed } from "@/components/SignalFeed";
 import { SalesAssist } from "@/components/SalesAssist";
 import { CompanyIntel } from "@/components/CompanyIntel";
-import { SEGMENTS, SIGNAL_TYPES } from "@/lib/data";
+import {
+  SEGMENTS,
+  SIGNAL_TYPES,
+  SWE_BANDS,
+  sweBandOf,
+  type SweBandId,
+} from "@/lib/data";
 import type {
   Signal,
   SegmentId,
@@ -48,6 +54,7 @@ export default function Page() {
   const [minStrength, setMinStrength] = useState(0);
   const [segment, setSegment] = useState<SegmentId | null>(null);
   const [signalType, setSignalType] = useState<SignalTypeId | null>(null);
+  const [sweBand, setSweBand] = useState<SweBandId | null>(null);
   const [search, setSearch] = useState("");
 
   const loadSignals = useCallback(async (force = false) => {
@@ -104,6 +111,18 @@ export default function Page() {
     return c;
   }, [signals]);
 
+  const { sweBandCounts, unknownSweCount } = useMemo(() => {
+    const counts = {} as Record<SweBandId, number>;
+    for (const b of SWE_BANDS) counts[b.id] = 0;
+    let unknown = 0;
+    for (const sig of signals) {
+      const band = sweBandOf(sig.sweEstimate);
+      if (band) counts[band] += 1;
+      else unknown += 1;
+    }
+    return { sweBandCounts: counts, unknownSweCount: unknown };
+  }, [signals]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return signals.filter(
@@ -111,11 +130,12 @@ export default function Page() {
         s.strength >= minStrength &&
         (!segment || s.segment === segment) &&
         (!signalType || s.type === signalType) &&
+        (!sweBand || sweBandOf(s.sweEstimate) === sweBand) &&
         (!q ||
           s.account.toLowerCase().includes(q) ||
           s.title.toLowerCase().includes(q)),
     );
-  }, [signals, minStrength, segment, signalType, search]);
+  }, [signals, minStrength, segment, signalType, sweBand, search]);
 
   const metrics = useMemo(() => {
     const accounts = new Set(filtered.map((s) => s.account));
@@ -193,6 +213,10 @@ export default function Page() {
           segmentCounts={segmentCounts}
           activeSegment={segment}
           onSegment={setSegment}
+          sweBandCounts={sweBandCounts}
+          unknownSweCount={unknownSweCount}
+          activeSweBand={sweBand}
+          onSweBand={setSweBand}
           signalCounts={signalCounts}
           activeSignalType={signalType}
           onSignalType={setSignalType}

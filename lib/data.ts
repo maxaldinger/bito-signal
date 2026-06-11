@@ -49,35 +49,37 @@ export const SEGMENT_MAP: Record<SegmentId, Segment> = Object.fromEntries(
 // ---------------------------------------------------------------------------
 // Signal taxonomy — sources we ask claude-sonnet-4 to search for.
 // ---------------------------------------------------------------------------
+// Colors are inlined as hex on chips/strength bars, so they must hold up on
+// both the light (default) and dark backgrounds — mid-saturation 500/600s.
 export const SIGNAL_TYPES: SignalType[] = [
   {
     id: "hiring",
     label: "Engineering Hiring",
-    color: "#34d399",
+    color: "#10b981",
     description: "Job posts, hiring sprees, eng team build-out language",
   },
   {
     id: "oss",
     label: "OSS / GitHub Activity",
-    color: "#a78bfa",
+    color: "#8b5cf6",
     description: "Major releases, repo activity, OSS commentary",
   },
   {
     id: "ma",
     label: "M&A",
-    color: "#f59e0b",
+    color: "#d97706",
     description: "Acquisitions & mergers creating codebase complexity",
   },
   {
     id: "funding",
     label: "Funding + Eng Build-out",
-    color: "#38bdf8",
+    color: "#0284c7",
     description: "Rounds explicitly earmarked for engineering / platform",
   },
   {
     id: "ai",
     label: "AI Tooling Signals",
-    color: "#f472b6",
+    color: "#db2777",
     description: "Public commentary on AI tooling spend, adoption or pain",
   },
 ];
@@ -85,6 +87,26 @@ export const SIGNAL_TYPES: SignalType[] = [
 export const SIGNAL_TYPE_MAP: Record<string, SignalType> = Object.fromEntries(
   SIGNAL_TYPES.map((s) => [s.id, s])
 );
+
+// ---------------------------------------------------------------------------
+// Engineering team-size bands — sidebar filter over each signal's sweEstimate.
+// Signals without an estimate match no band (they're only visible with the
+// filter off; the sidebar shows how many were hidden).
+// ---------------------------------------------------------------------------
+export const SWE_BANDS = [
+  { id: "0-50", label: "0–50", min: 0, max: 50 },
+  { id: "50-250", label: "50–250", min: 50, max: 250 },
+  { id: "250-500", label: "250–500", min: 250, max: 500 },
+  { id: "500+", label: "500+", min: 500, max: Number.POSITIVE_INFINITY },
+] as const;
+
+export type SweBandId = (typeof SWE_BANDS)[number]["id"];
+
+export function sweBandOf(swe?: number): SweBandId | null {
+  if (typeof swe !== "number" || !(swe > 0)) return null;
+  const band = SWE_BANDS.find((b) => swe >= b.min && swe < b.max);
+  return band ? band.id : "500+";
+}
 
 // ---------------------------------------------------------------------------
 // Example companies for the quick-search row. The search is open — the model
