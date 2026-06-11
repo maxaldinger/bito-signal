@@ -1,6 +1,6 @@
 "use client";
 
-import { Radio, Sparkles, type LucideIcon } from "lucide-react";
+import { Radio, Sparkles, Check, type LucideIcon } from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
 import type { SegmentId, SignalTypeId } from "@/lib/types";
 import { SegmentIcon } from "./SegmentIcon";
@@ -12,34 +12,86 @@ const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "assist", label: "Sales Assist", icon: Sparkles },
 ];
 
+// Section heading with an optional "clear" affordance when filters are active.
+function FilterHeading({
+  label,
+  activeCount,
+  onClear,
+}: {
+  label: string;
+  activeCount: number;
+  onClear: () => void;
+}) {
+  return (
+    <div className="mb-3 flex items-center justify-between px-1">
+      <h3 className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+        {label}
+        {activeCount > 0 && (
+          <span className="ml-1.5 rounded bg-neon-500/15 px-1 py-0.5 text-neon-300">
+            {activeCount}
+          </span>
+        )}
+      </h3>
+      {activeCount > 0 && (
+        <button
+          onClick={onClear}
+          className="font-mono text-[10px] uppercase tracking-wider text-ink-500 transition-colors hover:text-neon-300"
+        >
+          clear
+        </button>
+      )}
+    </div>
+  );
+}
+
+function CheckBox({ checked }: { checked: boolean }) {
+  return (
+    <span
+      className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border transition-colors ${
+        checked
+          ? "border-neon-500 bg-neon-500/20 text-neon-300"
+          : "border-ink-600 bg-transparent text-transparent"
+      }`}
+    >
+      <Check className="h-2.5 w-2.5" strokeWidth={3} />
+    </span>
+  );
+}
+
 export function Sidebar({
   activeTab,
   onTab,
   segmentCounts,
-  activeSegment,
-  onSegment,
+  selectedSegments,
+  onToggleSegment,
+  onClearSegments,
   sweBandCounts,
   unknownSweCount,
-  activeSweBand,
-  onSweBand,
+  selectedSweBands,
+  onToggleSweBand,
+  onClearSweBands,
   signalCounts,
-  activeSignalType,
-  onSignalType,
+  selectedSignalTypes,
+  onToggleSignalType,
+  onClearSignalTypes,
   minStrength,
   onMinStrength,
 }: {
   activeTab: TabId;
   onTab: (t: TabId) => void;
   segmentCounts: Record<SegmentId, number>;
-  activeSegment: SegmentId | null;
-  onSegment: (s: SegmentId | null) => void;
+  selectedSegments: SegmentId[];
+  onToggleSegment: (s: SegmentId) => void;
+  onClearSegments: () => void;
   sweBandCounts: Record<SweBandId, number>;
   unknownSweCount: number;
-  activeSweBand: SweBandId | null;
-  onSweBand: (b: SweBandId | null) => void;
+  selectedSweBands: SweBandId[];
+  onToggleSweBand: (b: SweBandId) => void;
+  onClearSweBands: () => void;
   signalCounts: Record<SignalTypeId, number>;
-  activeSignalType: SignalTypeId | null;
-  onSignalType: (s: SignalTypeId | null) => void;
+  selectedSignalTypes: SignalTypeId[];
+  onToggleSignalType: (s: SignalTypeId) => void;
+  onClearSignalTypes: () => void;
   minStrength: number;
   onMinStrength: (v: number) => void;
 }) {
@@ -67,33 +119,40 @@ export function Sidebar({
           })}
         </nav>
 
-        <div className="my-4 border-t border-ink-700" />
+        <p className="mt-3 px-1 font-mono text-[10px] leading-relaxed text-ink-500">
+          filters stack — pick as many as you need
+        </p>
 
-        {/* Segments */}
-        <h3 className="mb-3 px-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
-          segments
-        </h3>
+        <div className="my-3 border-t border-ink-700" />
+
+        {/* Segments — multi-select */}
+        <FilterHeading
+          label="segments"
+          activeCount={selectedSegments.length}
+          onClear={onClearSegments}
+        />
         <div className="flex flex-col gap-0.5">
           {SEGMENTS.map((seg) => {
-            const active = activeSegment === seg.id;
+            const checked = selectedSegments.includes(seg.id);
             return (
               <button
                 key={seg.id}
-                onClick={() => onSegment(active ? null : seg.id)}
+                onClick={() => onToggleSegment(seg.id)}
                 title={seg.blurb}
                 className={`group flex items-center justify-between rounded-lg px-2 py-2 transition-colors ${
-                  active ? "bg-ink-800" : "hover:bg-ink-800/60"
+                  checked ? "bg-ink-800" : "hover:bg-ink-800/60"
                 }`}
               >
                 <span className="flex items-center gap-2.5">
+                  <CheckBox checked={checked} />
                   <SegmentIcon
                     name={seg.icon}
                     className={`h-4 w-4 ${
-                      active ? "text-neon-400" : "text-ink-400 group-hover:text-ink-300"
+                      checked ? "text-neon-400" : "text-ink-400 group-hover:text-ink-300"
                     }`}
                   />
                   <span
-                    className={`text-left text-sm ${active ? "text-ink-50" : "text-ink-300"}`}
+                    className={`text-left text-sm ${checked ? "text-ink-50" : "text-ink-300"}`}
                   >
                     {seg.label}
                   </span>
@@ -108,32 +167,28 @@ export function Sidebar({
 
         <div className="my-4 border-t border-ink-700" />
 
-        {/* Engineering team size */}
-        <h3 className="mb-3 px-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
-          eng team size
-        </h3>
+        {/* Engineering team size — multi-select */}
+        <FilterHeading
+          label="eng team size"
+          activeCount={selectedSweBands.length}
+          onClear={onClearSweBands}
+        />
         <div className="flex flex-col gap-0.5">
           {SWE_BANDS.map((band) => {
-            const active = activeSweBand === band.id;
+            const checked = selectedSweBands.includes(band.id);
             return (
               <button
                 key={band.id}
-                onClick={() => onSweBand(active ? null : band.id)}
+                onClick={() => onToggleSweBand(band.id)}
                 className={`group flex items-center justify-between rounded-lg px-2 py-2 transition-colors ${
-                  active ? "bg-ink-800" : "hover:bg-ink-800/60"
+                  checked ? "bg-ink-800" : "hover:bg-ink-800/60"
                 }`}
               >
                 <span className="flex items-center gap-2.5">
-                  <span
-                    className={`font-mono text-xs ${
-                      active ? "text-neon-400" : "text-ink-500 group-hover:text-ink-400"
-                    }`}
-                  >
-                    ▸
-                  </span>
+                  <CheckBox checked={checked} />
                   <span
                     className={`font-mono text-sm tabular-nums ${
-                      active ? "text-ink-50" : "text-ink-300"
+                      checked ? "text-ink-50" : "text-ink-300"
                     }`}
                   >
                     {band.label} SWEs
@@ -146,7 +201,7 @@ export function Sidebar({
             );
           })}
         </div>
-        {activeSweBand !== null && unknownSweCount > 0 && (
+        {selectedSweBands.length > 0 && unknownSweCount > 0 && (
           <p className="mt-2 px-1 font-mono text-[10px] leading-relaxed text-ink-500">
             {unknownSweCount} signal{unknownSweCount === 1 ? "" : "s"} without a
             size estimate hidden
@@ -155,28 +210,31 @@ export function Sidebar({
 
         <div className="my-4 border-t border-ink-700" />
 
-        {/* Signal types */}
-        <h3 className="mb-3 px-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
-          signal types
-        </h3>
+        {/* Signal types — multi-select */}
+        <FilterHeading
+          label="signal types"
+          activeCount={selectedSignalTypes.length}
+          onClear={onClearSignalTypes}
+        />
         <div className="flex flex-col gap-0.5">
           {SIGNAL_TYPES.map((st) => {
-            const active = activeSignalType === st.id;
+            const checked = selectedSignalTypes.includes(st.id);
             return (
               <button
                 key={st.id}
-                onClick={() => onSignalType(active ? null : st.id)}
+                onClick={() => onToggleSignalType(st.id)}
                 title={st.description}
                 className={`group flex items-center justify-between rounded-lg px-2 py-2 transition-colors ${
-                  active ? "bg-ink-800" : "hover:bg-ink-800/60"
+                  checked ? "bg-ink-800" : "hover:bg-ink-800/60"
                 }`}
               >
                 <span className="flex items-center gap-2.5">
+                  <CheckBox checked={checked} />
                   <span
-                    className="h-1.5 w-1.5 rounded-full"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
                     style={{ backgroundColor: st.color }}
                   />
-                  <span className={`text-sm ${active ? "text-ink-50" : "text-ink-300"}`}>
+                  <span className={`text-left text-sm ${checked ? "text-ink-50" : "text-ink-300"}`}>
                     {st.label}
                   </span>
                 </span>

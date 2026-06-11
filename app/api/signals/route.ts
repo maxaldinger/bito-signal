@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import { apolloIcpSweep, type IcpSweepOrg } from "@/lib/enrich/apollo";
+import { upsertSignals, supabaseConfigured } from "@/lib/supabase";
 import type { Signal, SignalTypeId, SegmentId } from "@/lib/types";
 
 // Live feed — we ask claude-sonnet-4 to search the public web for fresh
@@ -218,8 +219,16 @@ export async function GET(req: NextRequest) {
         { status: 502, headers: { "Cache-Control": "no-store" } },
       );
     }
+    const icpSignals = icpSweepToSignals(sweep.orgs);
+    const persisted = supabaseConfigured()
+      ? (await upsertSignals(icpSignals)).ok
+      : false;
     return NextResponse.json(
-      { signals: icpSweepToSignals(sweep.orgs), updated: new Date().toISOString() },
+      {
+        signals: icpSignals,
+        persisted,
+        updated: new Date().toISOString(),
+      },
       {
         headers: {
           "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
@@ -301,9 +310,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // Persist into the Supabase cache (upsert on account+type) so pulls
+    // accumulate history; non-fatal if unconfigured or down.
+    const persisted = supabaseConfigured()
+      ? (await upsertSignals(signals)).ok
+      : false;
+
     return NextResponse.json(
       {
         signals,
+        persisted,
         updated: new Date().toISOString(),
         searchCount: result.searchCount,
         searchErrors: result.searchErrors,

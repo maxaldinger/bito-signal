@@ -12,6 +12,10 @@ import {
   Info,
   AlertTriangle,
   RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  DownloadCloud,
+  Loader2,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
 import { SIGNAL_TYPE_MAP } from "@/lib/data";
@@ -22,6 +26,13 @@ import { AccountPriority } from "./AccountPriority";
 export function SignalFeed({
   signals,
   loading,
+  pulling,
+  cacheMode,
+  page,
+  totalPages,
+  totalCached,
+  pageSize,
+  historyError,
   pendingBuckets,
   bucketErrors,
   metrics,
@@ -29,9 +40,18 @@ export function SignalFeed({
   onSelectCompany,
   onGetIntel,
   onRetry,
+  onPullMore,
+  onPage,
 }: {
   signals: Signal[];
   loading: boolean;
+  pulling: boolean;
+  cacheMode: boolean;
+  page: number;
+  totalPages: number;
+  totalCached: number;
+  pageSize: number;
+  historyError: string | null;
   pendingBuckets: SignalTypeId[];
   bucketErrors: Partial<Record<SignalTypeId, string>>;
   metrics: { total: number; accounts: number; avgFit: number; hot: number };
@@ -39,6 +59,8 @@ export function SignalFeed({
   onSelectCompany: (c: string) => void;
   onGetIntel: (c: string) => void;
   onRetry: () => void;
+  onPullMore: () => void;
+  onPage: (p: number) => void;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"feed" | "fit" | "recent">("feed");
@@ -129,22 +151,83 @@ export function SignalFeed({
         </div>
       )}
 
+      {/* History read error */}
+      {historyError && (
+        <div className="flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-4">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+          <p className="min-w-0 flex-1 break-words text-xs leading-relaxed text-red-300">
+            Cache read failed: {historyError}
+          </p>
+        </div>
+      )}
+
       {/* Account prioritization */}
       {signals.length > 0 && <AccountPriority signals={signals} onSelect={onSelectCompany} />}
 
-      {/* Feed header */}
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-[12px] text-ink-400">
-          <span className="font-semibold text-ink-100">{signals.length}</span> signals
-          {updated ? <span className="text-ink-600"> · updated {updated}</span> : null}
-        </p>
-        <button
-          onClick={() => setSort(nextSort)}
-          className="inline-flex items-center gap-1.5 rounded border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 transition-colors hover:bg-ink-800"
-        >
-          <ArrowDownUp className="h-3.5 w-3.5" />
-          {sortLabel}
-        </button>
+      {/* Feed header — pagination + pull controls */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ink-700 bg-ink-900 px-4 py-3">
+        <div className="min-w-0">
+          {cacheMode ? (
+            <>
+              <p className="font-mono text-[12px] text-ink-400">
+                <span className="font-semibold text-ink-100">{totalCached}</span> cached
+                signals · <span className="text-ink-300">{pageSize} results per page</span> ·
+                page <span className="font-semibold text-ink-100">{page}</span>/{totalPages}
+              </p>
+              <p className="mt-0.5 font-mono text-[11px] text-ink-600">
+                updated {updated} · pull more to scan for new signals · prev/next to revisit
+                earlier results
+              </p>
+            </>
+          ) : (
+            <p className="font-mono text-[12px] text-ink-400">
+              <span className="font-semibold text-ink-100">{signals.length}</span> signals
+              <span className="text-ink-600"> · updated {updated} · live scan (no cache configured)</span>
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {cacheMode && (
+            <>
+              <button
+                onClick={() => onPage(page - 1)}
+                disabled={page <= 1 || pulling}
+                title="Previous page"
+                className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-300 transition-colors hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" /> Prev
+              </button>
+              <button
+                onClick={() => onPage(page + 1)}
+                disabled={page >= totalPages || pulling}
+                title="Next page"
+                className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-300 transition-colors hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={onPullMore}
+                disabled={pulling}
+                title="Run a fresh live scan and add new results to the cache"
+                className="inline-flex items-center gap-1.5 rounded border border-neon-600/50 bg-neon-500/15 px-3 py-1.5 text-xs font-semibold text-neon-300 transition-colors hover:bg-neon-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {pulling ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <DownloadCloud className="h-3.5 w-3.5" />
+                )}
+                {pulling ? "Pulling…" : "Pull More Signals"}
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => setSort(nextSort)}
+            className="inline-flex items-center gap-1.5 rounded border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 transition-colors hover:bg-ink-800"
+          >
+            <ArrowDownUp className="h-3.5 w-3.5" />
+            {sortLabel}
+          </button>
+        </div>
       </div>
 
       {/* Feed */}
@@ -189,11 +272,12 @@ export function SignalFeed({
       <div className="flex items-start gap-2 rounded-lg border border-ink-700 bg-ink-900/50 p-3 text-xs text-ink-500">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-500" />
         <span>
-          Every signal is generated live by{" "}
-          <span className="font-mono text-ink-400">claude-sonnet-4</span> with the
-          Anthropic <span className="font-mono text-ink-400">web_search</span> tool at
-          refresh time — no static data. Strength is an ICP-fit estimate, and sources
-          are linked on each card. Verify before outreach.
+          Signals are generated live by{" "}
+          <span className="font-mono text-ink-400">claude-sonnet-4</span> +{" "}
+          <span className="font-mono text-ink-400">web_search</span> and the Apollo ICP
+          sweep{cacheMode ? ", then cached in Supabase — each pull adds new results and refreshes repeat sightings" : ""}.
+          Strength is an ICP-fit estimate, and sources are linked on each card. Verify
+          before outreach.
         </span>
       </div>
     </div>
