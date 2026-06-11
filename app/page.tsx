@@ -31,13 +31,18 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
+const BUCKETS: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai"];
+
 export default function Page() {
   const [tab, setTab] = useState<TabId>("feed");
 
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [feedError, setFeedError] = useState<string | null>(null);
+  const [bucketErrors, setBucketErrors] = useState<Partial<Record<SignalTypeId, string>>>({});
+  const [pendingBuckets, setPendingBuckets] = useState<SignalTypeId[]>([]);
   const [feedLoading, setFeedLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Guards against a superseded refresh appending stale bucket results.
+  const feedReqId = useRef(0);
   // Anchored to the last SUCCESSFUL fetch — a failed refresh must not claim
   // "just now". `now` ticks to re-derive the label.
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
@@ -57,29 +62,50 @@ export default function Page() {
   const [sweBand, setSweBand] = useState<SweBandId | null>(null);
   const [search, setSearch] = useState("");
 
+  // Five parallel bucket scans (~3 searches each) instead of one mega-pass:
+  // first cards land in ~20s and the feed fills in progressively.
   const loadSignals = useCallback(async (force = false) => {
-    setFeedError(null);
-    try {
-      // `cache: no-store` only bypasses the browser cache; the CDN cache keyed
-      // on s-maxage needs a unique URL to actually re-run the live pass.
-      const url = force ? `/api/signals?fresh=${Date.now()}` : "/api/signals";
-      const res = await fetch(url, force ? { cache: "no-store" } : {});
-      const data = await readJson(res);
-      if (!res.ok) {
-        setSignals([]);
-        setFeedError(
-          typeof data.error === "string" ? data.error : `Signal pass failed (${res.status})`,
-        );
-      } else {
-        setSignals(Array.isArray(data.signals) ? (data.signals as Signal[]) : []);
-        setLastFetchAt(Date.now());
-      }
-    } catch (e) {
-      setSignals([]);
-      setFeedError(String((e as Error)?.message || e));
-    } finally {
-      setFeedLoading(false);
-    }
+    const reqId = ++feedReqId.current;
+    setSignals([]);
+    setBucketErrors({});
+    setPendingBuckets([...BUCKETS]);
+    setFeedLoading(true);
+
+    await Promise.allSettled(
+      BUCKETS.map(async (bucket) => {
+        try {
+          // `cache: no-store` only bypasses the browser cache; the CDN cache
+          // keyed on s-maxage needs a unique URL to actually re-run the pass.
+          const url =
+            `/api/signals?type=${bucket}` + (force ? `&fresh=${Date.now()}` : "");
+          const res = await fetch(url, force ? { cache: "no-store" } : {});
+          const data = await readJson(res);
+          if (reqId !== feedReqId.current) return; // superseded by a newer refresh
+          if (!res.ok) {
+            setBucketErrors((prev) => ({
+              ...prev,
+              [bucket]:
+                typeof data.error === "string" ? data.error : `HTTP ${res.status}`,
+            }));
+          } else {
+            const fresh = Array.isArray(data.signals) ? (data.signals as Signal[]) : [];
+            setSignals((prev) => [...prev, ...fresh]);
+            setLastFetchAt(Date.now());
+          }
+        } catch (e) {
+          if (reqId !== feedReqId.current) return;
+          setBucketErrors((prev) => ({
+            ...prev,
+            [bucket]: String((e as Error)?.message || e),
+          }));
+        } finally {
+          if (reqId === feedReqId.current) {
+            setPendingBuckets((prev) => prev.filter((b) => b !== bucket));
+          }
+        }
+      }),
+    );
+    if (reqId === feedReqId.current) setFeedLoading(false);
   }, []);
 
   useEffect(() => {
@@ -243,7 +269,8 @@ export default function Page() {
               <SignalFeed
                 signals={filtered}
                 loading={feedLoading}
-                error={feedError}
+                pendingBuckets={pendingBuckets}
+                bucketErrors={bucketErrors}
                 metrics={metrics}
                 updated={lastUpdated}
                 onSelectCompany={getIntel}

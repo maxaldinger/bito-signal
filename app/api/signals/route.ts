@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import type { Signal, SignalTypeId, SegmentId } from "@/lib/types";
@@ -7,12 +7,19 @@ import type { Signal, SignalTypeId, SegmentId } from "@/lib/types";
 // buying signals across the five Bito ICP categories, then return them
 // in a normalized shape the UI already understands.
 //
+// Two shapes:
+//   GET /api/signals?type=hiring  → ONE bucket (~3 searches, ~25s). The UI
+//     fires all five buckets in parallel and renders them as they land —
+//     this is the fast path.
+//   GET /api/signals              → full five-bucket pass in a single turn
+//     (slow, kept for API consumers / curl).
+//
 // Force dynamic so `next build` never tries to prerender this route (that
 // would call Anthropic at build time). CDN caching is handled by the
-// Cache-Control header below; "Refresh" in the UI bypasses it.
+// Cache-Control header below — per-bucket URLs cache independently;
+// "Refresh" in the UI busts it with a &fresh= param.
 export const dynamic = "force-dynamic";
-// A full live pass (up to 8 web searches + a long structured response) can run
-// well past 90s — use the platform maximum (300s on all Vercel plans).
+// The full pass can run past 90s — use the platform maximum.
 export const maxDuration = 300;
 
 const VALID_TYPES: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai"];
@@ -60,17 +67,38 @@ Output ONLY a single JSON object — no prose, no code fences — matching this 
   ]
 }`;
 
-const USER_PROMPT = `Search the public web for 10-14 fresh buying signals that point to companies in Bito's ICP. Spread the signals across these five buckets — find 2-3 in each where possible:
+const BUCKET_BRIEFS: Record<SignalTypeId, string> = {
+  hiring:
+    "Engineering hiring announcements: companies posting waves of senior SWE / staff / platform-engineering / DevEx roles in the last 60 days. Use sources like LinkedIn announcements, company engineering blogs, hiring trackers, TechCrunch hiring stories.",
+  oss: "Major OSS / GitHub activity: notable releases, new flagship repos, or unusual repo growth from companies with paid commercial products. Use GitHub trending, company engineering blogs, HN front page.",
+  ma: "M&A creating codebase complexity: acquisitions or mergers in the last ~6 months where the acquirer now has to integrate a second non-trivial codebase. Use TechCrunch, Crunchbase News, M&A wires.",
+  funding:
+    'Funding rounds with explicit engineering build-out language: rounds where the announcement specifically says "hire engineers", "scale platform", "build the team" — not generic "growth". Use TechCrunch, business wires.',
+  ai: "AI tooling spend signals: public commentary (engineering blogs, podcasts, conference talks, Twitter/X threads) about AI dev-tool cost, adoption, or pain. Bonus if the company complains about Copilot/Cursor token cost.",
+};
 
-1. Engineering hiring announcements: companies posting waves of senior SWE / staff / platform-engineering / DevEx roles in the last 60 days. Use sources like LinkedIn announcements, company engineering blogs, hiring trackers, TheLayoff.com / inverse, TechCrunch hiring stories.
-2. Major OSS / GitHub activity: notable releases, new flagship repos, or unusual repo growth from companies with paid commercial products. Use GitHub trending, company engineering blogs, HN front page.
-3. M&A creating codebase complexity: acquisitions or mergers in the last ~6 months where the acquirer now has to integrate a second non-trivial codebase. Use TechCrunch, Crunchbase News, M&A wires.
-4. Funding rounds with explicit engineering build-out language: rounds where the announcement specifically says "hire engineers", "scale platform", "build the team" — not generic "growth". Use TechCrunch, business wires.
-5. AI tooling spend signals: public commentary (engineering blogs, podcasts, conference talks, Twitter/X threads) about AI dev-tool cost, adoption, or pain. Bonus if the company complains about Copilot/Cursor token cost.
-
-Avoid: companies under ~50 engineers, hobby OSS, generic funding news. Prefer companies headquartered in the US/EU with English-language sources.
+const SHARED_RULES = `Avoid: companies under ~50 engineers, hobby OSS, generic funding news. Prefer companies headquartered in the US/EU with English-language sources.
 
 Return ONLY the JSON object described in the system prompt.`;
+
+const FULL_PROMPT = `Search the public web for 10-14 fresh buying signals that point to companies in Bito's ICP. Spread the signals across these five buckets — find 2-3 in each where possible:
+
+1. ${BUCKET_BRIEFS.hiring}
+2. ${BUCKET_BRIEFS.oss}
+3. ${BUCKET_BRIEFS.ma}
+4. ${BUCKET_BRIEFS.funding}
+5. ${BUCKET_BRIEFS.ai}
+
+${SHARED_RULES}`;
+
+const bucketPrompt = (type: SignalTypeId) =>
+  `Search the public web for 3-5 fresh buying signals in ONE category for Bito's ICP.
+
+CATEGORY: ${BUCKET_BRIEFS[type]}
+
+Every signal's "type" field must be "${type}".
+
+${SHARED_RULES}`;
 
 interface ModelSignal {
   account: string;
@@ -121,13 +149,20 @@ function normalizeDate(d: string | undefined): string {
   return new Date(time).toISOString().slice(0, 10);
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const typeParam = req.nextUrl.searchParams.get("type")?.trim().toLowerCase();
+  const bucket: SignalTypeId | null = (VALID_TYPES as string[]).includes(
+    typeParam ?? "",
+  )
+    ? (typeParam as SignalTypeId)
+    : null;
+
   try {
     const result = await callClaudeWithWebSearch({
       system: SYSTEM,
-      user: USER_PROMPT,
-      maxSearches: Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
-      maxTokens: 6000,
+      user: bucket ? bucketPrompt(bucket) : FULL_PROMPT,
+      maxSearches: bucket ? 3 : Number(process.env.ANTHROPIC_WEB_SEARCH_MAX || 8),
+      maxTokens: bucket ? 2500 : 6000,
       temperature: 0.4,
     });
 
@@ -155,11 +190,12 @@ export async function GET() {
       .filter((s) => s && s.account && s.title && clampScore(s.strength) !== undefined)
       .map((s, i) => {
         const url = s.url && /^https?:\/\//.test(s.url) ? s.url : undefined;
+        const type = bucket ?? normalizeType(s.type);
         return {
-          id: `${normalizeType(s.type)}-${i}-${Date.now().toString(36)}`,
+          id: `${type}-${i}-${Date.now().toString(36)}`,
           account: String(s.account).trim(),
           segment: normalizeSegment(s.segment),
-          type: normalizeType(s.type),
+          type,
           strength: clampScore(s.strength)!,
           title: String(s.title).trim(),
           description: String(s.description || "").trim(),

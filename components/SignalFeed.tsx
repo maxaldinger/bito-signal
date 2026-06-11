@@ -13,7 +13,8 @@ import {
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
-import type { Signal } from "@/lib/types";
+import type { Signal, SignalTypeId } from "@/lib/types";
+import { SIGNAL_TYPE_MAP } from "@/lib/data";
 import { MetricCard } from "./MetricCard";
 import { SignalCard } from "./SignalCard";
 import { AccountPriority } from "./AccountPriority";
@@ -21,7 +22,8 @@ import { AccountPriority } from "./AccountPriority";
 export function SignalFeed({
   signals,
   loading,
-  error,
+  pendingBuckets,
+  bucketErrors,
   metrics,
   updated,
   onSelectCompany,
@@ -30,7 +32,8 @@ export function SignalFeed({
 }: {
   signals: Signal[];
   loading: boolean;
-  error: string | null;
+  pendingBuckets: SignalTypeId[];
+  bucketErrors: Partial<Record<SignalTypeId, string>>;
   metrics: { total: number; accounts: number; avgFit: number; hot: number };
   updated: string;
   onSelectCompany: (c: string) => void;
@@ -53,6 +56,13 @@ export function SignalFeed({
   const nextSort = sort === "feed" ? "fit" : sort === "fit" ? "recent" : "feed";
 
   const submit = (c: string) => c.trim() && onGetIntel(c.trim());
+
+  // Booting = nothing has landed yet; afterwards cards render progressively
+  // while remaining buckets are still scanning.
+  const booting = loading && signals.length === 0;
+  const failedBuckets = Object.keys(bucketErrors) as SignalTypeId[];
+  const allFailed = !loading && failedBuckets.length === 5 && signals.length === 0;
+  const bucketLabel = (b: SignalTypeId) => SIGNAL_TYPE_MAP[b]?.label ?? b;
 
   return (
     <div className="space-y-6">
@@ -96,13 +106,19 @@ export function SignalFeed({
         <MetricCard label="hot (≥80)" value={metrics.hot} icon={Flame} color="text-amber-400" loading={loading} />
       </div>
 
-      {/* Error banner — be honest when the live pass fails */}
-      {error && !loading && (
+      {/* Error banner — be honest when scans fail (all or some) */}
+      {failedBuckets.length > 0 && !booting && (
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-amber-300">Live signal pass failed</p>
-            <p className="mt-0.5 break-words text-xs leading-relaxed text-amber-200/80">{error}</p>
+            <p className="text-sm font-semibold text-amber-300">
+              {allFailed
+                ? "Live signal pass failed"
+                : `${failedBuckets.length} of 5 signal scans failed`}
+            </p>
+            <p className="mt-0.5 break-words text-xs leading-relaxed text-amber-200/80">
+              {failedBuckets.map((b) => `${bucketLabel(b)}: ${bucketErrors[b]}`).join(" · ")}
+            </p>
           </div>
           <button
             onClick={onRetry}
@@ -114,7 +130,7 @@ export function SignalFeed({
       )}
 
       {/* Account prioritization */}
-      {!loading && <AccountPriority signals={signals} onSelect={onSelectCompany} />}
+      {signals.length > 0 && <AccountPriority signals={signals} onSelect={onSelectCompany} />}
 
       {/* Feed header */}
       <div className="flex items-center justify-between">
@@ -132,10 +148,10 @@ export function SignalFeed({
       </div>
 
       {/* Feed */}
-      {loading ? (
+      {booting ? (
         <div className="space-y-4">
           <p className="font-mono text-xs text-neon-400">
-            ▸ searching hiring posts, OSS activity, M&A wires, funding news…
+            ▸ running 5 parallel scans: hiring, OSS, M&A, funding, AI tooling…
           </p>
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="rounded-lg border border-ink-700 bg-ink-900 p-5">
@@ -149,7 +165,7 @@ export function SignalFeed({
             </div>
           ))}
         </div>
-      ) : sorted.length === 0 && !error ? (
+      ) : sorted.length === 0 && failedBuckets.length === 0 ? (
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
           <p className="text-sm text-ink-400">
             No live signals match the current filters. Clear a segment, signal-type or
@@ -158,6 +174,11 @@ export function SignalFeed({
         </div>
       ) : (
         <div className="space-y-4">
+          {pendingBuckets.length > 0 && (
+            <p className="animate-pulse-dot font-mono text-xs text-neon-400">
+              ▸ still scanning: {pendingBuckets.map(bucketLabel).join(", ")}…
+            </p>
+          )}
           {sorted.map((s) => (
             <SignalCard key={s.id} signal={s} onSelect={onSelectCompany} />
           ))}
