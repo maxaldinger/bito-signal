@@ -1,12 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Header } from "@/components/Header";
 import { Sidebar, type TabId } from "@/components/Sidebar";
 import { SignalFeed } from "@/components/SignalFeed";
 import { SalesAssist } from "@/components/SalesAssist";
-import { CompanyIntel } from "@/components/CompanyIntel";
 import {
   SEGMENTS,
   SIGNAL_TYPES,
@@ -270,7 +268,6 @@ export default function Page() {
     setIntelError(null);
     setIntelLoading(true);
     setTab("feed");
-    window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       const res = await fetch(`/api/intel?company=${encodeURIComponent(company)}`);
       if (reqId !== intelReqId.current) return;
@@ -350,20 +347,7 @@ export default function Page() {
 
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto max-w-5xl">
-            {selected ? (
-              intelLoading ? (
-                <IntelSkeleton company={selected} />
-              ) : intelError || !intel ? (
-                <IntelError
-                  company={selected}
-                  error={intelError || "No brief returned."}
-                  onRetry={() => getIntel(selected)}
-                  onBack={clearSelection}
-                />
-              ) : (
-                <CompanyIntel intel={intel} onBack={clearSelection} />
-              )
-            ) : tab === "feed" ? (
+            {tab === "feed" ? (
               <SignalFeed
                 signals={filtered}
                 loading={feedLoading}
@@ -391,93 +375,17 @@ export default function Page() {
                 onRetry={refresh}
                 onPullMore={runPull}
                 onPage={(p) => loadHistory(p)}
+                expandedCompany={selected}
+                intel={intel}
+                intelLoading={intelLoading}
+                intelError={intelError}
+                onCloseIntel={clearSelection}
               />
             ) : (
               <SalesAssist />
             )}
           </div>
         </main>
-      </div>
-    </div>
-  );
-}
-
-const LOADING_LINES = [
-  "▸ searching news, engineering blogs, job boards…",
-  "▸ estimating SWE headcount and codebase complexity…",
-  "▸ scoring ICP fit across five criteria…",
-  "▸ mapping stakeholders — who feels the pain vs who signs…",
-  "▸ estimating AI-tooling cost exposure…",
-  "▸ drafting the outreach angle…",
-];
-
-function IntelSkeleton({ company }: { company: string }) {
-  const [lineIdx, setLineIdx] = useState(0);
-  useEffect(() => {
-    const i = setInterval(
-      () => setLineIdx((n) => (n + 1) % LOADING_LINES.length),
-      2600,
-    );
-    return () => clearInterval(i);
-  }, []);
-
-  return (
-    <div className="space-y-5">
-      <div className="skeleton h-4 w-32 rounded" />
-      <div className="skeleton h-9 w-72 rounded-lg" />
-      <p className="font-mono text-sm text-neon-400">
-        researching {company} live — {LOADING_LINES[lineIdx]}
-      </p>
-      <p className="font-mono text-xs text-ink-500">
-        claude-sonnet-4 + web_search · typically 30-60s
-      </p>
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="rounded-lg border border-ink-700 bg-ink-900 p-6">
-          <div className="skeleton mb-4 h-4 w-40 rounded" />
-          <div className="skeleton mb-2 h-4 w-full rounded" />
-          <div className="skeleton mb-2 h-4 w-5/6 rounded" />
-          <div className="skeleton h-4 w-2/3 rounded" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function IntelError({
-  company,
-  error,
-  onRetry,
-  onBack,
-}: {
-  company: string;
-  error: string;
-  onRetry: () => void;
-  onBack: () => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <button
-        onClick={onBack}
-        className="text-sm text-ink-400 transition-colors hover:text-ink-50"
-      >
-        ← Back to Signal Feed
-      </button>
-      <div className="flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-5">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-red-300">
-            Intel brief for {company} failed
-          </p>
-          <p className="mt-1 break-words text-xs leading-relaxed text-red-200/80">
-            {error}
-          </p>
-        </div>
-        <button
-          onClick={onRetry}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded border border-red-500/40 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/15"
-        >
-          <RefreshCw className="h-3.5 w-3.5" /> Retry
-        </button>
       </div>
     </div>
   );

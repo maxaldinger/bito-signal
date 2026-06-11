@@ -8,6 +8,7 @@ import {
   Cpu,
   Crosshair,
   ArrowRight,
+  ChevronUp,
   ExternalLink,
   type LucideIcon,
 } from "lucide-react";
@@ -43,9 +44,12 @@ function StrengthBar({ value, color }: { value: number; color: string }) {
 export function SignalCard({
   signal,
   onSelect,
+  expanded = false,
 }: {
   signal: Signal;
   onSelect: (company: string) => void;
+  /** Whether this card's inline brief is currently expanded beneath it. */
+  expanded?: boolean;
 }) {
   const type = SIGNAL_TYPE_MAP[signal.type];
   const Icon = TYPE_ICON[signal.type];
@@ -53,7 +57,11 @@ export function SignalCard({
   const segment = SEGMENT_MAP[signal.segment];
 
   return (
-    <div className="animate-fade-in rounded-lg border border-ink-700 bg-ink-900 p-5 transition-colors hover:border-ink-600">
+    <div
+      className={`animate-fade-in rounded-lg border bg-ink-900 p-5 transition-colors ${
+        expanded ? "border-neon-600/40" : "border-ink-700 hover:border-ink-600"
+      }`}
+    >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -121,9 +129,21 @@ export function SignalCard({
           )}
           <button
             onClick={() => onSelect(signal.account)}
-            className="inline-flex items-center gap-1 rounded border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:bg-ink-800 hover:text-ink-50"
+            className={`inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${
+              expanded
+                ? "border-neon-600/40 bg-neon-500/10 text-neon-300 hover:bg-neon-500/20"
+                : "border-ink-700 text-ink-300 hover:border-neon-600/40 hover:bg-ink-800 hover:text-ink-50"
+            }`}
           >
-            View Brief <ArrowRight className="h-3.5 w-3.5" />
+            {expanded ? (
+              <>
+                Close Brief <ChevronUp className="h-3.5 w-3.5" />
+              </>
+            ) : (
+              <>
+                View Brief <ArrowRight className="h-3.5 w-3.5" />
+              </>
+            )}
           </button>
         </div>
       </div>

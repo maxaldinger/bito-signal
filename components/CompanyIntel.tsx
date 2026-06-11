@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  ArrowLeft,
+  X,
   Target,
   Zap,
   AlertTriangle,
@@ -153,7 +153,7 @@ export function CompanyIntel({
         onClick={onBack}
         className="mb-1 inline-flex items-center gap-1.5 text-sm text-ink-400 transition-colors hover:text-ink-50"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to Signal Feed
+        <X className="h-4 w-4" /> Close brief
       </button>
 
       {/* Title row */}

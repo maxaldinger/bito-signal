@@ -216,3 +216,27 @@ input[type="range"]::-moz-range-thumb {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Inline brief expansion — the grid-rows trick animates to unknown content
+   heights smoothly (height:auto can't be transitioned). */
+.expander {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.expander-open {
+  grid-template-rows: 1fr;
+}
+.expander > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expander {
+    transition: none;
+  }
+  .animate-fade-in {
+    animation: none;
+  }
+}

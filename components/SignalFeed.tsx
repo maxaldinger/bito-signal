@@ -17,11 +17,12 @@ import {
   DownloadCloud,
   Loader2,
 } from "lucide-react";
-import type { Signal, SignalTypeId } from "@/lib/types";
+import type { Signal, SignalTypeId, CompanyIntel as Intel } from "@/lib/types";
 import { SIGNAL_TYPE_MAP } from "@/lib/data";
 import { MetricCard } from "./MetricCard";
 import { SignalCard } from "./SignalCard";
 import { AccountPriority } from "./AccountPriority";
+import { IntelExpander } from "./IntelExpander";
 
 export function SignalFeed({
   signals,
@@ -44,6 +45,11 @@ export function SignalFeed({
   onRetry,
   onPullMore,
   onPage,
+  expandedCompany,
+  intel,
+  intelLoading,
+  intelError,
+  onCloseIntel,
 }: {
   signals: Signal[];
   loading: boolean;
@@ -66,6 +72,11 @@ export function SignalFeed({
   onRetry: () => void;
   onPullMore: () => void;
   onPage: (p: number) => void;
+  expandedCompany: string | null;
+  intel: Intel | null;
+  intelLoading: boolean;
+  intelError: string | null;
+  onCloseIntel: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"feed" | "fit" | "recent">("feed");
@@ -83,6 +94,27 @@ export function SignalFeed({
   const nextSort = sort === "feed" ? "fit" : sort === "fit" ? "recent" : "feed";
 
   const submit = (c: string) => c.trim() && onGetIntel(c.trim());
+
+  // Toggle semantics: clicking the expanded company again closes its brief.
+  const toggleCompany = (account: string) =>
+    account === expandedCompany ? onCloseIntel() : onSelectCompany(account);
+
+  // The expander renders beneath the FIRST card for the expanded company;
+  // a searched company with no card on this page expands at the top.
+  const expandAfterIdx = expandedCompany
+    ? sorted.findIndex((s) => s.account === expandedCompany)
+    : -1;
+  const expanderEl = expandedCompany ? (
+    <IntelExpander
+      key={expandedCompany}
+      company={expandedCompany}
+      intel={intel}
+      loading={intelLoading}
+      error={intelError}
+      onClose={onCloseIntel}
+      onRetry={() => onGetIntel(expandedCompany)}
+    />
+  ) : null;
 
   // Booting = nothing has landed yet; afterwards cards render progressively
   // while remaining buckets are still scanning.
@@ -184,8 +216,11 @@ export function SignalFeed({
         </div>
       )}
 
+      {/* Searched company with no card on this page — brief expands here */}
+      {expandedCompany && expandAfterIdx === -1 && expanderEl}
+
       {/* Account prioritization */}
-      {signals.length > 0 && <AccountPriority signals={signals} onSelect={onSelectCompany} />}
+      {signals.length > 0 && <AccountPriority signals={signals} onSelect={toggleCompany} />}
 
       {/* Feed header — pagination + pull controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ink-700 bg-ink-900 px-4 py-3">
@@ -298,8 +333,15 @@ export function SignalFeed({
               ▸ still scanning: {pendingBuckets.map(bucketLabel).join(", ")}…
             </p>
           )}
-          {sorted.map((s) => (
-            <SignalCard key={s.id} signal={s} onSelect={onSelectCompany} />
+          {sorted.map((s, i) => (
+            <div key={s.id}>
+              <SignalCard
+                signal={s}
+                onSelect={toggleCompany}
+                expanded={s.account === expandedCompany}
+              />
+              {i === expandAfterIdx && expanderEl}
+            </div>
           ))}
         </div>
       )}
