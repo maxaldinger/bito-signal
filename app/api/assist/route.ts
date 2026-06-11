@@ -5,7 +5,7 @@ import { BITO_CONTEXT } from "@/lib/bito";
 // Sales Assist — chat-style helper for Bito reps. Four modes, all grounded:
 // "research" leans hard on web_search; the others may search lightly to
 // personalize (e.g. checking a prospect's latest news before an email).
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 const MODES: Record<string, { instruction: string; maxSearches: number }> = {
   ask: {

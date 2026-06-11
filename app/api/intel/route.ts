@@ -14,7 +14,7 @@ import type {
 // Live Intel Brief: claude-sonnet-4 researches the company on the open web,
 // then emits the full CompanyIntel JSON. Nothing is templated or canned —
 // the model must ground every section in what it actually found.
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 const VALID_SEGMENTS: SegmentId[] = [
   "saas",

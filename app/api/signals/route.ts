@@ -11,7 +11,9 @@ import type { Signal, SignalTypeId, SegmentId } from "@/lib/types";
 // would call Anthropic at build time). CDN caching is handled by the
 // Cache-Control header below; "Refresh" in the UI bypasses it.
 export const dynamic = "force-dynamic";
-export const maxDuration = 90;
+// A full live pass (up to 8 web searches + a long structured response) can run
+// well past 90s — use the platform maximum (300s on all Vercel plans).
+export const maxDuration = 300;
 
 const VALID_TYPES: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai"];
 const VALID_SEGMENTS: SegmentId[] = [
