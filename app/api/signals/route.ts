@@ -113,7 +113,7 @@ const BUCKET_BRIEFS: Record<SearchBucket, string> = {
 // Region scoping — the whole feed is one region at a time.
 const REGION_RULES: Record<RegionId, string> = {
   us: "Prefer companies headquartered in the US/EU with English-language sources.",
-  in: 'ONLY companies headquartered in India, or a global company\'s India engineering arm / GCC when the signal is specifically about the India org (e.g. "Walmart Global Tech India"). Indian tech press (YourStory, Inc42, ET Tech, Moneycontrol, Entrackr) are first-class sources. Use the India entity\'s name as "account" when the signal is about a GCC.',
+  in: "ONLY companies headquartered in India — the buyer must be an Indian company an India-based sales team can call into. EXCLUDE foreign-headquartered companies even when the story is about their India engineering center or GCC (e.g. a US startup 'expanding engineering in India' does NOT qualify). Indian tech press (YourStory, Inc42, ET Tech, Moneycontrol, Entrackr) are first-class sources.",
 };
 
 const sharedRules = (region: RegionId) => `Hard rules:
