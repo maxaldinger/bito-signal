@@ -12,14 +12,18 @@ const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "assist", label: "Sales Assist", icon: Sparkles },
 ];
 
-// Section heading with an optional "clear" affordance when filters are active.
+// Section heading with "all" / "clear" affordances.
 function FilterHeading({
   label,
   activeCount,
+  optionCount,
+  onSelectAll,
   onClear,
 }: {
   label: string;
   activeCount: number;
+  optionCount: number;
+  onSelectAll: () => void;
   onClear: () => void;
 }) {
   return (
@@ -32,14 +36,24 @@ function FilterHeading({
           </span>
         )}
       </h3>
-      {activeCount > 0 && (
-        <button
-          onClick={onClear}
-          className="font-mono text-[10px] uppercase tracking-wider text-ink-500 transition-colors hover:text-neon-300"
-        >
-          clear
-        </button>
-      )}
+      <span className="flex items-center gap-2">
+        {activeCount < optionCount && (
+          <button
+            onClick={onSelectAll}
+            className="font-mono text-[10px] uppercase tracking-wider text-ink-500 transition-colors hover:text-neon-300"
+          >
+            all
+          </button>
+        )}
+        {activeCount > 0 && (
+          <button
+            onClick={onClear}
+            className="font-mono text-[10px] uppercase tracking-wider text-ink-500 transition-colors hover:text-neon-300"
+          >
+            clear
+          </button>
+        )}
+      </span>
     </div>
   );
 }
@@ -64,16 +78,16 @@ export function Sidebar({
   segmentCounts,
   selectedSegments,
   onToggleSegment,
-  onClearSegments,
+  onSetSegments,
   sweBandCounts,
   unknownSweCount,
   selectedSweBands,
   onToggleSweBand,
-  onClearSweBands,
+  onSetSweBands,
   signalCounts,
   selectedSignalTypes,
   onToggleSignalType,
-  onClearSignalTypes,
+  onSetSignalTypes,
   minStrength,
   onMinStrength,
 }: {
@@ -82,16 +96,16 @@ export function Sidebar({
   segmentCounts: Record<SegmentId, number>;
   selectedSegments: SegmentId[];
   onToggleSegment: (s: SegmentId) => void;
-  onClearSegments: () => void;
+  onSetSegments: (s: SegmentId[]) => void;
   sweBandCounts: Record<SweBandId, number>;
   unknownSweCount: number;
   selectedSweBands: SweBandId[];
   onToggleSweBand: (b: SweBandId) => void;
-  onClearSweBands: () => void;
+  onSetSweBands: (b: SweBandId[]) => void;
   signalCounts: Record<SignalTypeId, number>;
   selectedSignalTypes: SignalTypeId[];
   onToggleSignalType: (s: SignalTypeId) => void;
-  onClearSignalTypes: () => void;
+  onSetSignalTypes: (s: SignalTypeId[]) => void;
   minStrength: number;
   onMinStrength: (v: number) => void;
 }) {
@@ -129,7 +143,9 @@ export function Sidebar({
         <FilterHeading
           label="segments"
           activeCount={selectedSegments.length}
-          onClear={onClearSegments}
+          optionCount={SEGMENTS.length}
+          onSelectAll={() => onSetSegments(SEGMENTS.map((s) => s.id))}
+          onClear={() => onSetSegments([])}
         />
         <div className="flex flex-col gap-0.5">
           {SEGMENTS.map((seg) => {
@@ -171,7 +187,9 @@ export function Sidebar({
         <FilterHeading
           label="eng team size"
           activeCount={selectedSweBands.length}
-          onClear={onClearSweBands}
+          optionCount={SWE_BANDS.length}
+          onSelectAll={() => onSetSweBands(SWE_BANDS.map((b) => b.id))}
+          onClear={() => onSetSweBands([])}
         />
         <div className="flex flex-col gap-0.5">
           {SWE_BANDS.map((band) => {
@@ -214,7 +232,9 @@ export function Sidebar({
         <FilterHeading
           label="signal types"
           activeCount={selectedSignalTypes.length}
-          onClear={onClearSignalTypes}
+          optionCount={SIGNAL_TYPES.length}
+          onSelectAll={() => onSetSignalTypes(SIGNAL_TYPES.map((t) => t.id))}
+          onClear={() => onSetSignalTypes([])}
         />
         <div className="flex flex-col gap-0.5">
           {SIGNAL_TYPES.map((st) => {

@@ -335,16 +335,16 @@ export default function Page() {
           segmentCounts={segmentCounts}
           selectedSegments={segments}
           onToggleSegment={(id) => setSegments((prev) => toggleIn(prev, id))}
-          onClearSegments={() => setSegments([])}
+          onSetSegments={setSegments}
           sweBandCounts={sweBandCounts}
           unknownSweCount={unknownSweCount}
           selectedSweBands={bands}
           onToggleSweBand={(id) => setBands((prev) => toggleIn(prev, id))}
-          onClearSweBands={() => setBands([])}
+          onSetSweBands={setBands}
           signalCounts={signalCounts}
           selectedSignalTypes={types}
           onToggleSignalType={(id) => setTypes((prev) => toggleIn(prev, id))}
-          onClearSignalTypes={() => setTypes([])}
+          onSetSignalTypes={setTypes}
           minStrength={minStrength}
           onMinStrength={setMinStrength}
         />
