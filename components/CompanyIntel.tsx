@@ -16,6 +16,7 @@ import {
   ArrowUpRight,
   Copy,
   Check,
+  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 import type { CompanyIntel as Intel, Stakeholder } from "@/lib/types";
@@ -110,9 +111,12 @@ function StakeholderCard({ s, company }: { s: Stakeholder; company: string }) {
 export function CompanyIntel({
   intel,
   onBack,
+  onRefresh,
 }: {
   intel: Intel;
   onBack: () => void;
+  /** Force-regenerate this brief (bypasses the cache). */
+  onRefresh?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -149,12 +153,23 @@ export function CompanyIntel({
 
   return (
     <div className="space-y-5">
-      <button
-        onClick={onBack}
-        className="mb-1 inline-flex items-center gap-1.5 text-sm text-ink-400 transition-colors hover:text-ink-50"
-      >
-        <X className="h-4 w-4" /> Close brief
-      </button>
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <button
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 text-sm text-ink-400 transition-colors hover:text-ink-50"
+        >
+          <X className="h-4 w-4" /> Close brief
+        </button>
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            title="Re-run the live research and replace this cached brief"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 px-3 py-1.5 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-300"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Update brief
+          </button>
+        )}
+      </div>
 
       {/* Title row */}
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -184,7 +199,8 @@ export function CompanyIntel({
             )}
           </div>
           <p className="mt-2 font-mono text-[11px] text-ink-500">
-            generated {new Date(intel.generatedAt).toLocaleString("en-US")} · live web research
+            generated {new Date(intel.generatedAt).toLocaleString("en-US")} · live web
+            research · cached until updated
           </p>
         </div>
         <div className="text-right">

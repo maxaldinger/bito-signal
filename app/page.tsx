@@ -261,7 +261,7 @@ export default function Page() {
     };
   }, [filtered]);
 
-  const getIntel = useCallback(async (company: string) => {
+  const getIntel = useCallback(async (company: string, fresh = false) => {
     const reqId = ++intelReqId.current;
     setSelected(company);
     setIntel(null);
@@ -269,7 +269,9 @@ export default function Page() {
     setIntelLoading(true);
     setTab("feed");
     try {
-      const res = await fetch(`/api/intel?company=${encodeURIComponent(company)}`);
+      const res = await fetch(
+        `/api/intel?company=${encodeURIComponent(company)}${fresh ? "&fresh=1" : ""}`,
+      );
       if (reqId !== intelReqId.current) return;
       const data = await readJson(res);
       if (reqId !== intelReqId.current) return;
@@ -380,6 +382,7 @@ export default function Page() {
                 intelLoading={intelLoading}
                 intelError={intelError}
                 onCloseIntel={clearSelection}
+                onRefreshIntel={(c) => getIntel(c, true)}
               />
             ) : (
               <SalesAssist />

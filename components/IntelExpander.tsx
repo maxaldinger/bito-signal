@@ -26,6 +26,7 @@ export function IntelExpander({
   error,
   onClose,
   onRetry,
+  onRefresh,
 }: {
   company: string;
   intel: Intel | null;
@@ -33,6 +34,7 @@ export function IntelExpander({
   error: string | null;
   onClose: () => void;
   onRetry: () => void;
+  onRefresh: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -72,7 +74,7 @@ export function IntelExpander({
             />
           ) : (
             <>
-              <CompanyIntel intel={intel} onBack={close} />
+              <CompanyIntel intel={intel} onBack={close} onRefresh={onRefresh} />
               <button
                 onClick={close}
                 className="mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-ink-700 py-2.5 text-sm font-medium text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100"

@@ -50,6 +50,7 @@ export function SignalFeed({
   intelLoading,
   intelError,
   onCloseIntel,
+  onRefreshIntel,
 }: {
   signals: Signal[];
   loading: boolean;
@@ -77,6 +78,7 @@ export function SignalFeed({
   intelLoading: boolean;
   intelError: string | null;
   onCloseIntel: () => void;
+  onRefreshIntel: (company: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"feed" | "fit" | "recent">("feed");
@@ -113,6 +115,7 @@ export function SignalFeed({
       error={intelError}
       onClose={onCloseIntel}
       onRetry={() => onGetIntel(expandedCompany)}
+      onRefresh={() => onRefreshIntel(expandedCompany)}
     />
   ) : null;
 

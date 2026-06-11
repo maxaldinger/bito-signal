@@ -7,7 +7,7 @@
 // Unconfigured deployments degrade gracefully: callers get configured:false
 // and the feed falls back to ephemeral (scan-only) mode.
 
-import type { Signal, SegmentId, SignalTypeId } from "./types";
+import type { CompanyIntel, Signal, SegmentId, SignalTypeId } from "./types";
 
 const TIMEOUT_MS = 10_000;
 
@@ -159,6 +159,71 @@ export async function countSignalsByType(type: SignalTypeId): Promise<number> {
     return Number(range.split("/")[1]) || 0;
   } catch {
     return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Intel-brief cache (public.bito_briefs) — one row per company. A generated
+// brief persists until the user clicks "Update brief".
+// ---------------------------------------------------------------------------
+
+const briefKey = (company: string) => company.trim().toLowerCase();
+
+export async function fetchBrief(company: string): Promise<CompanyIntel | null> {
+  const cfg = config();
+  if (!cfg) return null;
+  try {
+    const res = await fetch(
+      `${cfg.url}/rest/v1/bito_briefs?select=intel&company_key=eq.${encodeURIComponent(briefKey(company))}&limit=1`,
+      {
+        headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}` },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return null;
+    const rows = (await res.json()) as { intel: CompanyIntel }[];
+    return rows[0]?.intel ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function upsertBrief(
+  company: string,
+  intel: CompanyIntel,
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = config();
+  if (!cfg) return { ok: false, error: "Supabase not configured" };
+  try {
+    const res = await fetch(`${cfg.url}/rest/v1/bito_briefs?on_conflict=company_key`, {
+      method: "POST",
+      headers: {
+        apikey: cfg.key,
+        Authorization: `Bearer ${cfg.key}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify([
+        {
+          company_key: briefKey(company),
+          company: company.trim(),
+          intel,
+          generated_at: new Date().toISOString(),
+        },
+      ]),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).slice(0, 200);
+      return { ok: false, error: `Supabase brief upsert ${res.status}: ${detail}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      error: `Supabase brief upsert failed: ${e instanceof Error ? e.message : String(e)}`,
+    };
   }
 }
 

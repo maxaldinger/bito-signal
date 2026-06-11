@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import { SEGMENT_MAP } from "@/lib/data";
+import { fetchBrief, upsertBrief, supabaseConfigured } from "@/lib/supabase";
 import type {
   CompanyIntel,
   ICPScore,
@@ -153,6 +154,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing ?company=" }, { status: 400 });
   }
 
+  // Cache-first: a previously generated brief returns instantly. ?fresh=1
+  // (the "Update brief" button) skips the cache and regenerates.
+  const fresh = req.nextUrl.searchParams.get("fresh") === "1";
+  if (!fresh && supabaseConfigured()) {
+    const cached = await fetchBrief(company);
+    if (cached) {
+      return NextResponse.json(
+        { intel: cached, cached: true },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+  }
+
   try {
     const result = await callClaudeWithWebSearch({
       system: SYSTEM,
@@ -301,13 +315,17 @@ export async function GET(req: NextRequest) {
       citations: Array.from(citations.values()).slice(0, 16),
     };
 
+    // Persist for instant future opens, keyed on the REQUESTED name — that's
+    // what the next click looks up (the model may canonicalize differently).
+    // The DB is the cache now — keep the CDN out of it so "Update brief" is
+    // never masked by a stale edge copy.
+    if (supabaseConfigured()) {
+      await upsertBrief(company, intel);
+    }
+
     return NextResponse.json(
-      { intel, searchCount: result.searchCount },
-      {
-        headers: {
-          "Cache-Control": "public, s-maxage=1800, stale-while-revalidate=43200",
-        },
-      },
+      { intel, cached: false, searchCount: result.searchCount },
+      { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
     const message =
