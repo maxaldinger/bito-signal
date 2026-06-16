@@ -84,9 +84,27 @@ export function SignalCard({
   return (
     <div
       className={`animate-fade-in rounded-lg border bg-ink-900 p-5 transition-colors ${
-        expanded ? "border-neon-600/40" : "border-ink-700 hover:border-ink-600"
+        prospected
+          ? "border-neon-500/60 ring-1 ring-neon-500/40"
+          : expanded
+            ? "border-neon-600/40"
+            : "border-ink-700 hover:border-ink-600"
       }`}
     >
+      {prospected && (
+        <div
+          title="Already prospected — a HubSpot task exists for this company or one of its contacts"
+          className="mb-3 flex items-center gap-2 rounded-md border border-neon-500/40 bg-neon-500/15 px-3 py-2"
+        >
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
+            <Check className="h-4 w-4" strokeWidth={3.5} />
+          </span>
+          <span className="font-mono text-xs font-semibold uppercase tracking-wide text-neon-200">
+            Prospected · sent to HubSpot
+          </span>
+        </div>
+      )}
+
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -99,14 +117,6 @@ export function SignalCard({
           <span className="rounded border border-ink-700 bg-ink-950 px-2 py-1 text-[11px] text-ink-400">
             {segment.label}
           </span>
-          {prospected && (
-            <span
-              title="A HubSpot task has been created for this company"
-              className="inline-flex items-center gap-1 rounded border border-neon-600/40 bg-neon-500/10 px-1.5 py-1 font-mono text-[10px] font-semibold text-neon-300"
-            >
-              <Check className="h-3 w-3" /> Prospected
-            </span>
-          )}
         </div>
         <StrengthBar value={score} color={color} fromBrief={briefScore !== undefined} />
       </div>

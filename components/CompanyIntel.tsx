@@ -236,16 +236,23 @@ function ApolloPersonCard({
   const contactProspected = useIsProspected("contact", person.apolloId || displayName);
 
   return (
-    <div className="rounded-lg border border-ink-700 bg-ink-950/50 p-4">
+    <div
+      className={`rounded-lg border bg-ink-950/50 p-4 ${
+        contactProspected ? "border-neon-500/50 ring-1 ring-neon-500/30" : "border-ink-700"
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
         <h4 className="min-w-0 truncate text-sm font-semibold text-ink-100">{displayName}</h4>
         <div className="flex shrink-0 items-center gap-1.5">
           {contactProspected && (
             <span
-              title="A HubSpot task has been created for this contact"
-              className="inline-flex items-center gap-0.5 rounded border border-neon-600/40 bg-neon-500/10 px-1 py-0.5 font-mono text-[9px] font-semibold text-neon-300"
+              title="Already prospected — a HubSpot task has been created for this contact"
+              className="inline-flex items-center gap-1 rounded-md border border-neon-500/40 bg-neon-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-neon-200"
             >
-              <Check className="h-2.5 w-2.5" /> Prospected
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
+                <Check className="h-2.5 w-2.5" strokeWidth={3.5} />
+              </span>
+              In HubSpot
             </span>
           )}
           {person.seniority && (
@@ -592,10 +599,13 @@ export function CompanyIntel({
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             {companyProspected && (
               <span
-                title="A HubSpot task has been created for this company"
-                className="inline-flex items-center gap-1 rounded border border-neon-600/40 bg-neon-500/15 px-2 py-0.5 font-mono text-xs font-semibold text-neon-300"
+                title="Already prospected — a HubSpot task exists for this company or one of its contacts"
+                className="inline-flex items-center gap-1.5 rounded-md border border-neon-500/40 bg-neon-500/15 px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-wide text-neon-200"
               >
-                <Check className="h-3 w-3" /> Prospected
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
+                  <Check className="h-3.5 w-3.5" strokeWidth={3.5} />
+                </span>
+                Prospected · sent to HubSpot
               </span>
             )}
             <span className="rounded border border-neon-600/30 bg-neon-500/10 px-2 py-0.5 font-mono text-xs font-medium text-neon-300">
