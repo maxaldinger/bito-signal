@@ -34,6 +34,7 @@ interface ApolloOrg {
 }
 
 interface ApolloPerson {
+  id?: string | null;
   name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
@@ -121,6 +122,7 @@ function toContact(p: ApolloPerson): EnrichContact | undefined {
       : undefined;
   return {
     name,
+    apolloId: str(p.id),
     title: str(p.title),
     email,
     emailStatus: str(p.email_status),
@@ -299,16 +301,22 @@ interface ApolloMatchPerson extends ApolloPerson {
 }
 
 /**
- * Reveal one contact field (email OR phone) for a single named person.
- * @param name      Full name of the person (from the stakeholder card).
- * @param opts.company / opts.domain  Used to disambiguate the right person.
- * @param opts.linkedinUrl  Strongest matcher when available.
+ * Reveal one contact field (email OR phone) for a single person.
+ * @param opts.id  Apollo person id — the exact, reliable matcher (from a prior
+ *   people search). Strongly preferred; name+company matching is a fuzzy fallback.
+ * @param opts.name  Full name, used only when no id is available.
+ * @param opts.company / opts.domain  Disambiguate the right person for name matching.
+ * @param opts.linkedinUrl  Strong matcher when available.
  * @param opts.reveal  Which field to spend a credit unlocking.
  */
-export async function apolloPersonContact(
-  name: string,
-  opts: { company?: string; domain?: string; linkedinUrl?: string; reveal: RevealKind }
-): Promise<ApolloPersonContact> {
+export async function apolloPersonContact(opts: {
+  id?: string;
+  name?: string;
+  company?: string;
+  domain?: string;
+  linkedinUrl?: string;
+  reveal: RevealKind;
+}): Promise<ApolloPersonContact> {
   const fail = (configured: boolean, error: string): ApolloPersonContact => ({
     configured,
     ok: false,
@@ -317,12 +325,19 @@ export async function apolloPersonContact(
 
   const key = process.env.APOLLO_API_KEY;
   if (!key) return fail(false, "APOLLO_API_KEY not set — add it to .env.local / Vercel env");
-  if (!name) return fail(true, "A person name is required for an Apollo lookup");
+  if (!opts.id && !opts.name)
+    return fail(true, "An Apollo person id or name is required for a lookup");
 
-  const qs = new URLSearchParams({ name });
-  if (opts.linkedinUrl) qs.set("linkedin_url", opts.linkedinUrl);
-  if (opts.domain) qs.set("domain", opts.domain);
-  if (opts.company) qs.set("organization_name", opts.company);
+  const qs = new URLSearchParams();
+  if (opts.id) {
+    // Exact match — no obfuscation, no wrong-person risk.
+    qs.set("id", opts.id);
+  } else {
+    if (opts.name) qs.set("name", opts.name);
+    if (opts.linkedinUrl) qs.set("linkedin_url", opts.linkedinUrl);
+    if (opts.domain) qs.set("domain", opts.domain);
+    if (opts.company) qs.set("organization_name", opts.company);
+  }
   if (opts.reveal === "email") qs.set("reveal_personal_emails", "true");
   else qs.set("reveal_phone_number", "true");
 
@@ -340,16 +355,16 @@ export async function apolloPersonContact(
   if (status !== 200) return fail(true, statusError(status, "people match"));
 
   const person = (body as { person?: ApolloMatchPerson } | undefined)?.person;
-  if (!person) return fail(true, `Apollo: no person matched for "${name}"`);
+  if (!person)
+    return fail(true, `Apollo: no person matched for "${opts.name ?? opts.id ?? "?"}"`);
 
   const fullName =
     str(person.name) ??
-    [str(person.first_name), str(person.last_name)].filter(Boolean).join(" ") ??
-    name;
+    [str(person.first_name), str(person.last_name)].filter(Boolean).join(" ");
   const base: ApolloPersonContact = {
     configured: true,
     ok: true,
-    name: fullName || name,
+    name: fullName || opts.name,
     title: str(person.title),
     linkedinUrl: str(person.linkedin_url),
   };
@@ -384,6 +399,83 @@ export async function apolloPersonContact(
         "Apollo matched the person but returned no phone number (may be delivered async / plan-gated)",
     };
   return { ...base, phone };
+}
+
+// ---------------------------------------------------------------------------
+// People-by-title search — free (no credits), returns REAL engineering leaders
+// with stable Apollo ids. Last names arrive obfuscated ("Go***l") on every plan;
+// the per-person reveal (apolloPersonContact by id) un-obfuscates on demand.
+// This is what drives the stakeholder cards in a deep dive.
+// ---------------------------------------------------------------------------
+
+export interface ApolloPeopleResult {
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  /** Resolved org name Apollo matched (may differ from the query). */
+  orgName?: string;
+  people: EnrichContact[];
+}
+
+/**
+ * Find engineering-leadership people at a company by title. Resolves the org
+ * from `domain` (preferred — direct, no extra call) or by `company` name.
+ */
+export async function apolloPeopleByTitle(
+  company: string,
+  domain?: string
+): Promise<ApolloPeopleResult> {
+  const fail = (configured: boolean, error: string): ApolloPeopleResult => ({
+    configured,
+    ok: false,
+    error,
+    people: [],
+  });
+
+  const key = process.env.APOLLO_API_KEY;
+  if (!key) return fail(false, "APOLLO_API_KEY not set — add it to .env.local / Vercel env");
+  if (!company && !domain) return fail(true, "Pass a company name and/or domain");
+
+  let orgId: string | undefined;
+  let orgDomain = domain;
+  let orgName: string | undefined;
+
+  // Without a domain we must resolve the org by name to get a filter handle.
+  if (!orgDomain) {
+    try {
+      const sq = new URLSearchParams({ q_organization_name: company, page: "1", per_page: "5" });
+      const { status, body } = await apolloJson(`${BASE}/mixed_companies/search?${sq}`, key, "POST");
+      if (status !== 200) return fail(true, statusError(status, "organization search"));
+      const orgs =
+        (body as { organizations?: ApolloOrg[]; accounts?: ApolloOrg[] } | undefined)
+          ?.organizations ?? [];
+      const exact = orgs.find((o) => normName(o.name ?? "") === normName(company)) ?? orgs[0];
+      if (!exact) return fail(true, `Apollo: company not found by name "${company}"`);
+      orgId = str(exact.id);
+      orgDomain = str(exact.primary_domain);
+      orgName = str(exact.name);
+    } catch (e) {
+      return fail(true, isTimeout(e) ? "Apollo org lookup timed out" : "Apollo org lookup failed");
+    }
+  }
+
+  try {
+    const qs = new URLSearchParams({ page: "1", per_page: "12" });
+    for (const t of ENG_LEADERSHIP_TITLES) qs.append("person_titles[]", t);
+    if (orgId) qs.append("organization_ids[]", orgId);
+    else if (orgDomain) qs.append("q_organization_domains_list[]", orgDomain);
+
+    const { status, body } = await apolloJson(`${BASE}/mixed_people/api_search?${qs}`, key, "POST");
+    if (status !== 200) return fail(true, statusError(status, "people search"));
+    const b = body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
+    const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])].slice(0, 12);
+    const people = raw.map(toContact).filter((c): c is EnrichContact => c !== undefined);
+    if (people.length === 0)
+      return { configured: true, ok: false, error: "No engineering leaders found", orgName, people: [] };
+    return { configured: true, ok: true, orgName, people };
+  } catch (e) {
+    return fail(true, isTimeout(e) ? "Apollo people search timed out" : "Apollo people search failed");
+  }
 }
 
 // ---------------------------------------------------------------------------

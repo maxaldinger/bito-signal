@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   X,
   Target,
@@ -27,7 +27,8 @@ import {
 // Rendered verbatim whenever the Kubernetes bonus signal is detected.
 const K8S_NOTE =
   "K8s shops typically run 10+ services across multiple repos — high probability of agent context failure without live knowledge graph. Strong Bito fit.";
-import type { CompanyIntel as Intel, Stakeholder } from "@/lib/types";
+import type { CompanyIntel as Intel } from "@/lib/types";
+import type { EnrichContact } from "@/lib/enrich/types";
 import { fmtUSD, fmtNum } from "@/lib/format";
 import { EnrichmentPanel } from "./EnrichmentPanel";
 
@@ -59,14 +60,6 @@ const SEVERITY_STYLE: Record<string, string> = {
   LOW: "bg-sky-500/15 text-sky-400",
 };
 
-const STAKEHOLDER_BADGE: Record<Stakeholder["type"], { label: string; cls: string }> = {
-  "feels-pain": { label: "feels the pain", cls: "bg-amber-500/15 text-amber-400" },
-  signs: { label: "signs", cls: "bg-neon-500/15 text-neon-300" },
-  champion: { label: "champion", cls: "bg-sky-500/15 text-sky-400" },
-  blocker: { label: "blocker", cls: "bg-red-500/15 text-red-400" },
-  influencer: { label: "influencer", cls: "bg-violet-500/15 text-violet-400" },
-};
-
 const ICP_BARS: { key: keyof Pick<
   Intel["icp"],
   "sweHeadcount" | "codebaseComplexity" | "multiRepo" | "scalingActivity" | "aiToolingSpend"
@@ -96,46 +89,70 @@ interface ApolloRevealResult {
   phone?: string;
 }
 
-function StakeholderCard({
-  s,
+interface ApolloRevealPayload extends ApolloRevealResult {
+  name?: string;
+}
+
+// Apollo's `seniority` (or title, as a fallback) splits real contacts into the
+// two columns the deep dive already uses: economic buyers vs. practitioners.
+const DECISION_SENIORITY = new Set([
+  "owner",
+  "founder",
+  "c_suite",
+  "partner",
+  "vp",
+  "head",
+  "director",
+]);
+
+function isDecisionMaker(c: EnrichContact): boolean {
+  const sen = (c.seniority || "").toLowerCase();
+  if (sen) return DECISION_SENIORITY.has(sen);
+  const t = (c.title || "").toLowerCase();
+  return /\b(cto|chief|vp|vice president|head|director)\b/.test(t);
+}
+
+function ApolloPersonCard({
+  person,
   company,
   domain,
 }: {
-  s: Stakeholder;
+  person: EnrichContact;
   company: string;
   domain?: string;
 }) {
-  const badge = STAKEHOLDER_BADGE[s.type];
-  const q = s.linkedinQuery || `${company} ${s.role}`;
-
-  // Apollo contact reveal — one in-flight kind at a time, per card.
+  // One in-flight reveal kind at a time, per card.
   const [loading, setLoading] = useState<RevealKind | null>(null);
-  const [result, setResult] = useState<Record<RevealKind, ApolloRevealResult | undefined>>({
+  const [result, setResult] = useState<Record<RevealKind, ApolloRevealPayload | undefined>>({
     email: undefined,
     phone: undefined,
   });
-
-  // Apollo matches on a specific person — without a real name it just returns a
-  // generic, emailless record, so the reveal buttons only make sense when the
-  // model surfaced a named person on this card.
-  const personName = s.name?.trim();
-  const canReveal = Boolean(personName);
+  // Apollo un-obfuscates the full name on reveal — swap it in when it arrives.
+  const [revealedName, setRevealedName] = useState<string | undefined>(undefined);
 
   const reveal = async (kind: RevealKind) => {
-    if (loading || !personName) return;
+    if (loading) return;
     setLoading(kind);
     setResult((r) => ({ ...r, [kind]: undefined }));
     try {
-      const params = new URLSearchParams({ name: personName, reveal: kind, company });
-      if (domain) params.set("domain", domain);
+      const params = new URLSearchParams({ reveal: kind });
+      // Match by id (exact, un-obfuscated); fall back to name if id is missing.
+      if (person.apolloId) {
+        params.set("id", person.apolloId);
+      } else {
+        params.set("name", person.name);
+        params.set("company", company);
+        if (domain) params.set("domain", domain);
+      }
       const res = await fetch(`/api/enrich/apollo/person?${params.toString()}`);
-      let data: ApolloRevealResult;
+      let data: ApolloRevealPayload;
       try {
-        data = (await res.json()) as ApolloRevealResult;
+        data = (await res.json()) as ApolloRevealPayload;
       } catch {
         data = { ok: false, error: `HTTP ${res.status} — ${res.statusText || "bad response"}` };
       }
       setResult((r) => ({ ...r, [kind]: data }));
+      if (data.ok && data.name) setRevealedName(data.name);
     } catch (e) {
       setResult((r) => ({
         ...r,
@@ -146,43 +163,40 @@ function StakeholderCard({
     }
   };
 
+  const displayName = revealedName || person.name;
+  const liQuery = `${company} ${revealedName || person.title || ""}`.trim();
   const emailRes = result.email;
   const phoneRes = result.phone;
 
   return (
     <div className="rounded-lg border border-ink-700 bg-ink-950/50 p-4">
       <div className="flex items-center justify-between gap-2">
-        <h4 className="min-w-0 truncate text-sm font-semibold text-ink-100">
-          {s.name ? `${s.name} — ${s.role}` : s.role}
-        </h4>
-        <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase ${badge.cls}`}>
-          {badge.label}
-        </span>
+        <h4 className="min-w-0 truncate text-sm font-semibold text-ink-100">{displayName}</h4>
+        {person.seniority && (
+          <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-ink-300">
+            {person.seniority.replace(/_/g, " ")}
+          </span>
+        )}
       </div>
-      <p className="mt-1.5 text-xs leading-relaxed text-ink-400">{s.rationale}</p>
-      <p className="mt-2 text-xs leading-relaxed text-ink-300">
-        <span className="font-semibold text-neon-300">Hook: </span>
-        {s.outreachHook}
-      </p>
+      {person.title && <p className="mt-1 text-xs text-ink-400">{person.title}</p>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <a
-          href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(q)}`}
+          href={
+            person.linkedinUrl ||
+            `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(liQuery)}`
+          }
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-xs font-medium text-neon-400 hover:text-neon-300"
         >
-          Find on LinkedIn <ArrowUpRight className="h-3 w-3" />
+          {person.linkedinUrl ? "LinkedIn" : "Find on LinkedIn"} <ArrowUpRight className="h-3 w-3" />
         </a>
         <button
           type="button"
           onClick={() => reveal("email")}
-          disabled={loading !== null || !canReveal}
-          title={
-            canReveal
-              ? "Pull a verified email for this person from Apollo (consumes a credit)"
-              : "No named person on this card — find them on LinkedIn first"
-          }
+          disabled={loading !== null}
+          title="Reveal a verified email for this person from Apollo (consumes a credit)"
           className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-sky-500/40 hover:text-sky-300 disabled:opacity-50"
         >
           {loading === "email" ? (
@@ -195,12 +209,8 @@ function StakeholderCard({
         <button
           type="button"
           onClick={() => reveal("phone")}
-          disabled={loading !== null || !canReveal}
-          title={
-            canReveal
-              ? "Pull a phone number for this person from Apollo (consumes a credit)"
-              : "No named person on this card — find them on LinkedIn first"
-          }
+          disabled={loading !== null}
+          title="Reveal a phone number for this person from Apollo (consumes a credit)"
           className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-violet-500/40 hover:text-violet-300 disabled:opacity-50"
         >
           {loading === "phone" ? (
@@ -245,6 +255,110 @@ function StakeholderCard({
   );
 }
 
+interface ApolloPeopleResponse {
+  ok: boolean;
+  error?: string;
+  orgName?: string;
+  people: EnrichContact[];
+}
+
+// Drives the stakeholder map from Apollo's live people-by-title search (real
+// people + ids), replacing the model's invented roles.
+function ApolloStakeholders({ company, domain }: { company: string; domain?: string }) {
+  const [data, setData] = useState<ApolloPeopleResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setData(null);
+
+    const params = new URLSearchParams({ company });
+    if (domain) params.set("domain", domain);
+
+    fetch(`/api/enrich/apollo/people?${params.toString()}`)
+      .then(async (res) => {
+        let body: ApolloPeopleResponse | { error?: string };
+        try {
+          body = await res.json();
+        } catch {
+          body = { error: `HTTP ${res.status} — ${res.statusText || "non-JSON response"}` };
+        }
+        if (cancelled) return;
+        if (!res.ok) {
+          setError((body as { error?: string }).error || `Apollo people lookup failed (${res.status})`);
+        } else {
+          setData(body as ApolloPeopleResponse);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e?.message || e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [company, domain]);
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <p className="font-mono text-xs text-sky-400">▸ searching Apollo for engineering stakeholders…</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="skeleton h-24 rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (error) return <p className="text-sm text-red-400">{error}</p>;
+  if (!data || data.people.length === 0) {
+    return <p className="text-xs text-ink-500">No engineering stakeholders surfaced from Apollo.</p>;
+  }
+
+  const decisionMakers = data.people.filter(isDecisionMaker);
+  const practitioners = data.people.filter((p) => !isDecisionMaker(p));
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      <div>
+        <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
+          signs / gates the deal
+        </p>
+        <div className="space-y-3">
+          {decisionMakers.length === 0 ? (
+            <p className="text-xs text-ink-500">None surfaced.</p>
+          ) : (
+            decisionMakers.map((p, i) => (
+              <ApolloPersonCard key={p.apolloId || i} person={p} company={company} domain={domain} />
+            ))
+          )}
+        </div>
+      </div>
+      <div>
+        <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-amber-400/90">
+          feels the pain
+        </p>
+        <div className="space-y-3">
+          {practitioners.length === 0 ? (
+            <p className="text-xs text-ink-500">None surfaced.</p>
+          ) : (
+            practitioners.map((p, i) => (
+              <ApolloPersonCard key={p.apolloId || i} person={p} company={company} domain={domain} />
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CompanyIntel({
   intel,
   onBack,
@@ -264,13 +378,6 @@ export function CompanyIntel({
       : friction.level === "Medium"
         ? "text-amber-400"
         : "text-red-400";
-
-  const painSide = intel.stakeholders.filter(
-    (s) => s.type === "feels-pain" || s.type === "champion",
-  );
-  const signSide = intel.stakeholders.filter(
-    (s) => s.type === "signs" || s.type === "blocker" || s.type === "influencer",
-  );
 
   const copyDraft = async () => {
     if (!navigator.clipboard) {
@@ -417,38 +524,13 @@ export function CompanyIntel({
         )}
       </Section>
 
-      {/* Stakeholder map */}
-      <Section title="stakeholder map" icon={Users} iconColor="text-sky-400">
-        <div className="grid gap-5 lg:grid-cols-2">
-          <div>
-            <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-amber-400/90">
-              feels the pain
-            </p>
-            <div className="space-y-3">
-              {painSide.length === 0 ? (
-                <p className="text-xs text-ink-500">None surfaced.</p>
-              ) : (
-                painSide.map((s, i) => (
-                  <StakeholderCard key={i} s={s} company={intel.name} domain={intel.domain} />
-                ))
-              )}
-            </div>
-          </div>
-          <div>
-            <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
-              signs / gates the deal
-            </p>
-            <div className="space-y-3">
-              {signSide.length === 0 ? (
-                <p className="text-xs text-ink-500">None surfaced.</p>
-              ) : (
-                signSide.map((s, i) => (
-                  <StakeholderCard key={i} s={s} company={intel.name} domain={intel.domain} />
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+      {/* Stakeholder map — real people, live from Apollo people search */}
+      <Section
+        title="suggested people to contact"
+        icon={Users}
+        iconColor="text-sky-400"
+      >
+        <ApolloStakeholders company={intel.name} domain={intel.domain} />
       </Section>
 
       {/* Token cost exposure */}

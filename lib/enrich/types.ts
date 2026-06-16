@@ -23,6 +23,8 @@ export interface ProviderResult<T> {
 
 export interface EnrichContact {
   name: string;
+  /** Apollo person id — the exact key used to reveal email/phone (no fuzzy match). */
+  apolloId?: string;
   title?: string;
   email?: string;
   /** e.g. "verified" | "guessed" | "unavailable" — provider's own wording. */
