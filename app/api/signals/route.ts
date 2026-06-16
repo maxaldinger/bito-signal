@@ -72,6 +72,8 @@ Cast a wide net beyond obvious tech companies. Retailers, automakers, industrial
 
 Be honest. If a signal isn't strong, give it a lower score and say why in the description. Do NOT fabricate signals. If you cannot find enough live signals, return fewer rather than inventing them.
 
+SWE ESTIMATE: Always fill "sweEstimate" with your best numeric estimate of the company's SOFTWARE-ENGINEER headcount (engineers specifically — not total employees) — never null. Base it on the evidence plus what's generally known about the company's size and segment: an early-stage startup has tens, a mid-market scale-up 100-500, a large enterprise several thousand. This is an explicit modeled ESTIMATE used only for rough sizing and filtering — it is NOT a stated fact, so keep it out of the "description" (which must stay grounded in the source) and never present the number as something the source said.
+
 Output ONLY a single JSON object — no prose, no code fences — matching this schema:
 {
   "signals": [
@@ -86,7 +88,7 @@ Output ONLY a single JSON object — no prose, no code fences — matching this 
       "source": "publisher / domain in plain English",
       "url": "https://primary-citation-url",
       "date": "YYYY-MM-DD of the underlying event",
-      "sweEstimate": number or null,
+      "sweEstimate": best-effort integer estimate of software-engineer headcount (REQUIRED — never null; see SWE ESTIMATE rule above),
       "codebaseHint": "short phrase or null"
     }
   ]
