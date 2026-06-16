@@ -28,6 +28,7 @@ const K8S_NOTE =
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { fmtUSD, fmtNum } from "@/lib/format";
+import { HubSpotActions } from "./HubSpotActions";
 
 function Section({
   title,
@@ -326,6 +327,22 @@ function ApolloPersonCard({
             ))}
         </div>
       )}
+
+      <div className="mt-3 border-t border-ink-800 pt-3">
+        <HubSpotActions
+          kind="contact"
+          name={displayName}
+          email={emailRes?.ok ? emailRes.email : undefined}
+          compact
+          defaultSubject={`Call ${displayName}${person.title ? ` (${person.title})` : ""} — ${company}`}
+          defaultBody={
+            `${displayName}${person.title ? `, ${person.title}` : ""} at ${company}. ` +
+            `Surfaced via Bito Signal as a prospect to reach.` +
+            `${person.seniority ? ` Seniority: ${person.seniority.replace(/_/g, " ")}.` : ""}` +
+            `${emailRes?.ok && emailRes.email ? ` Email: ${emailRes.email}.` : ""}`
+          }
+        />
+      </div>
     </div>
   );
 }
@@ -525,6 +542,22 @@ export function CompanyIntel({
           </p>
         </div>
       </div>
+
+      {/* HubSpot — check the account / create a task with the signal context */}
+      <HubSpotActions
+        kind="company"
+        name={intel.name}
+        domain={intel.domain}
+        defaultSubject={`Prospect ${intel.name} — Bito Signal (ICP ${intel.icp.total}/99)`}
+        defaultBody={
+          `${intel.name} — ${intel.segment.label}` +
+          `${intel.employeeBand ? `, ${intel.employeeBand} employees` : ""}` +
+          `${intel.sweEstimate ? `, ~${fmtNum(intel.sweEstimate)} SWEs` : ""}.\n` +
+          `${intel.oneLiner ? `${intel.oneLiner}\n` : ""}` +
+          `\nBito ICP fit: ${intel.icp.total}/99. ${intel.summary}` +
+          `${intel.whyBito.length ? `\n\nWhy Bito: ${intel.whyBito.slice(0, 2).join("; ")}` : ""}`
+        }
+      />
 
       {/* ICP breakdown */}
       <Section title="icp score breakdown" icon={Target} iconColor="text-neon-400">
