@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Search,
@@ -56,6 +56,8 @@ export function HubSpotActions({
   defaultSubject,
   defaultBody,
   compact = false,
+  autoCheck = false,
+  autoCheckDelayMs = 0,
 }: {
   kind: HsKind;
   name: string;
@@ -73,6 +75,10 @@ export function HubSpotActions({
   defaultBody: string;
   /** Smaller styling for use inside a contact card. */
   compact?: boolean;
+  /** Run the HubSpot lookup automatically when the component populates. */
+  autoCheck?: boolean;
+  /** Stagger auto-checks to stay under HubSpot's ~4 req/s search limit. */
+  autoCheckDelayMs?: number;
 }) {
   const [checking, setChecking] = useState(false);
   const [check, setCheck] = useState<SearchResp | null>(null);
@@ -103,6 +109,16 @@ export function HubSpotActions({
       setChecking(false);
     }
   };
+
+  // Auto-check on populate. Staggered (autoCheckDelayMs) so a deep dive's dozen
+  // contact cards don't fire at once and trip HubSpot's ~4 req/s search limit.
+  // Re-runs when the name/email sharpens (e.g. after an Apollo reveal).
+  useEffect(() => {
+    if (!autoCheck || (!name && !domain && !email)) return;
+    const t = setTimeout(() => void runCheck(), autoCheckDelayMs);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCheck, autoCheckDelayMs, kind, name, domain, email]);
 
   const btn = compact
     ? "inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors disabled:opacity-50"

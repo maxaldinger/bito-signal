@@ -126,11 +126,14 @@ function ApolloPersonCard({
   company,
   domain,
   ctx,
+  autoCheckDelayMs,
 }: {
   person: EnrichContact;
   company: string;
   domain?: string;
   ctx: ContactTaskContext;
+  /** Stagger this card's auto HubSpot check (HubSpot search caps ~4 req/s). */
+  autoCheckDelayMs: number;
 }) {
   // One in-flight reveal kind at a time, per card.
   const [loading, setLoading] = useState<RevealKind | null>(null);
@@ -363,6 +366,8 @@ function ApolloPersonCard({
           companyName={company}
           companyDomain={domain}
           compact
+          autoCheck
+          autoCheckDelayMs={autoCheckDelayMs}
           defaultSubject={`Call ${displayName}${person.title ? ` (${person.title})` : ""} — ${company}`}
           defaultBody={
             `WHO: ${displayName}${person.title ? ` — ${person.title}` : ""}` +
@@ -468,7 +473,14 @@ function ApolloStakeholders({
             <p className="text-xs text-ink-500">None surfaced.</p>
           ) : (
             decisionMakers.map((p, i) => (
-              <ApolloPersonCard key={p.apolloId || i} person={p} company={company} domain={domain} ctx={ctx} />
+              <ApolloPersonCard
+                key={p.apolloId || i}
+                person={p}
+                company={company}
+                domain={domain}
+                ctx={ctx}
+                autoCheckDelayMs={i * 300}
+              />
             ))
           )}
         </div>
@@ -482,7 +494,14 @@ function ApolloStakeholders({
             <p className="text-xs text-ink-500">None surfaced.</p>
           ) : (
             practitioners.map((p, i) => (
-              <ApolloPersonCard key={p.apolloId || i} person={p} company={company} domain={domain} ctx={ctx} />
+              <ApolloPersonCard
+                key={p.apolloId || i}
+                person={p}
+                company={company}
+                domain={domain}
+                ctx={ctx}
+                autoCheckDelayMs={(decisionMakers.length + i) * 300}
+              />
             ))
           )}
         </div>
@@ -614,6 +633,7 @@ export function CompanyIntel({
         kind="company"
         name={intel.name}
         domain={intel.domain}
+        autoCheck
         defaultSubject={`Prospect ${intel.name} — Bito Signal (ICP ${intel.icp.total}/99)`}
         defaultBody={
           `${intel.name} — ${intel.segment.label}` +
