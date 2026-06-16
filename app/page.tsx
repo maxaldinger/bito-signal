@@ -5,6 +5,7 @@ import { Header } from "@/components/Header";
 import { Sidebar, type TabId } from "@/components/Sidebar";
 import { SignalFeed } from "@/components/SignalFeed";
 import { SalesAssist } from "@/components/SalesAssist";
+import { PullControls, type FeedSort } from "@/components/PullControls";
 import {
   SEGMENTS,
   SIGNAL_TYPES,
@@ -91,6 +92,7 @@ export default function Page() {
   const [types, setTypes] = useState<SignalTypeId[]>([]);
   const [bands, setBands] = useState<SweBandId[]>([]);
   const [minStrength, setMinStrength] = useState(0);
+  const [sort, setSort] = useState<FeedSort>("feed");
   const [search, setSearch] = useState("");
 
   // ---- Live bucket scans (shared by both modes) -------------------------
@@ -304,6 +306,17 @@ export default function Page() {
     });
   }, [signals, minStrength, segments, types, bands, search]);
 
+  // Feed sort lives here (driven by the sidebar PullControls) so the order is
+  // applied once, upstream of the feed.
+  const sortedFiltered = useMemo(() => {
+    if (sort === "feed") return filtered;
+    return [...filtered].sort((a, b) =>
+      sort === "fit"
+        ? b.strength - a.strength
+        : new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
+  }, [filtered, sort]);
+
   const metrics = useMemo(() => {
     const accounts = new Set(filtered.map((s) => s.account));
     const avgFit = filtered.length
@@ -388,6 +401,24 @@ export default function Page() {
             setTab(t);
             clearSelection();
           }}
+          pullControls={
+            tab === "feed" ? (
+              <PullControls
+                cacheMode={cacheMode}
+                region={region}
+                page={page}
+                totalPages={totalPages}
+                totalCached={total}
+                signalCount={filtered.length}
+                updated={lastUpdated}
+                pulling={pulling}
+                sort={sort}
+                onSort={setSort}
+                onPullMore={runPull}
+                onPage={(p) => loadHistory(p)}
+              />
+            ) : null
+          }
           segmentCounts={segmentCounts}
           selectedSegments={segments}
           onToggleSegment={(id) => setSegments((prev) => toggleIn(prev, id))}
@@ -408,22 +439,35 @@ export default function Page() {
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto max-w-5xl">
             {tab === "feed" ? (
-              <SignalFeed
-                signals={filtered}
-                loading={feedLoading}
-                pulling={pulling}
-                cacheMode={cacheMode}
-                region={region}
-                page={page}
-                totalPages={totalPages}
-                totalCached={total}
-                pageSize={PAGE_SIZE}
-                historyError={historyError}
-                pendingBuckets={pendingBuckets}
-                bucketErrors={bucketErrors}
-                metrics={metrics}
-                updated={lastUpdated}
-                unfilteredCount={signals.length}
+              <>
+                {/* Mobile pull controls — the sidebar (and its copy) is desktop-only */}
+                <div className="mb-4 lg:hidden">
+                  <PullControls
+                    cacheMode={cacheMode}
+                    region={region}
+                    page={page}
+                    totalPages={totalPages}
+                    totalCached={total}
+                    signalCount={filtered.length}
+                    updated={lastUpdated}
+                    pulling={pulling}
+                    sort={sort}
+                    onSort={setSort}
+                    onPullMore={runPull}
+                    onPage={(p) => loadHistory(p)}
+                  />
+                </div>
+                <SignalFeed
+                  signals={sortedFiltered}
+                  loading={feedLoading}
+                  pulling={pulling}
+                  cacheMode={cacheMode}
+                  totalCached={total}
+                  historyError={historyError}
+                  pendingBuckets={pendingBuckets}
+                  bucketErrors={bucketErrors}
+                  metrics={metrics}
+                  unfilteredCount={signals.length}
                 onClearFilters={() => {
                   setSegments([]);
                   setTypes([]);
@@ -435,14 +479,14 @@ export default function Page() {
                 onGetIntel={getIntel}
                 onRetry={refresh}
                 onPullMore={runPull}
-                onPage={(p) => loadHistory(p)}
                 expandedCompany={selected}
                 intel={intel}
                 intelLoading={intelLoading}
                 intelError={intelError}
                 onCloseIntel={clearSelection}
                 onRefreshIntel={(c) => getIntel(c, true)}
-              />
+                />
+              </>
             ) : (
               <SalesAssist />
             )}

@@ -1,6 +1,7 @@
 "use client";
 
-import { Radio, Sparkles, Check, type LucideIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Radio, Sparkles, Check, SlidersHorizontal, ChevronDown, type LucideIcon } from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
 import type { SegmentId, SignalTypeId } from "@/lib/types";
 import { SegmentIcon } from "./SegmentIcon";
@@ -90,9 +91,12 @@ export function Sidebar({
   onSetSignalTypes,
   minStrength,
   onMinStrength,
+  pullControls,
 }: {
   activeTab: TabId;
   onTab: (t: TabId) => void;
+  /** Compact pull/pagination controls, rendered above the collapsible filters. */
+  pullControls?: ReactNode;
   segmentCounts: Record<SegmentId, number>;
   selectedSegments: SegmentId[];
   onToggleSegment: (s: SegmentId) => void;
@@ -109,6 +113,13 @@ export function Sidebar({
   minStrength: number;
   onMinStrength: (v: number) => void;
 }) {
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const activeFilterCount =
+    selectedSegments.length +
+    selectedSweBands.length +
+    selectedSignalTypes.length +
+    (minStrength > 0 ? 1 : 0);
+
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-ink-700 bg-ink-950 lg:flex">
       <div className="sticky top-[64px] flex h-[calc(100vh-64px)] flex-col overflow-y-auto p-4">
@@ -133,11 +144,31 @@ export function Sidebar({
           })}
         </nav>
 
-        <p className="mt-3 px-1 font-mono text-[10px] leading-relaxed text-ink-500">
-          filters stack — pick as many as you need
-        </p>
+        {/* Pull / pagination controls — sit above the collapsible filters */}
+        {pullControls && <div className="mt-3">{pullControls}</div>}
 
-        <div className="my-3 border-t border-ink-700" />
+        {/* Collapsible filters */}
+        <button
+          onClick={() => setFiltersOpen((o) => !o)}
+          className="mt-3 flex items-center justify-between rounded-lg px-1 py-1.5 text-ink-300 transition-colors hover:text-ink-50"
+        >
+          <span className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            filters
+            {activeFilterCount > 0 && (
+              <span className="rounded bg-neon-500/15 px-1 py-0.5 text-neon-300">
+                {activeFilterCount}
+              </span>
+            )}
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 text-ink-500 transition-transform ${filtersOpen ? "" : "-rotate-90"}`}
+          />
+        </button>
+
+        {filtersOpen && (
+          <div className="mt-2">
+        <div className="mb-3 border-t border-ink-700" />
 
         {/* Segments — multi-select */}
         <FilterHeading
@@ -285,6 +316,8 @@ export function Sidebar({
           <span>50</span>
           <span>100</span>
         </div>
+          </div>
+        )}
 
         <p className="mt-auto pt-6 text-center font-mono text-[10px] text-ink-500">
           built for bito.ai
