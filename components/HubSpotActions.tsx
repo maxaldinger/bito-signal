@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
   X,
 } from "lucide-react";
+import { markProspected } from "@/lib/clientStore";
 
 type HsKind = "company" | "contact";
 type HsTaskType = "CALL" | "EMAIL" | "TODO";
@@ -245,6 +246,12 @@ function TaskModal({
         data = { ok: false, error: `HTTP ${res.status}` };
       }
       setResult(data);
+      // Mark prospected so the company/contact is badged across the UI. A
+      // contact task also prospects its parent company.
+      if (data.ok) {
+        markProspected(kind, kind === "contact" ? apolloId || name : name);
+        if (kind === "contact" && companyName) markProspected("company", companyName);
+      }
     } catch (e) {
       setResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
     } finally {

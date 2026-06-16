@@ -29,6 +29,7 @@ import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { fmtUSD, fmtNum } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
+import { useIsProspected, setDeepDiveScore } from "@/lib/clientStore";
 
 function Section({
   title,
@@ -224,16 +225,27 @@ function ApolloPersonCard({
   const liQuery = `${company} ${revealedName || person.title || ""}`.trim();
   const emailRes = result.email;
   const phoneRes = result.phone;
+  const contactProspected = useIsProspected("contact", person.apolloId || displayName);
 
   return (
     <div className="rounded-lg border border-ink-700 bg-ink-950/50 p-4">
       <div className="flex items-center justify-between gap-2">
         <h4 className="min-w-0 truncate text-sm font-semibold text-ink-100">{displayName}</h4>
-        {person.seniority && (
-          <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-ink-300">
-            {person.seniority.replace(/_/g, " ")}
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {contactProspected && (
+            <span
+              title="A HubSpot task has been created for this contact"
+              className="inline-flex items-center gap-0.5 rounded border border-neon-600/40 bg-neon-500/10 px-1 py-0.5 font-mono text-[9px] font-semibold text-neon-300"
+            >
+              <Check className="h-2.5 w-2.5" /> Prospected
+            </span>
+          )}
+          {person.seniority && (
+            <span className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-ink-300">
+              {person.seniority.replace(/_/g, " ")}
+            </span>
+          )}
+        </div>
       </div>
       {person.title && <p className="mt-1 text-xs text-ink-400">{person.title}</p>}
 
@@ -491,6 +503,13 @@ export function CompanyIntel({
 }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const companyProspected = useIsProspected("company", intel.name);
+
+  // Cache this brief's authoritative ICP total so the signal cards can show it
+  // instead of their rougher per-signal estimate.
+  useEffect(() => {
+    setDeepDiveScore(intel.name, intel.icp.total);
+  }, [intel.name, intel.icp.total]);
 
   // Company-level context woven into each contact's HubSpot task.
   const contactCtx: ContactTaskContext = {
@@ -547,6 +566,14 @@ export function CompanyIntel({
             <p className="mt-1 text-sm text-ink-300">{intel.oneLiner}</p>
           ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            {companyProspected && (
+              <span
+                title="A HubSpot task has been created for this company"
+                className="inline-flex items-center gap-1 rounded border border-neon-600/40 bg-neon-500/15 px-2 py-0.5 font-mono text-xs font-semibold text-neon-300"
+              >
+                <Check className="h-3 w-3" /> Prospected
+              </span>
+            )}
             <span className="rounded border border-neon-600/30 bg-neon-500/10 px-2 py-0.5 font-mono text-xs font-medium text-neon-300">
               {intel.segment.label}
             </span>
@@ -603,17 +630,18 @@ export function CompanyIntel({
         <div className="space-y-3">
           {ICP_BARS.map(({ key, label }) => {
             const v = intel.icp[key];
+            const pct = Math.round((v / 20) * 100);
             return (
               <div key={key} className="flex items-center gap-3">
                 <span className="w-56 shrink-0 text-sm text-ink-300">{label}</span>
                 <div className="h-2 flex-1 overflow-hidden rounded-full bg-ink-800">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-neon-600 to-neon-400"
-                    style={{ width: `${(v / 20) * 100}%` }}
+                    style={{ width: `${pct}%` }}
                   />
                 </div>
                 <span className="w-12 text-right font-mono text-sm font-semibold tabular-nums text-ink-200">
-                  {v}
+                  {pct}%
                 </span>
               </div>
             );

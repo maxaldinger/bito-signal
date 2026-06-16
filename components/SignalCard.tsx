@@ -10,11 +10,13 @@ import {
   ArrowRight,
   ChevronUp,
   ExternalLink,
+  Check,
   type LucideIcon,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
 import { SIGNAL_TYPE_MAP, SEGMENT_MAP } from "@/lib/data";
 import { timeAgo, fmtNum } from "@/lib/format";
+import { useDeepDiveScore, useIsProspected } from "@/lib/clientStore";
 
 const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
   hiring: Users,
@@ -25,17 +27,34 @@ const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
   icp: Crosshair,
 };
 
-function StrengthBar({ value, color }: { value: number; color: string }) {
+function StrengthBar({
+  value,
+  color,
+  fromBrief,
+}: {
+  value: number;
+  color: string;
+  /** True when the value is the authoritative score from a generated brief. */
+  fromBrief: boolean;
+}) {
   return (
-    <div className="flex items-center gap-2" title="ICP fit estimate (0-99)">
+    <div
+      className="flex items-center gap-2"
+      title={
+        fromBrief
+          ? "Bito ICP fit from the generated brief (0-99)"
+          : "Preliminary ICP estimate — open the brief for the scored breakdown (0-99)"
+      }
+    >
       <div className="h-1.5 w-24 overflow-hidden rounded-full bg-ink-800">
         <div
           className="h-full rounded-full transition-all"
           style={{ width: `${value}%`, backgroundColor: color }}
         />
       </div>
-      <span className="w-6 text-right font-mono text-xs font-semibold tabular-nums text-ink-300">
+      <span className="flex w-9 items-center justify-end gap-0.5 text-right font-mono text-xs font-semibold tabular-nums text-ink-300">
         {value}
+        {!fromBrief && <span className="text-[9px] font-normal text-ink-500">~</span>}
       </span>
     </div>
   );
@@ -56,6 +75,12 @@ export function SignalCard({
   const color = type.color;
   const segment = SEGMENT_MAP[signal.segment];
 
+  // Once a brief has been generated for this company, its real ICP total is the
+  // score we show — not the rougher per-signal estimate.
+  const briefScore = useDeepDiveScore(signal.account);
+  const score = briefScore ?? signal.strength;
+  const prospected = useIsProspected("company", signal.account);
+
   return (
     <div
       className={`animate-fade-in rounded-lg border bg-ink-900 p-5 transition-colors ${
@@ -74,8 +99,16 @@ export function SignalCard({
           <span className="rounded border border-ink-700 bg-ink-950 px-2 py-1 text-[11px] text-ink-400">
             {segment.label}
           </span>
+          {prospected && (
+            <span
+              title="A HubSpot task has been created for this company"
+              className="inline-flex items-center gap-1 rounded border border-neon-600/40 bg-neon-500/10 px-1.5 py-1 font-mono text-[10px] font-semibold text-neon-300"
+            >
+              <Check className="h-3 w-3" /> Prospected
+            </span>
+          )}
         </div>
-        <StrengthBar value={signal.strength} color={color} />
+        <StrengthBar value={score} color={color} fromBrief={briefScore !== undefined} />
       </div>
 
       <button
