@@ -17,6 +17,7 @@ import type { Signal, SignalTypeId } from "@/lib/types";
 import { SIGNAL_TYPE_MAP, SEGMENT_MAP } from "@/lib/data";
 import { timeAgo, fmtNum } from "@/lib/format";
 import { useDeepDiveScore, useIsProspected } from "@/lib/clientStore";
+import { HubSpotActions } from "./HubSpotActions";
 
 const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
   hiring: Users,
@@ -164,7 +165,25 @@ export function SignalCard({
         )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-ink-700 pt-3">
+      {/* HubSpot — check the account / create a quick task without opening the
+          brief. Manual check only (no autoCheck) so a full feed doesn't fire
+          dozens of HubSpot searches at once and trip the ~4 req/s limit. */}
+      <div className="mt-4 border-t border-ink-700 pt-3">
+        <HubSpotActions
+          kind="company"
+          name={signal.account}
+          compact
+          defaultSubject={`Prospect ${signal.account} — Bito Signal (fit ${score})`}
+          defaultBody={
+            `${signal.account} — ${segment.label}` +
+            `${signal.sweEstimate ? `, ~${fmtNum(signal.sweEstimate)} SWEs` : ""}.\n` +
+            `SIGNAL: ${signal.title}\n${signal.description}\n` +
+            `${signal.url ? `SOURCE: ${signal.source} — ${signal.url}\n` : ""}`
+          }
+        />
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink-700 pt-3">
         <span className="min-w-0 truncate font-mono text-[11px] text-ink-500">
           {timeAgo(signal.date)} · {signal.source}
         </span>
