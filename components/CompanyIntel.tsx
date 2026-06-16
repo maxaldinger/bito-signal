@@ -27,7 +27,7 @@ const K8S_NOTE =
   "K8s shops typically run 10+ services across multiple repos — high probability of agent context failure without live knowledge graph. Strong Bito fit.";
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
-import { fmtUSD, fmtNum } from "@/lib/format";
+import { fmtUSD, fmtNum, stripEmDashes } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import { useIsProspected, setDeepDiveScore } from "@/lib/clientStore";
 
@@ -193,7 +193,8 @@ function ApolloPersonCard({
       const content =
         `Draft a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
         `Address them by first name only. Subject line + tight body under 120 words + one clear CTA. ` +
-        `Tie it to Bito's AI code-review value for an engineering team. Don't invent specific facts about them.`;
+        `Tie it to Bito's AI code-review value for an engineering team. Don't invent specific facts about them. ` +
+        `Use plain punctuation only — do NOT use em dashes or en dashes; use commas, periods, or parentheses.`;
       const res = await fetch("/api/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -205,7 +206,11 @@ function ApolloPersonCard({
       } catch {
         data = { error: `HTTP ${res.status} — ${res.statusText || "bad response"}` };
       }
-      setDraft(res.ok ? { text: data.text } : { error: data.error || `Draft failed (${res.status})` });
+      setDraft(
+        res.ok
+          ? { text: data.text ? stripEmDashes(data.text) : data.text }
+          : { error: data.error || `Draft failed (${res.status})` },
+      );
     } catch (e) {
       setDraft({ error: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -538,7 +543,7 @@ export function CompanyIntel({
       `${intel.sweEstimate ? `, ~${fmtNum(intel.sweEstimate)} SWEs` : ""}` +
       `. ICP fit ${intel.icp.total}/99.${intel.oneLiner ? ` ${intel.oneLiner}` : ""}`,
     signal: intel.summary,
-    outreach: intel.outreach.draftMessage || intel.outreach.hook || "",
+    outreach: stripEmDashes(intel.outreach.draftMessage || intel.outreach.hook || ""),
   };
 
   const copyDraft = async () => {
@@ -548,7 +553,7 @@ export function CompanyIntel({
       return;
     }
     try {
-      await navigator.clipboard.writeText(intel.outreach.draftMessage);
+      await navigator.clipboard.writeText(stripEmDashes(intel.outreach.draftMessage));
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -728,7 +733,7 @@ export function CompanyIntel({
             {intel.outreach.channel}
           </span>
           <p className="text-sm font-semibold italic text-ink-100">
-            &ldquo;{intel.outreach.hook}&rdquo;
+            &ldquo;{stripEmDashes(intel.outreach.hook)}&rdquo;
           </p>
         </div>
         {intel.outreach.proof && (
@@ -740,7 +745,7 @@ export function CompanyIntel({
         {intel.outreach.draftMessage && (
           <div className="relative mt-3">
             <pre className="whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-4 font-mono text-[13px] leading-relaxed text-ink-200">
-              {intel.outreach.draftMessage}
+              {stripEmDashes(intel.outreach.draftMessage)}
             </pre>
             <button
               onClick={copyDraft}

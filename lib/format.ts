@@ -26,3 +26,17 @@ export function fmtNum(n: number): string {
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
   return Math.round(n).toString();
 }
+
+/**
+ * Strip the AI-writing "tell" of em/en dashes from generated outreach.
+ * Em dash (—) acts as a clause separator → comma; en dash (–) → hyphen.
+ * Deterministic so it catches dashes even when the model ignores the prompt.
+ */
+export function stripEmDashes(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/\s*—\s*/g, ", ")
+    .replace(/\s*–\s*/g, "-")
+    .replace(/,\s*,/g, ",")
+    .replace(/[ \t]{2,}/g, " ");
+}
