@@ -294,7 +294,10 @@ export default function Page() {
       if (types.length > 0 && !types.includes(s.type)) return false;
       if (bands.length > 0) {
         const band = sweBandOf(s.sweEstimate);
-        if (band === null || !bands.includes(band)) return false;
+        // A missing SWE estimate is not evidence the company is OUTSIDE the
+        // band — most signals (esp. the Apollo ICP sweep) have no SWE count, so
+        // hiding them would nuke the feed. Only exclude KNOWN out-of-band sizes.
+        if (band !== null && !bands.includes(band)) return false;
       }
       if (
         q &&

@@ -252,8 +252,8 @@ export function Sidebar({
         </div>
         {selectedSweBands.length > 0 && unknownSweCount > 0 && (
           <p className="mt-2 px-1 font-mono text-[10px] leading-relaxed text-ink-500">
-            {unknownSweCount} signal{unknownSweCount === 1 ? "" : "s"} without a
-            size estimate hidden
+            {unknownSweCount} signal{unknownSweCount === 1 ? "" : "s"} have no size
+            estimate — shown regardless (can&apos;t confirm they&apos;re out of band)
           </p>
         )}
 

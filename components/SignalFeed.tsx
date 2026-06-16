@@ -233,11 +233,12 @@ export function SignalFeed({
             <DownloadCloud className="h-4 w-4" /> Pull Signals
           </button>
         </div>
-      ) : sorted.length === 0 && failedBuckets.length === 0 ? (
+      ) : sorted.length === 0 ? (
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
           <p className="text-sm text-ink-400">
-            No signals on this page match the current filters. Clear a filter above, or
-            check the next page.
+            {unfilteredCount > 0
+              ? "No signals on this page match the current filters. Clear a filter above, or check the next page."
+              : "No signals on this page."}
           </p>
         </div>
       ) : (
