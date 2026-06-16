@@ -115,16 +115,18 @@ function StakeholderCard({
     phone: undefined,
   });
 
-  // Apollo matches on a person, so we need a name. Fall back to the role when
-  // the model didn't surface one (still useful with company/domain to narrow).
+  // Apollo matches on a specific person — without a real name it just returns a
+  // generic, emailless record, so the reveal buttons only make sense when the
+  // model surfaced a named person on this card.
   const personName = s.name?.trim();
+  const canReveal = Boolean(personName);
 
   const reveal = async (kind: RevealKind) => {
-    if (loading) return;
+    if (loading || !personName) return;
     setLoading(kind);
     setResult((r) => ({ ...r, [kind]: undefined }));
     try {
-      const params = new URLSearchParams({ name: personName || s.role, reveal: kind, company });
+      const params = new URLSearchParams({ name: personName, reveal: kind, company });
       if (domain) params.set("domain", domain);
       const res = await fetch(`/api/enrich/apollo/person?${params.toString()}`);
       let data: ApolloRevealResult;
@@ -175,8 +177,12 @@ function StakeholderCard({
         <button
           type="button"
           onClick={() => reveal("email")}
-          disabled={loading !== null}
-          title="Pull a verified email for this person from Apollo (consumes a credit)"
+          disabled={loading !== null || !canReveal}
+          title={
+            canReveal
+              ? "Pull a verified email for this person from Apollo (consumes a credit)"
+              : "No named person on this card — find them on LinkedIn first"
+          }
           className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-sky-500/40 hover:text-sky-300 disabled:opacity-50"
         >
           {loading === "email" ? (
@@ -189,8 +195,12 @@ function StakeholderCard({
         <button
           type="button"
           onClick={() => reveal("phone")}
-          disabled={loading !== null}
-          title="Pull a phone number for this person from Apollo (consumes a credit)"
+          disabled={loading !== null || !canReveal}
+          title={
+            canReveal
+              ? "Pull a phone number for this person from Apollo (consumes a credit)"
+              : "No named person on this card — find them on LinkedIn first"
+          }
           className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-violet-500/40 hover:text-violet-300 disabled:opacity-50"
         >
           {loading === "phone" ? (

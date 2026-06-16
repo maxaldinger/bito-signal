@@ -364,7 +364,9 @@ export async function apolloPersonContact(
       return {
         ...base,
         ok: false,
-        error: "Apollo matched the person but no email is unlocked on this plan",
+        error: raw
+          ? "Apollo returned a locked-email placeholder — you may be out of email credits"
+          : "Apollo matched this person but has no email on file for them",
       };
     return { ...base, email, emailStatus: str(person.email_status) };
   }
