@@ -430,7 +430,10 @@ export async function hubspotCreateTask(input: {
     primary = { ...contactRecord, kind: "contact", created: contactCreated };
   }
 
-  // Create the task, associated to every resolved record.
+  // Create the task, associated to every resolved record. Assign it to the rep
+  // (HUBSPOT_OWNER_ID) so it lands in their "my tasks" queue — without an owner
+  // the task is created unassigned and hidden from the default Tasks view.
+  const ownerId = process.env.HUBSPOT_OWNER_ID?.trim();
   const payload = {
     properties: {
       hs_task_subject: input.subject.trim(),
@@ -439,6 +442,7 @@ export async function hubspotCreateTask(input: {
       hs_task_status: "NOT_STARTED",
       hs_task_priority: "MEDIUM",
       hs_task_type: input.taskType ?? "CALL",
+      ...(ownerId ? { hubspot_owner_id: ownerId } : {}),
     },
     associations: taskAssociations.map((a) => ({
       to: { id: a.id },
