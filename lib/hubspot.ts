@@ -110,7 +110,7 @@ function isTimeout(e: unknown): boolean {
 function statusError(status: number, what: string): string {
   if (status === 401) return `HubSpot 401 on ${what} — HUBSPOT_TOKEN is invalid or expired`;
   if (status === 403)
-    return `HubSpot 403 on ${what} — the Private App is missing a required scope`;
+    return `HubSpot 403 on ${what} — token is missing a required CRM write scope. A Personal Access Key (CLI key) can't be granted write scopes; use a Private App token (pat-na1-…) with companies/contacts/tasks read+write.`;
   if (status === 429) return `HubSpot 429 on ${what} — rate limited, retry shortly`;
   return `HubSpot HTTP ${status} on ${what}`;
 }
