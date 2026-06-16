@@ -74,10 +74,9 @@ Be honest. If a signal isn't strong, give it a lower score and say why in the de
 
 SWE ESTIMATE: Always fill "sweEstimate" with your best numeric estimate of the company's SOFTWARE-ENGINEER headcount (engineers specifically — not total employees) — never null. Base it on the evidence plus what's generally known about the company's size and segment: an early-stage startup has tens, a mid-market scale-up 100-500, a large enterprise several thousand. This is an explicit modeled ESTIMATE used only for rough sizing and filtering — it is NOT a stated fact, so keep it out of the "description" (which must stay grounded in the source) and never present the number as something the source said.
 
-ACCOUNT RULES — who counts as a buyable "account":
-- The account must be a company that could BUY Bito: a real organization with an in-house software team of ~50+ engineers. EXCLUDE solo developers, hobby/side projects, and companies with fewer than ~50 engineers — that is below Bito's ICP floor.
-- NEVER surface the maker of an AI coding tool (or its parent) as the account — they are competitors/vendors, not buyers. Banned as accounts: GitHub, Microsoft, OpenAI, Anthropic, Anysphere/Cursor, Replit, Codeium/Windsurf, Tabnine, Sourcegraph/Cody, Amazon/AWS (CodeWhisperer), Google (Gemini Code Assist), JetBrains. If the tool vendor is the only company in the item, DROP the signal.
-- A story ABOUT a tool ("Copilot pricing backlash", "Cursor gets acquired") is not itself a signal. Only emit one if a SPECIFIC potential-buyer company is named as using or affected by the tool — that named buyer is the account. If no such buyer is named, skip the item.
+ACCOUNT RULES — who counts as a real "account":
+- The account must be a real organization with an in-house software team of roughly 50+ engineers. EXCLUDE solo developers, hobby/side projects, and companies with fewer than ~50 engineers — that is below Bito's ICP floor.
+- Large companies and AI-coding-tool makers (GitHub, Cursor/Anysphere, Replit, etc.) ARE valid prospects — do NOT exclude them. Their size just places them in a higher headcount band: estimate their (large) SWE headcount accurately so size filters can sort them correctly, rather than dropping them.
 
 Output ONLY a single JSON object — no prose, no code fences — matching this schema:
 {
@@ -263,7 +262,7 @@ const graderPrompt = (
 
 CATEGORY: ${BUCKET_BRIEFS[type]}
 
-For each item that genuinely fits the category AND names a real BUYER company (per the ACCOUNT RULES in the system prompt), emit one signal (type "${type}"). Extract the company from the headline/snippet (for GitHub repos, the org behind the repo). Skip items with no identifiable buyer company, AI-tool vendors/competitors named as the only company, aggregators, listicles, individuals' side projects, sub-50-engineer companies, duplicates of the same story, and anything clearly outside the category. It is fine — expected — to return far fewer signals than items. Set "url" to the item's url and "date" to the item's date. Score honestly: these are headline-level candidates, so most belong in the 55-80 range; reserve 80+ for unambiguous, strong ICP fits. Always provide sweEstimate as a best-effort engineer-headcount estimate per the SWE ESTIMATE rule in the system prompt.
+For each item that genuinely fits the category AND names a real company (per the ACCOUNT RULES in the system prompt), emit one signal (type "${type}"). Extract the company from the headline/snippet (for GitHub repos, the org behind the repo). Skip items with no identifiable company, aggregators, listicles, individuals' side projects, sub-50-engineer companies, duplicates of the same story, and anything clearly outside the category. It is fine — expected — to return far fewer signals than items. Set "url" to the item's url and "date" to the item's date. Score honestly: these are headline-level candidates, so most belong in the 55-80 range; reserve 80+ for unambiguous, strong ICP fits. Always provide sweEstimate as a best-effort engineer-headcount estimate per the SWE ESTIMATE rule in the system prompt.
 ${
   exclude.length > 0
     ? `\nALREADY TRACKED — skip these companies entirely:\n${exclude.join(", ")}\n`
