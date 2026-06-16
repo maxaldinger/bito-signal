@@ -163,15 +163,15 @@ export function SignalFeed({
         </div>
       )}
 
-      {/* Error banner — be honest when scans fail (all or some) */}
-      {failedBuckets.length > 0 && !booting && (
+      {/* Error banner — only when the WHOLE pull fails and nothing landed.
+          Free sources (HN Algolia, GDELT) 4xx/429 routinely, so a partial
+          bucket miss is normal noise, not something to alarm on every pull. */}
+      {allFailed && !booting && (
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-amber-300">
-              {allFailed
-                ? "Live signal pass failed"
-                : `${failedBuckets.length} of 5 signal scans failed`}
+              Live signal pass failed — no sources responded
             </p>
             <p className="mt-0.5 break-words text-xs leading-relaxed text-amber-200/80">
               {failedBuckets.map((b) => `${bucketLabel(b)}: ${bucketErrors[b]}`).join(" · ")}

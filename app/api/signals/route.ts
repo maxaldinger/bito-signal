@@ -340,6 +340,23 @@ const ICP_KEYWORD_STRENGTH: Record<string, number> = {
   media: 66,
 };
 
+// Profile-fit score for an Apollo sweep row: keyword affinity, then adjusted by
+// how close the modeled SWE headcount sits to Bito's 50-500 sweet spot. Still a
+// disclosed rule (every card states the keyword + band it matched) — but no
+// longer a flat per-keyword constant, so the feed actually differentiates
+// instead of showing one number across the board.
+function modeledStrength(keyword: string, swe?: number): number {
+  const base = ICP_KEYWORD_STRENGTH[keyword] ?? 70;
+  if (typeof swe !== "number" || swe <= 0) return base;
+  let adj: number;
+  if (swe >= 50 && swe <= 500) adj = 8; // ICP bullseye
+  else if (swe < 50) adj = -18 + Math.round((swe / 50) * 8); // below the SWE floor
+  else if (swe <= 1500) adj = 2; // a touch large, still strong
+  else if (swe <= 5000) adj = -6; // big — SWE share of headcount less certain
+  else adj = -14; // mega-org — review burden diluted across a huge workforce
+  return Math.max(40, Math.min(92, base + adj));
+}
+
 const ICP_KEYWORD_SEGMENT: Record<string, SegmentId> = {
   "developer tools": "devtools",
   "artificial intelligence": "ai",
@@ -383,25 +400,28 @@ function modeledSweFromOrg(org: IcpSweepOrg): number | undefined {
 }
 
 function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
-  return orgs.map((org, i) => ({
-    id: `icp-${i}-${Date.now().toString(36)}`,
-    account: org.name,
-    segment: ICP_KEYWORD_SEGMENT[org.matchedKeyword] ?? "saas",
-    type: "icp" as const,
-    strength: ICP_KEYWORD_STRENGTH[org.matchedKeyword] ?? 70,
-    title: `Profile-fit match: ${org.matchedKeyword} · ${org.employeeBand}`,
-    description:
-      `Surfaced by Apollo org search on Bito's ICP filters — matched "${org.matchedKeyword}" within the ${org.employeeBand} band. ` +
-      `Fit score is a rule-based profile estimate; no event signal yet — run the brief for live research.`,
-    tags: [org.matchedKeyword, org.employeeBand],
-    source: "Apollo org search",
-    url: org.linkedinUrl || org.websiteUrl,
-    date: todayISO(),
+  return orgs.map((org, i) => {
     // Modeled engineer-share of Apollo's total headcount (see modeledSweFromOrg)
-    // so the eng-team-size filter has a value to match on. Rough by design.
-    sweEstimate: modeledSweFromOrg(org),
-    codebaseHint: undefined,
-  }));
+    // — drives both the size filter and the fit score below. Rough by design.
+    const swe = modeledSweFromOrg(org);
+    return {
+      id: `icp-${i}-${Date.now().toString(36)}`,
+      account: org.name,
+      segment: ICP_KEYWORD_SEGMENT[org.matchedKeyword] ?? "saas",
+      type: "icp" as const,
+      strength: modeledStrength(org.matchedKeyword, swe),
+      title: `Profile-fit match: ${org.matchedKeyword} · ${org.employeeBand}`,
+      description:
+        `Surfaced by Apollo org search on Bito's ICP filters — matched "${org.matchedKeyword}" within the ${org.employeeBand} band. ` +
+        `Fit score is a rule-based profile estimate; no event signal yet — run the brief for live research.`,
+      tags: [org.matchedKeyword, org.employeeBand],
+      source: "Apollo org search",
+      url: org.linkedinUrl || org.websiteUrl,
+      date: todayISO(),
+      sweEstimate: swe,
+      codebaseHint: undefined,
+    };
+  });
 }
 
 export async function GET(req: NextRequest) {
