@@ -524,9 +524,25 @@ export async function GET(req: NextRequest) {
         };
       });
 
-    // Zero signals is a failed pass, not an empty market — report it as such
-    // (uncached) so Refresh actually retries instead of serving a frozen miss.
     if (signals.length === 0) {
+      // Free grader path: the fetch succeeded but none of the candidates
+      // qualified as an ICP signal (common for OSS — GitHub Trending / Show HN
+      // skew toward sub-50-engineer/indie projects). That's an EMPTY result,
+      // not a failure — return 200 so the UI doesn't flag a "failed scan";
+      // uncached so the next pull re-grades fresh candidates.
+      if (bucket && !deep) {
+        return NextResponse.json(
+          {
+            signals: [],
+            empty: true,
+            note: `No ICP-qualifying ${bucket} signals from free sources this pass.`,
+            updated: new Date().toISOString(),
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      // Deep / full web-search pass returning nothing is more likely a
+      // transient miss — keep it a retryable failure.
       const failedSearches =
         result.searchErrors.length > 0
           ? ` ${result.searchErrors.length} web search(es) failed (${result.searchErrors.join(", ")}).`
