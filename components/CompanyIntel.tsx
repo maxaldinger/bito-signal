@@ -6,10 +6,8 @@ import {
   Target,
   Zap,
   AlertTriangle,
-  Swords,
   Users,
   Coins,
-  GaugeCircle,
   Compass,
   Send,
   Link2,
@@ -30,7 +28,6 @@ const K8S_NOTE =
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { fmtUSD, fmtNum } from "@/lib/format";
-import { EnrichmentPanel } from "./EnrichmentPanel";
 
 function Section({
   title,
@@ -163,6 +160,53 @@ function ApolloPersonCard({
     }
   };
 
+  // Per-person cold email draft (AI assist).
+  const [drafting, setDrafting] = useState(false);
+  const [draft, setDraft] = useState<{ text?: string; error?: string } | null>(null);
+  const [draftCopied, setDraftCopied] = useState(false);
+
+  const draftEmail = async () => {
+    if (drafting) return;
+    setDrafting(true);
+    setDraft(null);
+    setDraftCopied(false);
+    try {
+      const who = (revealedName || person.name).split(" ")[0];
+      const role = person.title || "an engineering leader";
+      const content =
+        `Draft a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
+        `Address them by first name only. Subject line + tight body under 120 words + one clear CTA. ` +
+        `Tie it to Bito's AI code-review value for an engineering team. Don't invent specific facts about them.`;
+      const res = await fetch("/api/assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "ask", messages: [{ role: "user", content }] }),
+      });
+      let data: { text?: string; error?: string };
+      try {
+        data = await res.json();
+      } catch {
+        data = { error: `HTTP ${res.status} — ${res.statusText || "bad response"}` };
+      }
+      setDraft(res.ok ? { text: data.text } : { error: data.error || `Draft failed (${res.status})` });
+    } catch (e) {
+      setDraft({ error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const copyDraftEmail = async () => {
+    if (!draft?.text || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(draft.text);
+      setDraftCopied(true);
+      setTimeout(() => setDraftCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — user can select manually */
+    }
+  };
+
   const displayName = revealedName || person.name;
   const liQuery = `${company} ${revealedName || person.title || ""}`.trim();
   const emailRes = result.email;
@@ -220,7 +264,38 @@ function ApolloPersonCard({
           )}
           Apollo phone
         </button>
+        <button
+          type="button"
+          onClick={draftEmail}
+          disabled={drafting}
+          title="Draft a personalized cold outreach email for this person (AI)"
+          className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-300 disabled:opacity-50"
+        >
+          {drafting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+          Draft email
+        </button>
       </div>
+
+      {draft && (
+        <div className="mt-2">
+          {draft.error ? (
+            <p className="font-mono text-[11px] text-amber-400/90">Draft: {draft.error}</p>
+          ) : draft.text ? (
+            <div className="relative">
+              <pre className="whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-3 pr-16 font-mono text-[12px] leading-relaxed text-ink-200">
+                {draft.text}
+              </pre>
+              <button
+                onClick={copyDraftEmail}
+                className="absolute right-2 top-2 inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-1.5 py-0.5 text-[10px] font-medium text-ink-400 transition-colors hover:text-neon-300"
+              >
+                {draftCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {draftCopied ? "copied" : "copy"}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {(emailRes || phoneRes) && (
         <div className="mt-2 space-y-1 font-mono text-[11px]">
@@ -371,13 +446,6 @@ export function CompanyIntel({
 }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
-  const friction = intel.onboarding;
-  const frictionColor =
-    friction.level === "Low"
-      ? "text-neon-400"
-      : friction.level === "Medium"
-        ? "text-amber-400"
-        : "text-red-400";
 
   const copyDraft = async () => {
     if (!navigator.clipboard) {
@@ -473,7 +541,7 @@ export function CompanyIntel({
                   />
                 </div>
                 <span className="w-12 text-right font-mono text-sm font-semibold tabular-nums text-ink-200">
-                  {v}/20
+                  {v}
                 </span>
               </div>
             );
@@ -533,6 +601,40 @@ export function CompanyIntel({
         <ApolloStakeholders company={intel.name} domain={intel.domain} />
       </Section>
 
+      {/* Outreach angle — sits directly under the people to contact */}
+      <Section title="outreach angle" icon={Send} iconColor="text-neon-400">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded bg-ink-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-ink-300">
+            {intel.outreach.channel}
+          </span>
+          <p className="text-sm font-semibold italic text-ink-100">
+            &ldquo;{intel.outreach.hook}&rdquo;
+          </p>
+        </div>
+        {intel.outreach.proof && (
+          <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-ink-400">
+            <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-ink-500" />
+            Backed by: {intel.outreach.proof}
+          </p>
+        )}
+        {intel.outreach.draftMessage && (
+          <div className="relative mt-3">
+            <pre className="whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-4 font-mono text-[13px] leading-relaxed text-ink-200">
+              {intel.outreach.draftMessage}
+            </pre>
+            <button
+              onClick={copyDraft}
+              className={`absolute right-2 top-2 inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 text-[11px] font-medium transition-colors ${
+                copyFailed ? "text-red-400" : "text-ink-400 hover:text-neon-300"
+              }`}
+            >
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              {copyFailed ? "copy failed — select manually" : copied ? "copied" : "copy"}
+            </button>
+          </div>
+        )}
+      </Section>
+
       {/* Token cost exposure */}
       <Section title="estimated token cost exposure" icon={Coins} iconColor="text-amber-400">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -572,51 +674,6 @@ export function CompanyIntel({
         )}
       </Section>
 
-      {/* Onboarding friction */}
-      <Section title="onboarding friction" icon={GaugeCircle} iconColor={frictionColor}>
-        <div className="flex flex-wrap items-center gap-4">
-          <p className={`font-mono text-4xl font-bold leading-none ${frictionColor}`}>
-            {friction.score}
-            <span className="text-base font-medium text-ink-500">/99</span>
-          </p>
-          <span className={`rounded px-2 py-1 font-mono text-xs font-bold uppercase ${
-            friction.level === "Low"
-              ? "bg-neon-500/15 text-neon-300"
-              : friction.level === "Medium"
-                ? "bg-amber-500/15 text-amber-400"
-                : "bg-red-500/15 text-red-400"
-          }`}>
-            {friction.level} friction
-          </span>
-        </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <div>
-            <p className="mb-2 font-mono text-[11px] font-bold uppercase tracking-wider text-red-400/80">
-              drivers
-            </p>
-            <ul className="space-y-1.5 text-sm text-ink-300">
-              {friction.drivers.map((d, i) => (
-                <li key={i} className="flex gap-2">
-                  <span className="text-red-400/70">▸</span> {d}
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <p className="mb-2 font-mono text-[11px] font-bold uppercase tracking-wider text-neon-400/80">
-              mitigations
-            </p>
-            <ul className="space-y-1.5 text-sm text-ink-300">
-              {friction.mitigations.map((m, i) => (
-                <li key={i} className="flex gap-2">
-                  <span className="text-neon-400/70">▸</span> {m}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </Section>
-
       {/* Suggested motion */}
       <Section title="suggested motion" icon={Compass} iconColor="text-violet-400">
         <div className="flex flex-wrap items-center gap-3">
@@ -641,40 +698,6 @@ export function CompanyIntel({
               </li>
             ))}
           </ul>
-        )}
-      </Section>
-
-      {/* Outreach angle */}
-      <Section title="outreach angle" icon={Send} iconColor="text-neon-400">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded bg-ink-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-ink-300">
-            {intel.outreach.channel}
-          </span>
-          <p className="text-sm font-semibold italic text-ink-100">
-            &ldquo;{intel.outreach.hook}&rdquo;
-          </p>
-        </div>
-        {intel.outreach.proof && (
-          <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-ink-400">
-            <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-ink-500" />
-            Backed by: {intel.outreach.proof}
-          </p>
-        )}
-        {intel.outreach.draftMessage && (
-          <div className="relative mt-3">
-            <pre className="whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-4 font-mono text-[13px] leading-relaxed text-ink-200">
-              {intel.outreach.draftMessage}
-            </pre>
-            <button
-              onClick={copyDraft}
-              className={`absolute right-2 top-2 inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 text-[11px] font-medium transition-colors ${
-                copyFailed ? "text-red-400" : "text-ink-400 hover:text-neon-300"
-              }`}
-            >
-              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-              {copyFailed ? "copy failed — select manually" : copied ? "copied" : "copy"}
-            </button>
-          </div>
         )}
       </Section>
 
@@ -710,74 +733,6 @@ export function CompanyIntel({
         </Section>
       )}
 
-      {/* Competitive context */}
-      {intel.competitors.length > 0 && (
-        <Section title="competitive context" icon={Swords} iconColor="text-red-400">
-          <div className="space-y-4">
-            {intel.competitors.map((c, i) => (
-              <div key={i} className="rounded-lg border border-ink-700 bg-ink-950/50 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <h4 className="text-sm font-bold text-ink-100">{c.name}</h4>
-                  <span className="rounded bg-ink-800 px-1.5 py-0.5 text-[10px] text-ink-400">
-                    {c.category}
-                  </span>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <p className="mb-1 font-mono text-[10px] font-bold uppercase tracking-wider text-red-400/80">
-                      their gap
-                    </p>
-                    <p className="text-xs leading-relaxed text-ink-400">{c.weakness}</p>
-                  </div>
-                  <div>
-                    <p className="mb-1 font-mono text-[10px] font-bold uppercase tracking-wider text-neon-400/80">
-                      bito advantage
-                    </p>
-                    <p className="text-xs leading-relaxed text-ink-400">{c.bitoAdvantage}</p>
-                  </div>
-                </div>
-                {c.pitch && (
-                  <p className="mt-3 border-t border-ink-700 pt-3 text-xs italic leading-relaxed text-ink-300">
-                    &ldquo;{c.pitch}&rdquo;
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* Live enrichment — Apollo / Hunter / GitHub / Proxycurl / Crunchbase */}
-      <EnrichmentPanel company={intel.name} domain={intel.domain} />
-
-      {/* Sources */}
-      {intel.citations.length > 0 && (
-        <div className="rounded-lg border border-ink-700 bg-ink-900/50 p-4">
-          <p className="mb-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink-400">
-            live sources used
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {intel.citations.map((c) => (
-              <a
-                key={c.url}
-                href={c.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={c.title}
-                className="inline-flex max-w-xs items-center gap-1 truncate rounded border border-ink-700 bg-ink-950 px-2 py-1 text-[11px] text-ink-400 transition-colors hover:border-neon-600/40 hover:text-neon-300"
-              >
-                <span className="truncate">{c.title}</span>
-                <ArrowUpRight className="h-3 w-3 shrink-0" />
-              </a>
-            ))}
-          </div>
-          <p className="mt-3 text-[11px] leading-relaxed text-ink-600">
-            This brief was generated live by claude-sonnet-4 with web search. Scores,
-            cost figures and stakeholder mapping are model estimates grounded in the
-            sources above — validate in discovery before quoting externally.
-          </p>
-        </div>
-      )}
     </div>
   );
 }
