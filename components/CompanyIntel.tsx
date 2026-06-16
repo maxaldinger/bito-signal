@@ -18,6 +18,9 @@ import {
   Check,
   RefreshCw,
   Boxes,
+  Mail,
+  Phone,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -83,9 +86,67 @@ function MotionBadge({ motion }: { motion: Intel["motion"]["primary"] }) {
   );
 }
 
-function StakeholderCard({ s, company }: { s: Stakeholder; company: string }) {
+type RevealKind = "email" | "phone";
+
+interface ApolloRevealResult {
+  ok: boolean;
+  error?: string;
+  email?: string;
+  emailStatus?: string;
+  phone?: string;
+}
+
+function StakeholderCard({
+  s,
+  company,
+  domain,
+}: {
+  s: Stakeholder;
+  company: string;
+  domain?: string;
+}) {
   const badge = STAKEHOLDER_BADGE[s.type];
   const q = s.linkedinQuery || `${company} ${s.role}`;
+
+  // Apollo contact reveal — one in-flight kind at a time, per card.
+  const [loading, setLoading] = useState<RevealKind | null>(null);
+  const [result, setResult] = useState<Record<RevealKind, ApolloRevealResult | undefined>>({
+    email: undefined,
+    phone: undefined,
+  });
+
+  // Apollo matches on a person, so we need a name. Fall back to the role when
+  // the model didn't surface one (still useful with company/domain to narrow).
+  const personName = s.name?.trim();
+
+  const reveal = async (kind: RevealKind) => {
+    if (loading) return;
+    setLoading(kind);
+    setResult((r) => ({ ...r, [kind]: undefined }));
+    try {
+      const params = new URLSearchParams({ name: personName || s.role, reveal: kind, company });
+      if (domain) params.set("domain", domain);
+      const res = await fetch(`/api/enrich/apollo/person?${params.toString()}`);
+      let data: ApolloRevealResult;
+      try {
+        data = (await res.json()) as ApolloRevealResult;
+      } catch {
+        data = { ok: false, error: `HTTP ${res.status} — ${res.statusText || "bad response"}` };
+      }
+      setResult((r) => ({ ...r, [kind]: data }));
+    } catch (e) {
+      setResult((r) => ({
+        ...r,
+        [kind]: { ok: false, error: e instanceof Error ? e.message : String(e) },
+      }));
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const emailRes = result.email;
+  const phoneRes = result.phone;
+
   return (
     <div className="rounded-lg border border-ink-700 bg-ink-950/50 p-4">
       <div className="flex items-center justify-between gap-2">
@@ -101,14 +162,75 @@ function StakeholderCard({ s, company }: { s: Stakeholder; company: string }) {
         <span className="font-semibold text-neon-300">Hook: </span>
         {s.outreachHook}
       </p>
-      <a
-        href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(q)}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-neon-400 hover:text-neon-300"
-      >
-        Find on LinkedIn <ArrowUpRight className="h-3 w-3" />
-      </a>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <a
+          href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(q)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-xs font-medium text-neon-400 hover:text-neon-300"
+        >
+          Find on LinkedIn <ArrowUpRight className="h-3 w-3" />
+        </a>
+        <button
+          type="button"
+          onClick={() => reveal("email")}
+          disabled={loading !== null}
+          title="Pull a verified email for this person from Apollo (consumes a credit)"
+          className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-sky-500/40 hover:text-sky-300 disabled:opacity-50"
+        >
+          {loading === "email" ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Mail className="h-3 w-3" />
+          )}
+          Apollo email
+        </button>
+        <button
+          type="button"
+          onClick={() => reveal("phone")}
+          disabled={loading !== null}
+          title="Pull a phone number for this person from Apollo (consumes a credit)"
+          className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-violet-500/40 hover:text-violet-300 disabled:opacity-50"
+        >
+          {loading === "phone" ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Phone className="h-3 w-3" />
+          )}
+          Apollo phone
+        </button>
+      </div>
+
+      {(emailRes || phoneRes) && (
+        <div className="mt-2 space-y-1 font-mono text-[11px]">
+          {emailRes &&
+            (emailRes.ok && emailRes.email ? (
+              <p className="flex items-center gap-1.5 text-ink-200">
+                <Mail className="h-3 w-3 text-sky-400" />
+                <a href={`mailto:${emailRes.email}`} className="hover:text-sky-300">
+                  {emailRes.email}
+                </a>
+                {emailRes.emailStatus && (
+                  <span className="text-[10px] text-ink-500">({emailRes.emailStatus})</span>
+                )}
+              </p>
+            ) : (
+              <p className="text-amber-400/90">Email: {emailRes.error || "not found"}</p>
+            ))}
+          {phoneRes &&
+            (phoneRes.ok && phoneRes.phone ? (
+              <p className="flex items-center gap-1.5 text-ink-200">
+                <Phone className="h-3 w-3 text-violet-400" />
+                <a href={`tel:${phoneRes.phone}`} className="hover:text-violet-300">
+                  {phoneRes.phone}
+                </a>
+              </p>
+            ) : (
+              <p className="text-amber-400/90">Phone: {phoneRes.error || "not found"}</p>
+            ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -297,7 +419,7 @@ export function CompanyIntel({
                 <p className="text-xs text-ink-500">None surfaced.</p>
               ) : (
                 painSide.map((s, i) => (
-                  <StakeholderCard key={i} s={s} company={intel.name} />
+                  <StakeholderCard key={i} s={s} company={intel.name} domain={intel.domain} />
                 ))
               )}
             </div>
@@ -311,7 +433,7 @@ export function CompanyIntel({
                 <p className="text-xs text-ink-500">None surfaced.</p>
               ) : (
                 signSide.map((s, i) => (
-                  <StakeholderCard key={i} s={s} company={intel.name} />
+                  <StakeholderCard key={i} s={s} company={intel.name} domain={intel.domain} />
                 ))
               )}
             </div>

@@ -259,6 +259,132 @@ export async function enrichApollo(
 }
 
 // ---------------------------------------------------------------------------
+// Single-person contact reveal — used by the stakeholder cards to pull a
+// verified email or a phone number for one named person on demand.
+//
+// Endpoint: POST /api/v1/people/match (consumes credits when reveal_* flags are
+// set). Docs: https://docs.apollo.io/reference/people-enrichment
+//   - reveal_personal_emails=true  → unlocks `email` / `personal_emails`
+//   - reveal_phone_number=true     → unlocks `phone_numbers[]` (Apollo delivers
+//     phone async via webhook on some plans; we surface whatever comes back
+//     inline and report an honest note when nothing did).
+// ---------------------------------------------------------------------------
+
+export type RevealKind = "email" | "phone";
+
+export interface ApolloPersonContact {
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  name?: string;
+  title?: string;
+  /** Populated for reveal "email". */
+  email?: string;
+  emailStatus?: string;
+  /** Populated for reveal "phone". */
+  phone?: string;
+  linkedinUrl?: string;
+}
+
+interface ApolloPhoneNumber {
+  raw_number?: string | null;
+  sanitized_number?: string | null;
+  type?: string | null;
+}
+
+interface ApolloMatchPerson extends ApolloPerson {
+  personal_emails?: string[] | null;
+  phone_numbers?: ApolloPhoneNumber[] | null;
+  organization?: { phone?: string | null } | null;
+}
+
+/**
+ * Reveal one contact field (email OR phone) for a single named person.
+ * @param name      Full name of the person (from the stakeholder card).
+ * @param opts.company / opts.domain  Used to disambiguate the right person.
+ * @param opts.linkedinUrl  Strongest matcher when available.
+ * @param opts.reveal  Which field to spend a credit unlocking.
+ */
+export async function apolloPersonContact(
+  name: string,
+  opts: { company?: string; domain?: string; linkedinUrl?: string; reveal: RevealKind }
+): Promise<ApolloPersonContact> {
+  const fail = (configured: boolean, error: string): ApolloPersonContact => ({
+    configured,
+    ok: false,
+    error,
+  });
+
+  const key = process.env.APOLLO_API_KEY;
+  if (!key) return fail(false, "APOLLO_API_KEY not set — add it to .env.local / Vercel env");
+  if (!name) return fail(true, "A person name is required for an Apollo lookup");
+
+  const qs = new URLSearchParams({ name });
+  if (opts.linkedinUrl) qs.set("linkedin_url", opts.linkedinUrl);
+  if (opts.domain) qs.set("domain", opts.domain);
+  if (opts.company) qs.set("organization_name", opts.company);
+  if (opts.reveal === "email") qs.set("reveal_personal_emails", "true");
+  else qs.set("reveal_phone_number", "true");
+
+  let status: number;
+  let body: unknown;
+  try {
+    ({ status, body } = await apolloJson(`${BASE}/people/match?${qs}`, key, "POST"));
+  } catch (e) {
+    return fail(
+      true,
+      isTimeout(e) ? "Apollo people match timed out after 15s" : "Apollo people match failed"
+    );
+  }
+
+  if (status !== 200) return fail(true, statusError(status, "people match"));
+
+  const person = (body as { person?: ApolloMatchPerson } | undefined)?.person;
+  if (!person) return fail(true, `Apollo: no person matched for "${name}"`);
+
+  const fullName =
+    str(person.name) ??
+    [str(person.first_name), str(person.last_name)].filter(Boolean).join(" ") ??
+    name;
+  const base: ApolloPersonContact = {
+    configured: true,
+    ok: true,
+    name: fullName || name,
+    title: str(person.title),
+    linkedinUrl: str(person.linkedin_url),
+  };
+
+  if (opts.reveal === "email") {
+    const raw =
+      str(person.email) ??
+      (Array.isArray(person.personal_emails) ? str(person.personal_emails[0]) : undefined);
+    const email =
+      raw && raw.includes("@") && !raw.startsWith("email_not_unlocked") ? raw : undefined;
+    if (!email)
+      return {
+        ...base,
+        ok: false,
+        error: "Apollo matched the person but no email is unlocked on this plan",
+      };
+    return { ...base, email, emailStatus: str(person.email_status) };
+  }
+
+  // reveal === "phone"
+  const phones = Array.isArray(person.phone_numbers) ? person.phone_numbers : [];
+  const phone =
+    phones.map((p) => str(p?.sanitized_number) ?? str(p?.raw_number)).find(Boolean) ??
+    str(person.organization?.phone);
+  if (!phone)
+    return {
+      ...base,
+      ok: false,
+      error:
+        "Apollo matched the person but returned no phone number (may be delivered async / plan-gated)",
+    };
+  return { ...base, phone };
+}
+
+// ---------------------------------------------------------------------------
 // ICP sweep — org search as a *discovery* source for the signal feed.
 // Filters verified against docs.apollo.io/reference/organization-search:
 // organization_num_employees_ranges[] + q_organization_keyword_tags[].
