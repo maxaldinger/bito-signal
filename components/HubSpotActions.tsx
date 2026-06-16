@@ -10,9 +10,21 @@ import {
   CircleCheck,
   CircleX,
   ArrowUpRight,
+  Sparkles,
   X,
 } from "lucide-react";
 import { markProspected } from "@/lib/clientStore";
+import { stripEmDashes } from "@/lib/format";
+
+// Swap the body's outreach section for a freshly generated one (the section is
+// last in the task body, so replace from the marker to the end).
+function replaceOutreachSection(body: string, draft: string): string {
+  const marker = "SUGGESTED OUTREACH:";
+  const idx = body.indexOf(marker);
+  return idx === -1
+    ? `${body}\n\n${marker}\n${draft}`
+    : `${body.slice(0, idx)}${marker}\n${draft}`;
+}
 
 type HsKind = "company" | "contact";
 type HsTaskType = "CALL" | "EMAIL" | "TODO";
@@ -227,6 +239,45 @@ function TaskModal({
   const [taskType, setTaskType] = useState<HsTaskType>("CALL");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<TaskResp | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+
+  // Generate a per-individual outreach email and drop it into the notes,
+  // replacing the company-level default. On-demand (contacts only).
+  const personalize = async () => {
+    if (generating) return;
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const who = name.split(" ")[0] || name;
+      const role = jobtitle || "an engineering leader";
+      const content =
+        `Draft a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${companyName || "their company"}. ` +
+        `Address them by first name only. Subject line + tight body under 120 words + one clear CTA. ` +
+        `Tie it to Bito's AI code-review value for an engineering team. Don't invent specific facts about them. ` +
+        `Use plain punctuation only — do NOT use em dashes or en dashes.`;
+      const res = await fetch("/api/assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "ask", messages: [{ role: "user", content }] }),
+      });
+      let data: { text?: string; error?: string };
+      try {
+        data = await res.json();
+      } catch {
+        data = { error: `HTTP ${res.status}` };
+      }
+      if (!res.ok || !data.text) {
+        setGenError(data.error || `Could not generate (${res.status})`);
+        return;
+      }
+      setBody((b) => replaceOutreachSection(b, stripEmDashes(data.text!)));
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const submit = async () => {
     if (saving) return;
@@ -333,15 +384,34 @@ function TaskModal({
                   className="mt-1 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2.5 text-sm text-ink-100 focus:border-orange-500/40 focus:outline-none"
                 />
               </label>
-              <label className="block">
-                <span className="font-mono text-[10px] uppercase tracking-wider text-ink-400">context / notes</span>
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-ink-400">context / notes</span>
+                  {kind === "contact" && (
+                    <button
+                      type="button"
+                      onClick={personalize}
+                      disabled={generating}
+                      title="Generate a personalized outreach email for this person and drop it into the notes"
+                      className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[10px] font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-300 disabled:opacity-50"
+                    >
+                      {generating ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3 w-3" />
+                      )}
+                      {generating ? "Personalizing…" : "Personalize outreach"}
+                    </button>
+                  )}
+                </div>
                 <textarea
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   rows={12}
                   className="mt-1 max-h-[45vh] min-h-[10rem] w-full resize-y rounded-lg border border-ink-700 bg-ink-950 px-3 py-2.5 text-sm leading-relaxed text-ink-200 focus:border-orange-500/40 focus:outline-none"
                 />
-              </label>
+                {genError && <p className="mt-1 text-xs text-amber-400/90">{genError}</p>}
+              </div>
               <div className="flex flex-wrap gap-4">
                 <label className="block">
                   <span className="font-mono text-[10px] uppercase tracking-wider text-ink-400">due date</span>
