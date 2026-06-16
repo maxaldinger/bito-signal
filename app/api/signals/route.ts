@@ -74,6 +74,11 @@ Be honest. If a signal isn't strong, give it a lower score and say why in the de
 
 SWE ESTIMATE: Always fill "sweEstimate" with your best numeric estimate of the company's SOFTWARE-ENGINEER headcount (engineers specifically — not total employees) — never null. Base it on the evidence plus what's generally known about the company's size and segment: an early-stage startup has tens, a mid-market scale-up 100-500, a large enterprise several thousand. This is an explicit modeled ESTIMATE used only for rough sizing and filtering — it is NOT a stated fact, so keep it out of the "description" (which must stay grounded in the source) and never present the number as something the source said.
 
+ACCOUNT RULES — who counts as a buyable "account":
+- The account must be a company that could BUY Bito: a real organization with an in-house software team of ~50+ engineers. EXCLUDE solo developers, hobby/side projects, and companies with fewer than ~50 engineers — that is below Bito's ICP floor.
+- NEVER surface the maker of an AI coding tool (or its parent) as the account — they are competitors/vendors, not buyers. Banned as accounts: GitHub, Microsoft, OpenAI, Anthropic, Anysphere/Cursor, Replit, Codeium/Windsurf, Tabnine, Sourcegraph/Cody, Amazon/AWS (CodeWhisperer), Google (Gemini Code Assist), JetBrains. If the tool vendor is the only company in the item, DROP the signal.
+- A story ABOUT a tool ("Copilot pricing backlash", "Cursor gets acquired") is not itself a signal. Only emit one if a SPECIFIC potential-buyer company is named as using or affected by the tool — that named buyer is the account. If no such buyer is named, skip the item.
+
 Output ONLY a single JSON object — no prose, no code fences — matching this schema:
 {
   "signals": [
@@ -173,6 +178,18 @@ async function gdeltWithRetry(
   return fetchGdeltItems(query, opts);
 }
 
+// HN's Algolia API returns 400/429 in bursts when several queries land at once
+// from a shared Vercel IP. Retry once after a short cool-down before giving up.
+async function hnWithRetry(
+  query: string,
+  opts?: { minPoints?: number; limit?: number; days?: number },
+): Promise<{ ok: boolean; error?: string; items: RawItem[] }> {
+  const first = await fetchHNItems(query, opts);
+  if (first.ok || !/HTTP 4|429|rate/i.test(first.error ?? "")) return first;
+  await new Promise((r) => setTimeout(r, 1800));
+  return fetchHNItems(query, opts);
+}
+
 async function fetchBucketItems(
   type: SearchBucket,
   region: RegionId,
@@ -195,12 +212,12 @@ async function fetchBucketItems(
           gd('("hiring engineers" OR "engineering hiring" OR "hiring spree" OR "engineering team") software', { limit: 25 }),
           inIndia
             ? fetchRssItems("https://inc42.com/feed/", { limit: 20 })
-            : fetchHNItems("hiring engineers", { minPoints: 5, days: 21, limit: 10 }),
+            : hnWithRetry("hiring engineers", { minPoints: 5, days: 21, limit: 10 }),
         ];
       case "oss":
         return [
           fetchGitHubTrendingItems({ limit: 20, days: 30, minStars: 150 }),
-          fetchHNItems("Show HN", { minPoints: 40, days: 10, limit: 12 }),
+          hnWithRetry("Show HN", { minPoints: 40, days: 10, limit: 12 }),
         ];
       case "ma":
         return [
@@ -219,11 +236,11 @@ async function fetchBucketItems(
         ];
       case "ai":
         return [
-          fetchHNItems("Copilot", { minPoints: 15, days: 21, limit: 8 }),
-          fetchHNItems("AI coding", { minPoints: 15, days: 21, limit: 8 }),
+          hnWithRetry("Copilot", { minPoints: 15, days: 21, limit: 8 }),
+          hnWithRetry("AI coding", { minPoints: 15, days: 21, limit: 8 }),
           ...(inIndia
             ? [fetchRssItems("https://inc42.com/feed/", { limit: 15 })]
-            : [fetchHNItems("Cursor", { minPoints: 20, days: 21, limit: 6 })]),
+            : [hnWithRetry("Cursor", { minPoints: 20, days: 21, limit: 6 })]),
           gd('("AI coding" OR "GitHub Copilot" OR "Cursor AI" OR "AI developer tools") (cost OR spend OR adoption OR rollout)', { limit: 20 }),
         ];
     }
@@ -246,7 +263,7 @@ const graderPrompt = (
 
 CATEGORY: ${BUCKET_BRIEFS[type]}
 
-For each item that genuinely fits the category AND names a real company, emit one signal (type "${type}"). Extract the company from the headline/snippet (for GitHub repos, the org behind the repo). Skip items with no identifiable company, aggregators, listicles, individuals' side projects, duplicates of the same story, and anything clearly outside the category. It is fine — expected — to return far fewer signals than items. Set "url" to the item's url and "date" to the item's date. Score honestly: these are headline-level candidates, so most belong in the 55-80 range; reserve 80+ for unambiguous, strong ICP fits. Only set sweEstimate if the text itself states team size — never guess.
+For each item that genuinely fits the category AND names a real BUYER company (per the ACCOUNT RULES in the system prompt), emit one signal (type "${type}"). Extract the company from the headline/snippet (for GitHub repos, the org behind the repo). Skip items with no identifiable buyer company, AI-tool vendors/competitors named as the only company, aggregators, listicles, individuals' side projects, sub-50-engineer companies, duplicates of the same story, and anything clearly outside the category. It is fine — expected — to return far fewer signals than items. Set "url" to the item's url and "date" to the item's date. Score honestly: these are headline-level candidates, so most belong in the 55-80 range; reserve 80+ for unambiguous, strong ICP fits. Always provide sweEstimate as a best-effort engineer-headcount estimate per the SWE ESTIMATE rule in the system prompt.
 ${
   exclude.length > 0
     ? `\nALREADY TRACKED — skip these companies entirely:\n${exclude.join(", ")}\n`
