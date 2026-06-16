@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
+import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 
 // Sales Assist — two kinds of modes:
@@ -169,6 +169,10 @@ ${cfg.schema}`;
       system,
       user,
       history,
+      // Structured tool modes (LOU, MEDDPICC, threading, proposal, deck) extract
+      // and draft from the rep's notes — Haiku handles them at lower cost. The
+      // free-form research/email chat ("ask") stays on the default Sonnet model.
+      model: cfg.type === "json" ? FAST_MODEL : undefined,
       maxSearches: cfg.maxSearches,
       maxTokens: cfg.type === "json" ? 4000 : 2500,
       temperature: cfg.type === "json" ? 0.3 : 0.5,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
+import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import { apolloIcpSweep, type IcpSweepOrg } from "@/lib/enrich/apollo";
 import { fetchHNItems } from "@/lib/sources/hn";
@@ -440,6 +440,9 @@ export async function GET(req: NextRequest) {
       result = await callClaudeWithWebSearch({
         system: GRADER_SYSTEM,
         user: graderPrompt(bucket as SearchBucket, fetched.items, exclude, region),
+        // Structured grading of pre-fetched candidates — no search, high volume.
+        // Haiku handles it well at ~3x lower cost than the deep scan.
+        model: FAST_MODEL,
         webSearch: false,
         maxTokens: 4000,
         temperature: 0.2,

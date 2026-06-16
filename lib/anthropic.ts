@@ -9,10 +9,19 @@ import type { LiveCitation } from "./types";
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MODEL = "claude-sonnet-4-6";
+// Cheaper, faster model for high-volume, structured, low/no-search calls
+// (signal grading, structured extraction from notes). ~3x cheaper than Sonnet.
+// Override with ANTHROPIC_MODEL_FAST; callers opt in via opts.model = FAST_MODEL.
+export const FAST_MODEL = process.env.ANTHROPIC_MODEL_FAST?.trim() || "claude-haiku-4-5";
 
 export interface AnthropicCallOptions {
   system: string;
   user: string;
+  /**
+   * Model override for this call. Defaults to ANTHROPIC_MODEL / Sonnet. Pass
+   * FAST_MODEL for cheap structured/grading work.
+   */
+  model?: string;
   // Optional prior assistant/user history.
   history?: { role: "user" | "assistant"; content: string }[];
   /**
@@ -136,7 +145,7 @@ export async function callClaudeWithWebSearch(
     );
   }
 
-  const model = process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL;
+  const model = opts.model?.trim() || process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_MODEL;
   const maxUses = Math.max(
     1,
     Math.min(
