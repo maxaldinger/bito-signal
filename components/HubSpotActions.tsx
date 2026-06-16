@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Search,
   CalendarPlus,
@@ -259,7 +260,11 @@ function TaskModal({
     }
   };
 
-  return (
+  // Render through a portal to <body>: the modal lives inside the animated
+  // (transformed) deep-dive section, which would otherwise be the containing
+  // block for `fixed` — pinning the overlay to that section instead of the
+  // viewport. The portal escapes it so it overlays the whole screen.
+  const overlay = (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
@@ -381,4 +386,6 @@ function TaskModal({
       </div>
     </div>
   );
+
+  return typeof document !== "undefined" ? createPortal(overlay, document.body) : null;
 }
