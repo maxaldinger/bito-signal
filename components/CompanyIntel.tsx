@@ -110,14 +110,26 @@ function isDecisionMaker(c: EnrichContact): boolean {
   return /\b(cto|chief|vp|vice president|head|director)\b/.test(t);
 }
 
+// Company-level context woven into each contact's HubSpot task body.
+interface ContactTaskContext {
+  /** One-line company descriptor (segment, ICP, what they do). */
+  companyLine: string;
+  /** What the signal was — the synthesized exec summary. */
+  signal: string;
+  /** Suggested outreach to fall back on when no per-person draft exists. */
+  outreach: string;
+}
+
 function ApolloPersonCard({
   person,
   company,
   domain,
+  ctx,
 }: {
   person: EnrichContact;
   company: string;
   domain?: string;
+  ctx: ContactTaskContext;
 }) {
   // One in-flight reveal kind at a time, per card.
   const [loading, setLoading] = useState<RevealKind | null>(null);
@@ -332,14 +344,22 @@ function ApolloPersonCard({
         <HubSpotActions
           kind="contact"
           name={displayName}
+          apolloId={person.apolloId}
           email={emailRes?.ok ? emailRes.email : undefined}
+          phone={phoneRes?.ok ? phoneRes.phone : undefined}
+          jobtitle={person.title}
+          companyName={company}
+          companyDomain={domain}
           compact
           defaultSubject={`Call ${displayName}${person.title ? ` (${person.title})` : ""} — ${company}`}
           defaultBody={
-            `${displayName}${person.title ? `, ${person.title}` : ""} at ${company}. ` +
-            `Surfaced via Bito Signal as a prospect to reach.` +
-            `${person.seniority ? ` Seniority: ${person.seniority.replace(/_/g, " ")}.` : ""}` +
-            `${emailRes?.ok && emailRes.email ? ` Email: ${emailRes.email}.` : ""}`
+            `WHO: ${displayName}${person.title ? ` — ${person.title}` : ""}` +
+            `${person.seniority ? ` (${person.seniority.replace(/_/g, " ")})` : ""} at ${company}\n` +
+            `${emailRes?.ok && emailRes.email ? `Email: ${emailRes.email}\n` : ""}` +
+            `${phoneRes?.ok && phoneRes.phone ? `Phone: ${phoneRes.phone}\n` : ""}` +
+            `\nCOMPANY: ${ctx.companyLine}\n` +
+            `\nSIGNAL: ${ctx.signal}\n` +
+            `\nSUGGESTED OUTREACH:\n${draft?.text || ctx.outreach || "—"}`
           }
         />
       </div>
@@ -356,7 +376,15 @@ interface ApolloPeopleResponse {
 
 // Drives the stakeholder map from Apollo's live people-by-title search (real
 // people + ids), replacing the model's invented roles.
-function ApolloStakeholders({ company, domain }: { company: string; domain?: string }) {
+function ApolloStakeholders({
+  company,
+  domain,
+  ctx,
+}: {
+  company: string;
+  domain?: string;
+  ctx: ContactTaskContext;
+}) {
   const [data, setData] = useState<ApolloPeopleResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -428,7 +456,7 @@ function ApolloStakeholders({ company, domain }: { company: string; domain?: str
             <p className="text-xs text-ink-500">None surfaced.</p>
           ) : (
             decisionMakers.map((p, i) => (
-              <ApolloPersonCard key={p.apolloId || i} person={p} company={company} domain={domain} />
+              <ApolloPersonCard key={p.apolloId || i} person={p} company={company} domain={domain} ctx={ctx} />
             ))
           )}
         </div>
@@ -442,7 +470,7 @@ function ApolloStakeholders({ company, domain }: { company: string; domain?: str
             <p className="text-xs text-ink-500">None surfaced.</p>
           ) : (
             practitioners.map((p, i) => (
-              <ApolloPersonCard key={p.apolloId || i} person={p} company={company} domain={domain} />
+              <ApolloPersonCard key={p.apolloId || i} person={p} company={company} domain={domain} ctx={ctx} />
             ))
           )}
         </div>
@@ -463,6 +491,17 @@ export function CompanyIntel({
 }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+
+  // Company-level context woven into each contact's HubSpot task.
+  const contactCtx: ContactTaskContext = {
+    companyLine:
+      `${intel.name} — ${intel.segment.label}` +
+      `${intel.employeeBand ? `, ${intel.employeeBand} employees` : ""}` +
+      `${intel.sweEstimate ? `, ~${fmtNum(intel.sweEstimate)} SWEs` : ""}` +
+      `. ICP fit ${intel.icp.total}/99.${intel.oneLiner ? ` ${intel.oneLiner}` : ""}`,
+    signal: intel.summary,
+    outreach: intel.outreach.draftMessage || intel.outreach.hook || "",
+  };
 
   const copyDraft = async () => {
     if (!navigator.clipboard) {
@@ -631,7 +670,7 @@ export function CompanyIntel({
         icon={Users}
         iconColor="text-sky-400"
       >
-        <ApolloStakeholders company={intel.name} domain={intel.domain} />
+        <ApolloStakeholders company={intel.name} domain={intel.domain} ctx={contactCtx} />
       </Section>
 
       {/* Outreach angle — sits directly under the people to contact */}

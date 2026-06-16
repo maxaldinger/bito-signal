@@ -46,6 +46,11 @@ export function HubSpotActions({
   name,
   domain,
   email,
+  phone,
+  jobtitle,
+  apolloId,
+  companyName,
+  companyDomain,
   defaultSubject,
   defaultBody,
   compact = false,
@@ -54,6 +59,14 @@ export function HubSpotActions({
   name: string;
   domain?: string;
   email?: string;
+  /** Contact extras pushed into the HubSpot record on task create. */
+  phone?: string;
+  jobtitle?: string;
+  /** Apollo person id — lets the server reveal a missing email/phone. */
+  apolloId?: string;
+  /** Parent company for a contact (so the contact + task link to it). */
+  companyName?: string;
+  companyDomain?: string;
   defaultSubject: string;
   defaultBody: string;
   /** Smaller styling for use inside a contact card. */
@@ -146,6 +159,11 @@ export function HubSpotActions({
           name={name}
           domain={domain}
           email={email}
+          phone={phone}
+          jobtitle={jobtitle}
+          apolloId={apolloId}
+          companyName={companyName}
+          companyDomain={companyDomain}
           objectId={matchedId}
           defaultSubject={defaultSubject}
           defaultBody={defaultBody}
@@ -161,6 +179,11 @@ function TaskModal({
   name,
   domain,
   email,
+  phone,
+  jobtitle,
+  apolloId,
+  companyName,
+  companyDomain,
   objectId,
   defaultSubject,
   defaultBody,
@@ -170,6 +193,11 @@ function TaskModal({
   name: string;
   domain?: string;
   email?: string;
+  phone?: string;
+  jobtitle?: string;
+  apolloId?: string;
+  companyName?: string;
+  companyDomain?: string;
   objectId?: string;
   defaultSubject: string;
   defaultBody: string;
@@ -193,7 +221,22 @@ function TaskModal({
       const res = await fetch("/api/hubspot/task", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, name, domain, email, objectId, subject, body, dueDateMs, taskType }),
+        body: JSON.stringify({
+          kind,
+          name,
+          domain,
+          email,
+          phone,
+          jobtitle,
+          apolloId,
+          companyName,
+          companyDomain,
+          objectId,
+          subject,
+          body,
+          dueDateMs,
+          taskType,
+        }),
       });
       let data: TaskResp;
       try {

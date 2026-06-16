@@ -69,7 +69,7 @@ function statusError(status: number, what: string): string {
 
 async function hsFetch(
   path: string,
-  init: { method: "GET" | "POST"; body?: unknown },
+  init: { method: "GET" | "POST" | "PATCH" | "PUT"; body?: unknown },
   key: string
 ): Promise<{ status: number; body: unknown }> {
   const res = await fetch(`${BASE}${path}`, {
@@ -188,97 +188,199 @@ export async function hubspotSearch(
   return { configured: true, ok: true, found: records.length > 0, records };
 }
 
-async function createRecord(
-  kind: HsKind,
-  opts: { name?: string; domain?: string; email?: string },
-  key: string
-): Promise<{ ok: boolean; record?: HsRecord; error?: string }> {
-  const objType = kind === "company" ? "companies" : "contacts";
-  let properties: Record<string, string>;
-  if (kind === "company") {
-    if (!opts.name && !opts.domain) return { ok: false, error: "company needs a name or domain" };
-    properties = {};
-    if (opts.name) properties.name = opts.name;
-    if (opts.domain) properties.domain = opts.domain;
-  } else {
-    properties = {};
-    if (opts.email) properties.email = opts.email;
-    if (opts.name) {
-      const [first, ...rest] = opts.name.split(" ");
-      properties.firstname = first;
-      if (rest.length) properties.lastname = rest.join(" ");
-    }
-    if (!properties.email && !properties.firstname)
-      return { ok: false, error: "contact needs a name or email" };
-  }
+// HubSpot default association: Contact → Company (primary).
+const CONTACT_TO_COMPANY = 279;
 
+async function createObject(
+  objType: "companies" | "contacts",
+  properties: Record<string, string>,
+  key: string
+): Promise<{ ok: boolean; id?: string; error?: string }> {
   const { status, body } = await hsFetch(`/crm/v3/objects/${objType}`, { method: "POST", body: { properties } }, key);
-  if (status !== 201 && status !== 200) return { ok: false, error: statusError(status, `create ${kind}`) };
+  if (status !== 201 && status !== 200) return { ok: false, error: statusError(status, `create ${objType}`) };
   const id = (body as { id?: string } | undefined)?.id;
-  if (!id) return { ok: false, error: `HubSpot create ${kind} returned no id` };
+  return id ? { ok: true, id } : { ok: false, error: `HubSpot create ${objType} returned no id` };
+}
+
+// Best-effort field fill on an existing record — never throws, so enrichment
+// failures don't block task creation.
+async function patchObject(
+  objType: "companies" | "contacts",
+  id: string,
+  properties: Record<string, string>,
+  key: string
+): Promise<void> {
+  if (Object.keys(properties).length === 0) return;
+  try {
+    await hsFetch(`/crm/v3/objects/${objType}/${id}`, { method: "PATCH", body: { properties } }, key);
+  } catch {
+    /* non-fatal */
+  }
+}
+
+async function associateDefault(
+  fromType: string,
+  fromId: string,
+  toType: string,
+  toId: string,
+  key: string
+): Promise<void> {
+  try {
+    await hsFetch(
+      `/crm/v4/objects/${fromType}/${fromId}/associations/default/${toType}/${toId}`,
+      { method: "PUT" },
+      key
+    );
+  } catch {
+    /* non-fatal — the task still lands on the primary record */
+  }
+}
+
+function contactProps(opts: { name?: string; email?: string; phone?: string; jobtitle?: string }): Record<string, string> {
+  const p: Record<string, string> = {};
+  if (opts.email) p.email = opts.email;
+  if (opts.phone) p.phone = opts.phone;
+  if (opts.jobtitle) p.jobtitle = opts.jobtitle;
+  if (opts.name) {
+    const [first, ...rest] = opts.name.split(" ");
+    if (first) p.firstname = first;
+    if (rest.length) p.lastname = rest.join(" ");
+  }
+  return p;
+}
+
+// Resolve (objectId → search → create) a company, returning its id + record.
+async function resolveCompany(
+  opts: { name?: string; domain?: string; objectId?: string },
+  key: string
+): Promise<{ ok: boolean; error?: string; id?: string; record?: HsRecord; created?: boolean }> {
+  if (!opts.objectId && !opts.name && !opts.domain) return { ok: true }; // nothing to link
+  if (opts.objectId) return { ok: true, id: opts.objectId, record: { id: opts.objectId, name: opts.name } };
+  const search = await hubspotSearch("company", { name: opts.name, domain: opts.domain });
+  if (!search.ok) return { ok: false, error: search.error };
+  if (search.found) return { ok: true, id: search.records[0].id, record: search.records[0], created: false };
+  const props: Record<string, string> = {};
+  if (opts.name) props.name = opts.name;
+  if (opts.domain) props.domain = opts.domain;
+  const c = await createObject("companies", props, key);
+  if (!c.ok || !c.id) return { ok: false, error: c.error };
   const pid = await portalId(key);
   return {
     ok: true,
-    record: {
-      id,
-      name: opts.name,
-      detail: kind === "company" ? opts.domain : opts.email,
-      url: recordUrl(pid, kind === "company" ? OBJ_COMPANY : OBJ_CONTACT, id),
-    },
+    id: c.id,
+    created: true,
+    record: { id: c.id, name: opts.name, detail: opts.domain, url: recordUrl(pid, OBJ_COMPANY, c.id) },
   };
 }
 
 /**
- * Create a HubSpot task and associate it to the company/contact. Resolves the
- * record by `objectId` (from a prior search) or by searching; if still missing,
- * creates a minimal record so the task is never orphaned.
+ * Create a HubSpot task with a fully-populated CRM record behind it.
+ *
+ * For a contact: resolves/creates the parent company, resolves/creates the
+ * contact while writing email + phone + job title into its standard fields
+ * (filling them on an existing contact too), links the contact to the company,
+ * then creates the task associated to BOTH the contact and the company.
+ * For a company: resolves/creates the company and associates the task to it.
+ * Records are never orphaned and never fabricated beyond the fields provided.
  */
 export async function hubspotCreateTask(input: {
   kind: HsKind;
   objectId?: string;
+  // contact fields
   name?: string;
-  domain?: string;
   email?: string;
+  phone?: string;
+  jobtitle?: string;
+  // company (linkage for a contact, or the target for a company task)
+  companyName?: string;
+  companyDomain?: string;
+  companyObjectId?: string;
+  // company-task target (kind === "company")
+  domain?: string;
+  // task
   subject: string;
   body: string;
   dueDateMs: number;
   taskType?: HsTaskType;
 }): Promise<HsTaskResult> {
-  const fail = (configured: boolean, error: string): HsTaskResult => ({
-    configured,
-    ok: false,
-    error,
-  });
+  const fail = (configured: boolean, error: string): HsTaskResult => ({ configured, ok: false, error });
 
   const key = token();
   if (!key) return fail(false, "HUBSPOT_TOKEN not set — add it to .env.local / Vercel env");
   if (!input.subject?.trim()) return fail(true, "A task subject is required");
   if (!Number.isFinite(input.dueDateMs)) return fail(true, "A valid due date is required");
 
-  // 1. Resolve the CRM record to associate the task with.
-  let record: HsRecord | undefined;
-  let created = false;
-  if (input.objectId) {
-    record = { id: input.objectId, name: input.name };
+  // Association ids of the records this task should appear on.
+  const taskAssociations: { id: string; typeId: number }[] = [];
+  let primary: (HsRecord & { kind: HsKind; created: boolean }) | undefined;
+
+  if (input.kind === "company") {
+    const co = await resolveCompany(
+      { name: input.name, domain: input.domain, objectId: input.objectId },
+      key
+    );
+    if (!co.ok || !co.id) return fail(true, co.error || "Could not resolve the company in HubSpot");
+    taskAssociations.push({ id: co.id, typeId: TASK_TO_COMPANY });
+    primary = { ...(co.record as HsRecord), kind: "company", created: Boolean(co.created) };
   } else {
-    const search = await hubspotSearch(input.kind, {
-      name: input.name,
-      domain: input.domain,
-      email: input.email,
-    });
-    if (!search.ok) return fail(true, search.error || "HubSpot lookup failed");
-    if (search.found) {
-      record = search.records[0];
-    } else {
-      const c = await createRecord(input.kind, { name: input.name, domain: input.domain, email: input.email }, key);
-      if (!c.ok || !c.record) return fail(true, c.error || `Could not create ${input.kind} in HubSpot`);
-      record = c.record;
-      created = true;
+    // 1. Parent company (so the contact + task hang off it).
+    const co = await resolveCompany(
+      { name: input.companyName, domain: input.companyDomain, objectId: input.companyObjectId },
+      key
+    );
+    if (!co.ok) return fail(true, co.error || "Could not resolve the parent company");
+
+    // 2. Contact — find or create, then fill email/phone/jobtitle.
+    let contactId = input.objectId;
+    let contactRecord: HsRecord | undefined;
+    let contactCreated = false;
+    if (!contactId) {
+      const search = await hubspotSearch("contact", { name: input.name, email: input.email });
+      if (!search.ok) return fail(true, search.error || "HubSpot contact lookup failed");
+      if (search.found) {
+        contactId = search.records[0].id;
+        contactRecord = search.records[0];
+      }
     }
+    if (contactId) {
+      // Enrich an existing contact: set phone/jobtitle (and email only if we have
+      // one and it's safe — HubSpot keys identity on email, so we never blank it).
+      const patch: Record<string, string> = {};
+      if (input.phone) patch.phone = input.phone;
+      if (input.jobtitle) patch.jobtitle = input.jobtitle;
+      await patchObject("contacts", contactId, patch, key);
+    } else {
+      const props = contactProps({
+        name: input.name,
+        email: input.email,
+        phone: input.phone,
+        jobtitle: input.jobtitle,
+      });
+      if (!props.email && !props.firstname) return fail(true, "Contact needs a name or email");
+      const c = await createObject("contacts", props, key);
+      if (!c.ok || !c.id) return fail(true, c.error || "Could not create the contact in HubSpot");
+      contactId = c.id;
+      contactCreated = true;
+    }
+
+    const pid = await portalId(key);
+    contactRecord = contactRecord ?? {
+      id: contactId,
+      name: input.name,
+      detail: input.email,
+      url: recordUrl(pid, OBJ_CONTACT, contactId),
+    };
+
+    // 3. Link contact → company, and put the task on both records.
+    if (co.id) {
+      await associateDefault("contacts", contactId, "companies", co.id, key);
+      taskAssociations.push({ id: co.id, typeId: TASK_TO_COMPANY });
+    }
+    taskAssociations.push({ id: contactId, typeId: TASK_TO_CONTACT });
+    primary = { ...contactRecord, kind: "contact", created: contactCreated };
   }
 
-  // 2. Create the task with the association.
-  const typeId = input.kind === "company" ? TASK_TO_COMPANY : TASK_TO_CONTACT;
+  // Create the task, associated to every resolved record.
   const payload = {
     properties: {
       hs_task_subject: input.subject.trim(),
@@ -288,12 +390,10 @@ export async function hubspotCreateTask(input: {
       hs_task_priority: "MEDIUM",
       hs_task_type: input.taskType ?? "CALL",
     },
-    associations: [
-      {
-        to: { id: record!.id },
-        types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: typeId }],
-      },
-    ],
+    associations: taskAssociations.map((a) => ({
+      to: { id: a.id },
+      types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: a.typeId }],
+    })),
   };
 
   let status: number;
@@ -312,6 +412,6 @@ export async function hubspotCreateTask(input: {
     ok: true,
     taskId,
     taskUrl: taskId ? recordUrl(pid, OBJ_TASK, taskId) : undefined,
-    linkedTo: record ? { ...record, kind: input.kind, created } : undefined,
+    linkedTo: primary,
   };
 }

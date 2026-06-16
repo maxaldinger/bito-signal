@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hubspotCreateTask, type HsKind, type HsTaskType } from "@/lib/hubspot";
+import { apolloPersonContact } from "@/lib/enrich/apollo";
 
 // POST /api/hubspot/task
-// body: { kind, name?, domain?, email?, objectId?, subject, body, dueDateMs, taskType? }
-// Creates a HubSpot task linked to the company/contact (resolving or creating
-// the record so the task is never orphaned).
-export const maxDuration = 25;
+// body: {
+//   kind, subject, body, dueDateMs, taskType?, objectId?,
+//   // company task: name (company), domain
+//   // contact task: name (contact), email?, phone?, jobtitle?, apolloId?,
+//   //               companyName?, companyDomain?
+// }
+// Creates a HubSpot task with a fully-populated record behind it. For a contact,
+// any missing email/phone is revealed from Apollo (by apolloId) so the CRM
+// contact lands complete.
+export const maxDuration = 30;
 
 const TASK_TYPES = new Set(["CALL", "EMAIL", "TODO"]);
 
@@ -15,6 +22,11 @@ export async function POST(req: NextRequest) {
     name?: string;
     domain?: string;
     email?: string;
+    phone?: string;
+    jobtitle?: string;
+    apolloId?: string;
+    companyName?: string;
+    companyDomain?: string;
     objectId?: string;
     subject?: string;
     body?: string;
@@ -39,12 +51,31 @@ export async function POST(req: NextRequest) {
   const taskType =
     body.taskType && TASK_TYPES.has(body.taskType) ? (body.taskType as HsTaskType) : "CALL";
 
+  // Complete the contact: reveal any missing email/phone from Apollo so the
+  // HubSpot record gets real contact info (best-effort — never blocks the task).
+  let email = body.email;
+  let phone = body.phone;
+  if (body.kind === "contact" && body.apolloId) {
+    if (!email) {
+      const r = await apolloPersonContact({ id: body.apolloId, reveal: "email" });
+      if (r.ok && r.email) email = r.email;
+    }
+    if (!phone) {
+      const r = await apolloPersonContact({ id: body.apolloId, reveal: "phone" });
+      if (r.ok && r.phone) phone = r.phone;
+    }
+  }
+
   const result = await hubspotCreateTask({
     kind: body.kind as HsKind,
     objectId: body.objectId,
     name: body.name,
     domain: body.domain,
-    email: body.email,
+    email,
+    phone,
+    jobtitle: body.jobtitle,
+    companyName: body.companyName,
+    companyDomain: body.companyDomain,
     subject: body.subject,
     body: body.body ?? "",
     dueDateMs: body.dueDateMs,
