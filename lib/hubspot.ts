@@ -51,8 +51,56 @@ export interface HsTaskResult {
   linkedTo?: HsRecord & { kind: HsKind; created: boolean };
 }
 
-function token(): string | undefined {
-  return process.env.HUBSPOT_TOKEN;
+// HUBSPOT_TOKEN may be either:
+//   - a Private App access token ("pat-na1-…") — used directly as a Bearer; or
+//   - a Personal Access Key (the CLI credential) — which is exchanged here for a
+//     short-lived OAuth access token via HubSpot's local-dev auth endpoint.
+const PAK_REFRESH_URL = "https://api.hubapi.com/localdevauth/v1/auth/refresh";
+let accessTokenCache: { token: string; expiresAt: number } | undefined;
+
+async function resolveAccessToken(): Promise<
+  { ok: true; token: string } | { ok: false; configured: boolean; error: string }
+> {
+  const raw = process.env.HUBSPOT_TOKEN?.trim();
+  if (!raw)
+    return { ok: false, configured: false, error: "HUBSPOT_TOKEN not set — add it to .env.local / Vercel env" };
+
+  // Private App token — usable as-is.
+  if (raw.startsWith("pat-")) return { ok: true, token: raw };
+
+  // Personal Access Key — exchange for a cached short-lived access token.
+  const now = Date.now();
+  if (accessTokenCache && accessTokenCache.expiresAt - 60_000 > now) {
+    return { ok: true, token: accessTokenCache.token };
+  }
+  try {
+    const res = await fetch(PAK_REFRESH_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ encodedOAuthRefreshToken: raw }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status !== 200) {
+      return { ok: false, configured: true, error: statusError(res.status, "personal-access-key exchange") };
+    }
+    const j = (await res.json()) as {
+      oauthAccessToken?: string;
+      expiresAtMillis?: number;
+      hubId?: number;
+    };
+    if (!j.oauthAccessToken)
+      return { ok: false, configured: true, error: "HubSpot PAK exchange returned no access token" };
+    accessTokenCache = { token: j.oauthAccessToken, expiresAt: j.expiresAtMillis ?? now + 25 * 60_000 };
+    // The exchange already tells us the portal — skip the account-info call.
+    if (j.hubId && portalIdCache === undefined) portalIdCache = String(j.hubId);
+    return { ok: true, token: j.oauthAccessToken };
+  } catch (e) {
+    return {
+      ok: false,
+      configured: true,
+      error: isTimeout(e) ? "HubSpot PAK exchange timed out" : "HubSpot PAK exchange failed",
+    };
+  }
 }
 
 function isTimeout(e: unknown): boolean {
@@ -128,8 +176,9 @@ export async function hubspotSearch(
     records: [],
   });
 
-  const key = token();
-  if (!key) return fail(false, "HUBSPOT_TOKEN not set — add it to .env.local / Vercel env");
+  const auth = await resolveAccessToken();
+  if (!auth.ok) return fail(auth.configured, auth.error);
+  const key = auth.token;
 
   const objType = kind === "company" ? "companies" : "contacts";
   const properties =
@@ -305,8 +354,9 @@ export async function hubspotCreateTask(input: {
 }): Promise<HsTaskResult> {
   const fail = (configured: boolean, error: string): HsTaskResult => ({ configured, ok: false, error });
 
-  const key = token();
-  if (!key) return fail(false, "HUBSPOT_TOKEN not set — add it to .env.local / Vercel env");
+  const auth = await resolveAccessToken();
+  if (!auth.ok) return fail(auth.configured, auth.error);
+  const key = auth.token;
   if (!input.subject?.trim()) return fail(true, "A task subject is required");
   if (!Number.isFinite(input.dueDateMs)) return fail(true, "A valid due date is required");
 
