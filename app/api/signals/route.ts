@@ -353,6 +353,35 @@ const ICP_KEYWORD_SEGMENT: Record<string, SegmentId> = {
   media: "media",
 };
 
+// Apollo sweep records carry only TOTAL-employee counts, never a SWE count.
+// To give the size filter something to bite on, model a rough engineer-share of
+// headcount — same spirit as the grader's modeled sweEstimate, surfaced with a
+// "~" in the UI so it never reads as a stated fact. Tech-native shops are
+// mostly-engineering; traditional industries run a large workforce around a
+// comparatively small in-house software org. When Apollo omits the per-org
+// headcount we fall back to a representative figure for the matched band.
+const TECH_NATIVE_SWEEP_KEYWORDS = new Set([
+  "developer tools",
+  "saas",
+  "fintech",
+  "artificial intelligence",
+]);
+
+function modeledSweFromOrg(org: IcpSweepOrg): number | undefined {
+  const techNative = TECH_NATIVE_SWEEP_KEYWORDS.has(org.matchedKeyword);
+  // Representative total when Apollo's per-org count is missing: tech-native
+  // matches the 100-2000 band, traditional the 5,000+ band.
+  const total =
+    typeof org.estimatedEmployees === "number" && org.estimatedEmployees > 0
+      ? org.estimatedEmployees
+      : techNative
+        ? 600
+        : 15000;
+  const engShare = techNative ? 0.35 : 0.03;
+  const swe = Math.round(total * engShare);
+  return swe > 0 ? swe : undefined;
+}
+
 function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
   return orgs.map((org, i) => ({
     id: `icp-${i}-${Date.now().toString(36)}`,
@@ -368,7 +397,9 @@ function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
     source: "Apollo org search",
     url: org.linkedinUrl || org.websiteUrl,
     date: todayISO(),
-    sweEstimate: undefined, // total headcount ≠ SWE count — never conflate
+    // Modeled engineer-share of Apollo's total headcount (see modeledSweFromOrg)
+    // so the eng-team-size filter has a value to match on. Rough by design.
+    sweEstimate: modeledSweFromOrg(org),
     codebaseHint: undefined,
   }));
 }

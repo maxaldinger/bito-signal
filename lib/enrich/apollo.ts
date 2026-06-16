@@ -494,6 +494,8 @@ export interface IcpSweepOrg {
   matchedKeyword: string;
   /** The headcount filter band the org matched (e.g. "100-2000 employees"). */
   employeeBand: string;
+  /** Apollo's per-org TOTAL employee estimate, when present (not SWE count). */
+  estimatedEmployees?: number;
 }
 
 export interface IcpSweepResult {
@@ -539,6 +541,7 @@ interface ApolloAccountRecord {
   domain?: string;
   website_url?: string;
   linkedin_url?: string;
+  estimated_num_employees?: number;
 }
 
 // organization_locations[] filter values per intel region (verified Apollo
@@ -616,6 +619,7 @@ export async function apolloIcpSweep(page = 1, region: RegionId = "us"): Promise
           linkedinUrl: str(a.linkedin_url),
           matchedKeyword: batch.query.keyword,
           employeeBand: batch.query.bandLabel,
+          estimatedEmployees: num(a.estimated_num_employees),
         });
       }
     }
