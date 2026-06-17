@@ -90,7 +90,7 @@ export function SignalFeed({
   pendingBuckets,
   bucketErrors,
   metrics,
-  unfilteredCount,
+  hiddenCount,
   onClearFilters,
   onSelectCompany,
   onGetIntel,
@@ -128,8 +128,8 @@ export function SignalFeed({
   pendingBuckets: SignalTypeId[];
   bucketErrors: Partial<Record<SignalTypeId, string>>;
   metrics: { total: number; accounts: number; avgFit: number; hot: number };
-  /** Rows on the current page BEFORE client-side filters. */
-  unfilteredCount: number;
+  /** How many cached signals the active filters are hiding (global). */
+  hiddenCount: number;
   onClearFilters: () => void;
   onSelectCompany: (c: string) => void;
   onGetIntel: (c: string) => void;
@@ -265,11 +265,10 @@ export function SignalFeed({
       )}
 
       {/* Filters hiding rows — say so loudly instead of looking like a small pull */}
-      {!loading && unfilteredCount > signals.length && (
+      {!loading && hiddenCount > 0 && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-500/30 bg-violet-500/10 px-4 py-2.5">
           <p className="font-mono text-xs text-violet-300">
-            ▸ {unfilteredCount - signals.length} of {unfilteredCount} signals on this
-            page hidden by your filters
+            ▸ {hiddenCount} cached signal{hiddenCount === 1 ? "" : "s"} hidden by your filters
           </p>
           <button
             onClick={onClearFilters}
@@ -379,9 +378,9 @@ export function SignalFeed({
       ) : sorted.length === 0 ? (
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
           <p className="text-sm text-ink-400">
-            {unfilteredCount > 0
-              ? "No signals on this page match the current filters. Clear a filter above, or check the next page."
-              : "No signals on this page."}
+            {hiddenCount > 0
+              ? "No cached signals match the current filters. Clear a filter to see them."
+              : "No signals cached yet — hit Pull More Signals."}
           </p>
         </div>
       ) : (

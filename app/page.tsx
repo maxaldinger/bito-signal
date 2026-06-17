@@ -163,15 +163,15 @@ export default function Page() {
     [],
   );
 
-  // ---- Cache mode: paged history ----------------------------------------
-  const loadHistory = useCallback(async (p: number): Promise<{ configured: boolean; total: number }> => {
+  // ---- Cache mode: load the WHOLE region cache, sort/paginate client-side ----
+  // (so sort + filters apply globally, not just to one server page).
+  const loadAll = useCallback(async (): Promise<{ configured: boolean; total: number }> => {
     const reqId = ++feedReqId.current;
     setHistoryError(null);
     try {
-      const res = await fetch(
-        `/api/signals/history?page=${p}&region=${regionRef.current}`,
-        { cache: "no-store" },
-      );
+      const res = await fetch(`/api/signals/history?all=1&region=${regionRef.current}`, {
+        cache: "no-store",
+      });
       const data = await readJson(res);
       if (reqId !== feedReqId.current) return { configured: true, total: 0 };
       if (!res.ok) {
@@ -187,7 +187,6 @@ export default function Page() {
         setSignals(Array.isArray(data.signals) ? (data.signals as Signal[]) : []);
         setTotal(Number(data.total) || 0);
         totalRef.current = Number(data.total) || 0;
-        setPage(p);
         setLastFetchAt(Date.now());
         setFeedLoading(false);
       }
@@ -211,11 +210,12 @@ export default function Page() {
     const reqId = ++feedReqId.current;
     const { failed } = await scanBuckets({ force: true, appendLive: false, reqId });
     if (reqId === feedReqId.current) {
-      const { total: after } = await loadHistory(1);
+      const { total: after } = await loadAll();
       setPullResult({ added: Math.max(0, after - before), failed });
+      setPage(1);
       setPulling(false);
     }
-  }, [pulling, scanBuckets, loadHistory]);
+  }, [pulling, scanBuckets, loadAll]);
 
   // Ephemeral mode (no Supabase): progressive append, like before.
   const runEphemeralScan = useCallback(
@@ -244,7 +244,7 @@ export default function Page() {
       } catch {
         /* private mode — default region stands */
       }
-      const { configured } = await loadHistory(1);
+      const { configured } = await loadAll();
       if (!configured) {
         await runEphemeralScan(false);
       }
@@ -268,10 +268,11 @@ export default function Page() {
       setBucketErrors({});
       setPendingBuckets([]);
       setFeedLoading(true);
-      loadHistory(1);
+      setPage(1);
+      loadAll();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [loadHistory],
+    [loadAll],
   );
 
   useEffect(() => {
@@ -379,18 +380,34 @@ export default function Page() {
     });
   }, [filtered, sort, scoresMap, prospectedMap, lowPriMap, presenceMap]);
 
+  // Client-side pagination over the globally sorted+filtered set.
+  const pageCount = Math.max(1, Math.ceil(sortedFiltered.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), pageCount);
+  const pageItems = useMemo(
+    () => sortedFiltered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [sortedFiltered, safePage],
+  );
+  // How many cached signals the active filters are hiding (global, not per page).
+  const hiddenByFilters = signals.length - filtered.length;
+
+  // Changing filters/sort/region resets to page 1 so you never land past the end.
+  useEffect(() => {
+    setPage(1);
+  }, [segments, types, bands, minStrength, search, sort, region]);
+
+  // Metrics describe the current page (label is "signals on page").
   const metrics = useMemo(() => {
-    const accounts = new Set(filtered.map((s) => s.account));
-    const avgFit = filtered.length
-      ? Math.round(filtered.reduce((sum, s) => sum + s.strength, 0) / filtered.length)
+    const accounts = new Set(pageItems.map((s) => s.account));
+    const avgFit = pageItems.length
+      ? Math.round(pageItems.reduce((sum, s) => sum + s.strength, 0) / pageItems.length)
       : 0;
     return {
-      total: filtered.length,
+      total: pageItems.length,
       accounts: accounts.size,
       avgFit,
-      hot: filtered.filter((s) => s.strength >= 80).length,
+      hot: pageItems.filter((s) => s.strength >= 80).length,
     };
-  }, [filtered]);
+  }, [pageItems]);
 
   const getIntel = useCallback(async (company: string, fresh = false) => {
     const reqId = ++intelReqId.current;
@@ -428,7 +445,7 @@ export default function Page() {
   const refresh = () => {
     setRefreshing(true);
     const done = () => setTimeout(() => setRefreshing(false), 400);
-    if (cacheMode) loadHistory(page).finally(done);
+    if (cacheMode) loadAll().finally(done);
     else {
       setFeedLoading(true);
       runEphemeralScan(true).finally(done);
@@ -443,7 +460,8 @@ export default function Page() {
     setIntelError(null);
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Pages now span the full sorted+filtered set (client-side), not a server page.
+  const totalPages = pageCount;
 
   return (
     <div className="min-h-screen bg-ink-950">
@@ -468,14 +486,14 @@ export default function Page() {
               <PullControls
                 cacheMode={cacheMode}
                 region={region}
-                page={page}
+                page={safePage}
                 totalPages={totalPages}
                 totalCached={total}
                 signalCount={filtered.length}
                 updated={lastUpdated}
                 pulling={pulling}
                 onPullMore={runPull}
-                onPage={(p) => loadHistory(p)}
+                onPage={setPage}
               />
             ) : null
           }
@@ -505,23 +523,23 @@ export default function Page() {
                   <PullControls
                     cacheMode={cacheMode}
                     region={region}
-                    page={page}
+                    page={safePage}
                     totalPages={totalPages}
                     totalCached={total}
                     signalCount={filtered.length}
                     updated={lastUpdated}
                     pulling={pulling}
                     onPullMore={runPull}
-                    onPage={(p) => loadHistory(p)}
+                    onPage={setPage}
                   />
                 </div>
                 <SignalFeed
-                  signals={sortedFiltered}
+                  signals={pageItems}
                   sort={sort}
                   onSort={setSort}
-                  page={page}
+                  page={safePage}
                   totalPages={totalPages}
-                  onPage={(p) => loadHistory(p)}
+                  onPage={setPage}
                   pullResult={pullResult}
                   onDismissPullResult={() => setPullResult(null)}
                   loading={feedLoading}
@@ -532,7 +550,7 @@ export default function Page() {
                   pendingBuckets={pendingBuckets}
                   bucketErrors={bucketErrors}
                   metrics={metrics}
-                  unfilteredCount={signals.length}
+                  hiddenCount={hiddenByFilters}
                 onClearFilters={() => {
                   setSegments([]);
                   setTypes([]);

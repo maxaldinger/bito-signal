@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchSignalPage, supabaseConfigured } from "@/lib/supabase";
+import { fetchSignalPage, fetchAllSignals, supabaseConfigured } from "@/lib/supabase";
 import { isRegionId, type RegionId } from "@/lib/data";
 
 // Paged read over the Supabase signal cache. 50 results per page.
@@ -25,7 +25,12 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, Number(req.nextUrl.searchParams.get("page")) || 1);
   const regionParam = req.nextUrl.searchParams.get("region")?.trim().toLowerCase();
   const region: RegionId = isRegionId(regionParam) ? regionParam : "us";
-  const result = await fetchSignalPage(page, PAGE_SIZE, region);
+  // all=1 returns the whole region cache so the client can sort/paginate
+  // globally; otherwise a single server page (legacy / fallback).
+  const all = req.nextUrl.searchParams.get("all") === "1";
+  const result = all
+    ? await fetchAllSignals(region)
+    : await fetchSignalPage(page, PAGE_SIZE, region);
 
   if (!result.ok) {
     return NextResponse.json(
@@ -39,6 +44,7 @@ export async function GET(req: NextRequest) {
       configured: true,
       signals: result.signals,
       total: result.total,
+      capped: result.capped ?? false,
       page,
       pageSize: PAGE_SIZE,
     },

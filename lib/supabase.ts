@@ -272,6 +272,53 @@ export interface SignalPage {
   error?: string;
   signals: Signal[];
   total: number;
+  /** True when the cache exceeded `cap` and only the most-recent rows loaded. */
+  capped?: boolean;
+}
+
+/**
+ * Fetch the whole cache for a region (newest-seen first), so the client can
+ * sort/filter/paginate GLOBALLY rather than per server page. PostgREST caps a
+ * single response at ~1000 rows, so we page through in chunks up to `cap`.
+ */
+export async function fetchAllSignals(region: RegionId, cap = 5000): Promise<SignalPage> {
+  const cfg = config();
+  if (!cfg) {
+    return { configured: false, ok: false, error: "Supabase not configured", signals: [], total: 0 };
+  }
+  const chunk = 1000;
+  const all: Signal[] = [];
+  let total = 0;
+  try {
+    for (let offset = 0; offset < cap; offset += chunk) {
+      const res = await fetch(
+        `${cfg.url}/rest/v1/bito_signals?select=*&region=eq.${region}&order=last_seen_at.desc,strength.desc&limit=${chunk}&offset=${offset}`,
+        {
+          headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}`, Prefer: "count=exact" },
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+          cache: "no-store",
+        },
+      );
+      if (!res.ok) {
+        const detail = (await res.text().catch(() => "")).slice(0, 200);
+        return { configured: true, ok: false, error: `Supabase read ${res.status}: ${detail}`, signals: [], total: 0 };
+      }
+      const rows = (await res.json()) as SignalRow[];
+      const range = res.headers.get("content-range") ?? "";
+      total = Number(range.split("/")[1]) || total || all.length + rows.length;
+      all.push(...rows.map(rowToSignal));
+      if (rows.length < chunk) break; // reached the end
+    }
+    return { configured: true, ok: true, signals: all, total, capped: total > all.length };
+  } catch (e) {
+    return {
+      configured: true,
+      ok: false,
+      error: `Supabase read failed: ${e instanceof Error ? e.message : String(e)}`,
+      signals: [],
+      total: 0,
+    };
+  }
 }
 
 /** Fetch one page of cached signals, newest-seen first, with an exact total. */
