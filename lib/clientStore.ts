@@ -374,6 +374,7 @@ export type ApolloReveal = {
   email?: string;
   emailStatus?: string;
   phone?: string;
+  country?: string;
 };
 const apolloReveals = makeStore<Record<string, ApolloReveal>>("bito-apollo-reveals", {});
 

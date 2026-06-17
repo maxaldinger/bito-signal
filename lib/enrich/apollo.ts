@@ -333,6 +333,8 @@ export interface ApolloPersonContact {
   /** Populated for reveal "phone". */
   phone?: string;
   linkedinUrl?: string;
+  /** Person's country, from the richer match response (search is often thin). */
+  country?: string;
 }
 
 interface ApolloPhoneNumber {
@@ -414,6 +416,7 @@ export async function apolloPersonContact(opts: {
     name: fullName || opts.name,
     title: str(person.title),
     linkedinUrl: str(person.linkedin_url),
+    country: str(person.country),
   };
 
   if (opts.reveal === "email") {

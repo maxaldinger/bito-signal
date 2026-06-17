@@ -96,6 +96,7 @@ interface ApolloRevealResult {
 
 interface ApolloRevealPayload extends ApolloRevealResult {
   name?: string;
+  country?: string;
 }
 
 // Apollo's `seniority` (or title, as a fallback) splits real contacts into the
@@ -147,8 +148,10 @@ function ApolloPersonCard({
     email: undefined,
     phone: undefined,
   });
-  // Apollo un-obfuscates the full name on reveal — swap it in when it arrives.
+  // Apollo un-obfuscates the full name (and returns location) on reveal — swap
+  // them in when they arrive, since the people SEARCH is too thin to include them.
   const [revealedName, setRevealedName] = useState<string | undefined>(undefined);
+  const [revealedCountry, setRevealedCountry] = useState<string | undefined>(undefined);
 
   const reveal = async (kind: RevealKind) => {
     if (loading) return;
@@ -174,12 +177,20 @@ function ApolloPersonCard({
       setResult((r) => ({ ...r, [kind]: data }));
       if (data.ok) {
         if (data.name) setRevealedName(data.name);
+        if (data.country) setRevealedCountry(data.country);
         // Cache by Apollo id so reopening the brief reuses it (no re-spend). Use
         // "" for an attempted-but-empty field so it reads as "tried, none found"
         // rather than "not yet tried" (which would re-reveal next time).
         if (person.apolloId) {
-          const patch: { name?: string; email?: string; emailStatus?: string; phone?: string } = {};
+          const patch: {
+            name?: string;
+            email?: string;
+            emailStatus?: string;
+            phone?: string;
+            country?: string;
+          } = {};
           if (data.name) patch.name = data.name;
+          if (data.country) patch.country = data.country;
           if (kind === "email") {
             patch.email = data.email ?? "";
             patch.emailStatus = data.emailStatus;
@@ -210,6 +221,7 @@ function ApolloPersonCard({
     let cancelled = false;
     const cached = getReveal(id);
     if (cached?.name) setRevealedName(cached.name);
+    if (cached?.country) setRevealedCountry(cached.country);
     if (cached?.email !== undefined)
       setResult((r) => ({
         ...r,
@@ -281,6 +293,9 @@ function ApolloPersonCard({
   };
 
   const displayName = revealedName || person.name;
+  // Location: the people SEARCH is too thin to include it, so prefer the value
+  // the reveal returned (or its cache) and fall back to whatever search gave us.
+  const displayCountry = revealedCountry || person.country;
   const liQuery = `${company} ${revealedName || person.title || ""}`.trim();
   const emailRes = result.email;
   const phoneRes = result.phone;
@@ -313,11 +328,11 @@ function ApolloPersonCard({
           )}
         </div>
       </div>
-      {(person.title || person.country) && (
+      {(person.title || displayCountry) && (
         <p className="mt-1 text-xs text-ink-400">
           {person.title}
-          {person.title && person.country ? " · " : ""}
-          {person.country && <span className="text-ink-500">{person.country}</span>}
+          {person.title && displayCountry ? " · " : ""}
+          {displayCountry && <span className="text-ink-500">{displayCountry}</span>}
         </p>
       )}
 
