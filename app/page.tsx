@@ -346,6 +346,8 @@ export default function Page() {
           return a.account.localeCompare(b.account);
         case "hubspot":
           return Number(inHubspot(b)) - Number(inHubspot(a));
+        case "nothubspot":
+          return Number(inHubspot(a)) - Number(inHubspot(b));
         default:
           return 0; // "feed": keep the original pull order
       }

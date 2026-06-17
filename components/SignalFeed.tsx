@@ -23,7 +23,14 @@ import { IntelExpander } from "./IntelExpander";
 
 // Feed sort. "feed" = mixed (original pull order). The rest sort the cards;
 // minimized/low-priority cards always sink to the bottom regardless (page.tsx).
-export type FeedSort = "feed" | "fit" | "size" | "recent" | "az" | "hubspot";
+export type FeedSort =
+  | "feed"
+  | "fit"
+  | "size"
+  | "recent"
+  | "az"
+  | "hubspot"
+  | "nothubspot";
 
 const SORT_OPTIONS: { id: FeedSort; label: string }[] = [
   { id: "feed", label: "Mixed feed" },
@@ -32,6 +39,7 @@ const SORT_OPTIONS: { id: FeedSort; label: string }[] = [
   { id: "recent", label: "Most recent" },
   { id: "az", label: "Company A → Z" },
   { id: "hubspot", label: "In HubSpot first" },
+  { id: "nothubspot", label: "Not in HubSpot first" },
 ];
 
 export function SignalFeed({
