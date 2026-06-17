@@ -27,9 +27,9 @@ const K8S_NOTE =
   "K8s shops typically run 10+ services across multiple repos — high probability of agent context failure without live knowledge graph. Strong Bito fit.";
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
-import { fmtUSD, fmtNum, stripEmDashes } from "@/lib/format";
+import { fmtUSD, fmtNum, fmtDate, stripEmDashes } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
-import { useIsProspected, setDeepDiveScore } from "@/lib/clientStore";
+import { useIsProspected, useProspectedAt, setDeepDiveScore } from "@/lib/clientStore";
 
 function Section({
   title,
@@ -535,6 +535,7 @@ export function CompanyIntel({
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const companyProspected = useIsProspected("company", intel.name);
+  const companyProspectedAt = useProspectedAt("company", intel.name);
 
   // Cache this brief's authoritative ICP total so the signal cards can show it
   // instead of their rougher per-signal estimate.
@@ -605,7 +606,7 @@ export function CompanyIntel({
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
                   <Check className="h-3.5 w-3.5" strokeWidth={3.5} />
                 </span>
-                Prospected · sent to HubSpot
+                Prospected · sent to HubSpot{companyProspectedAt ? ` · ${fmtDate(companyProspectedAt)}` : ""}
               </span>
             )}
             <span className="rounded border border-neon-600/30 bg-neon-500/10 px-2 py-0.5 font-mono text-xs font-medium text-neon-300">

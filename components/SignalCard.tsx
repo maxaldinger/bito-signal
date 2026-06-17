@@ -15,8 +15,8 @@ import {
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
 import { SIGNAL_TYPE_MAP, SEGMENT_MAP } from "@/lib/data";
-import { timeAgo, fmtNum } from "@/lib/format";
-import { useDeepDiveScore, useIsProspected } from "@/lib/clientStore";
+import { timeAgo, fmtNum, fmtDate } from "@/lib/format";
+import { useDeepDiveScore, useIsProspected, useProspectedAt } from "@/lib/clientStore";
 import { HubSpotActions } from "./HubSpotActions";
 
 const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
@@ -81,6 +81,7 @@ export function SignalCard({
   const briefScore = useDeepDiveScore(signal.account);
   const score = briefScore ?? signal.strength;
   const prospected = useIsProspected("company", signal.account);
+  const prospectedAt = useProspectedAt("company", signal.account);
 
   return (
     <div
@@ -101,7 +102,7 @@ export function SignalCard({
             <Check className="h-4 w-4" strokeWidth={3.5} />
           </span>
           <span className="font-mono text-xs font-semibold uppercase tracking-wide text-neon-200">
-            Prospected · sent to HubSpot
+            Prospected · sent to HubSpot{prospectedAt ? ` · ${fmtDate(prospectedAt)}` : ""}
           </span>
         </div>
       )}

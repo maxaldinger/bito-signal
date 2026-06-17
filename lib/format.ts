@@ -12,6 +12,16 @@ export function timeAgo(dateISO: string): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
+/** Short calendar date from an epoch-ms timestamp, e.g. "Jun 15, 2026". */
+export function fmtDate(ms: number): string {
+  if (!ms || Number.isNaN(ms)) return "";
+  return new Date(ms).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export function fmtUSD(n: number): string {
   if (!n) return "$0";
   if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;

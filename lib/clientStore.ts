@@ -30,15 +30,17 @@ function normCompany(s: string): string {
     .trim();
 }
 
-// Generic localStorage-backed store with a stable snapshot reference.
-function makeStore<T>(key: string, empty: T) {
+// Generic localStorage-backed store with a stable snapshot reference. An
+// optional `coerce` migrates whatever shape is on disk into the current one.
+function makeStore<T>(key: string, empty: T, coerce?: (raw: unknown) => T) {
   let cache: T | null = null;
   const listeners = new Set<() => void>();
 
   function get(): T {
     if (cache === null) {
       try {
-        cache = (JSON.parse(localStorage.getItem(key) || "null") as T) ?? empty;
+        const raw = JSON.parse(localStorage.getItem(key) || "null");
+        cache = coerce ? coerce(raw) : ((raw as T) ?? empty);
       } catch {
         cache = empty;
       }
@@ -67,31 +69,68 @@ function makeStore<T>(key: string, empty: T) {
 }
 
 // ---------------- Prospected ----------------
-type Prospected = { companies: string[]; contacts: string[] };
-const prospected = makeStore<Prospected>("bito-prospected", { companies: [], contacts: [] });
+// Each entry maps a normalized key -> epoch-ms timestamp of when it was sent to
+// HubSpot. 0 means "prospected, date unknown" (a legacy entry stored before we
+// tracked dates).
+type DateMap = Record<string, number>;
+type Prospected = { companies: DateMap; contacts: DateMap };
+
+// Coerce the on-disk value into the date-map shape. Older builds stored plain
+// string arrays (no dates) — migrate those to timestamp 0.
+function asDateMap(raw: unknown): DateMap {
+  const out: DateMap = {};
+  if (Array.isArray(raw)) {
+    for (const k of raw) if (typeof k === "string") out[k] = 0;
+  } else if (raw && typeof raw === "object") {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      out[k] = typeof v === "number" && v > 0 ? v : 0;
+    }
+  }
+  return out;
+}
+
+const prospected = makeStore<Prospected>(
+  "bito-prospected",
+  { companies: {}, contacts: {} },
+  (raw) => {
+    const r = (raw ?? {}) as { companies?: unknown; contacts?: unknown };
+    return { companies: asDateMap(r.companies), contacts: asDateMap(r.contacts) };
+  },
+);
+
+const normFor = (kind: "company" | "contact", v: string) =>
+  kind === "company" ? normCompany(v) : norm(v);
+
+// Find the actual stored key that matches `key` under this kind's normalization.
+function matchingKey(map: DateMap, kind: "company" | "contact", key: string): string | undefined {
+  const target = normFor(kind, key);
+  return Object.keys(map).find((v) => normFor(kind, v) === target);
+}
 
 export function markProspected(kind: "company" | "contact", key: string): void {
   if (!key) return;
   const cur = prospected.get();
   const field = kind === "company" ? "companies" : "contacts";
-  const k = kind === "company" ? normCompany(key) : norm(key);
-  // Compare with the same normalization so legacy values don't duplicate.
-  const exists = cur[field].some((v) =>
-    kind === "company" ? normCompany(v) === k : norm(v) === k,
-  );
-  if (exists) return;
-  prospected.set({ ...cur, [field]: [...cur[field], k] });
+  // Already prospected → keep the original date, don't overwrite it.
+  if (matchingKey(cur[field], kind, key)) return;
+  const k = normFor(kind, key);
+  prospected.set({ ...cur, [field]: { ...cur[field], [k]: Date.now() } });
 }
 
 export function useIsProspected(kind: "company" | "contact", key: string): boolean {
   const s = prospected.useStore();
   if (!key) return false;
-  if (kind === "company") {
-    const target = normCompany(key);
-    return s.companies.some((v) => normCompany(v) === target);
-  }
-  const target = norm(key);
-  return s.contacts.some((v) => norm(v) === target);
+  return matchingKey(kind === "company" ? s.companies : s.contacts, kind, key) !== undefined;
+}
+
+/** Epoch-ms when this was sent to HubSpot, or undefined if not prospected / date unknown. */
+export function useProspectedAt(kind: "company" | "contact", key: string): number | undefined {
+  const s = prospected.useStore();
+  if (!key) return undefined;
+  const map = kind === "company" ? s.companies : s.contacts;
+  const k = matchingKey(map, kind, key);
+  const ts = k ? map[k] : 0;
+  return ts && ts > 0 ? ts : undefined;
 }
 
 // ---------------- Deep-dive ICP scores ----------------
