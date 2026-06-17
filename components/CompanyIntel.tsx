@@ -332,34 +332,6 @@ function ApolloPersonCard({
         </a>
         <button
           type="button"
-          onClick={() => reveal("email")}
-          disabled={loading !== null}
-          title="Reveal a verified email for this person from Apollo (consumes a credit)"
-          className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-sky-500/40 hover:text-sky-300 disabled:opacity-50"
-        >
-          {loading === "email" ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Mail className="h-3 w-3" />
-          )}
-          Apollo email
-        </button>
-        <button
-          type="button"
-          onClick={() => reveal("phone")}
-          disabled={loading !== null}
-          title="Reveal a phone number for this person from Apollo (consumes a credit)"
-          className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-violet-500/40 hover:text-violet-300 disabled:opacity-50"
-        >
-          {loading === "phone" ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Phone className="h-3 w-3" />
-          )}
-          Apollo phone
-        </button>
-        <button
-          type="button"
           onClick={draftEmail}
           disabled={drafting}
           title="Draft a personalized cold outreach email for this person (AI)"
@@ -391,33 +363,29 @@ function ApolloPersonCard({
         </div>
       )}
 
-      {(emailRes || phoneRes) && (
+      {/* Only show contact info we actually surfaced — no "not found" / error
+          noise, since the reveal runs automatically. */}
+      {((emailRes?.ok && emailRes.email) || (phoneRes?.ok && phoneRes.phone)) && (
         <div className="mt-2 space-y-1 font-mono text-[11px]">
-          {emailRes &&
-            (emailRes.ok && emailRes.email ? (
-              <p className="flex items-center gap-1.5 text-ink-200">
-                <Mail className="h-3 w-3 text-sky-400" />
-                <a href={`mailto:${emailRes.email}`} className="hover:text-sky-300">
-                  {emailRes.email}
-                </a>
-                {emailRes.emailStatus && (
-                  <span className="text-[10px] text-ink-500">({emailRes.emailStatus})</span>
-                )}
-              </p>
-            ) : (
-              <p className="text-amber-400/90">Email: {emailRes.error || "not found"}</p>
-            ))}
-          {phoneRes &&
-            (phoneRes.ok && phoneRes.phone ? (
-              <p className="flex items-center gap-1.5 text-ink-200">
-                <Phone className="h-3 w-3 text-violet-400" />
-                <a href={`tel:${phoneRes.phone}`} className="hover:text-violet-300">
-                  {phoneRes.phone}
-                </a>
-              </p>
-            ) : (
-              <p className="text-amber-400/90">Phone: {phoneRes.error || "not found"}</p>
-            ))}
+          {emailRes?.ok && emailRes.email && (
+            <p className="flex items-center gap-1.5 text-ink-200">
+              <Mail className="h-3 w-3 text-sky-400" />
+              <a href={`mailto:${emailRes.email}`} className="hover:text-sky-300">
+                {emailRes.email}
+              </a>
+              {emailRes.emailStatus && (
+                <span className="text-[10px] text-ink-500">({emailRes.emailStatus})</span>
+              )}
+            </p>
+          )}
+          {phoneRes?.ok && phoneRes.phone && (
+            <p className="flex items-center gap-1.5 text-ink-200">
+              <Phone className="h-3 w-3 text-violet-400" />
+              <a href={`tel:${phoneRes.phone}`} className="hover:text-violet-300">
+                {phoneRes.phone}
+              </a>
+            </p>
+          )}
         </div>
       )}
 
