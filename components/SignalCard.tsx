@@ -73,11 +73,15 @@ export function SignalCard({
   signal,
   onSelect,
   expanded = false,
+  index = 0,
 }: {
   signal: Signal;
   onSelect: (company: string) => void;
   /** Whether this card's inline brief is currently expanded beneath it. */
   expanded?: boolean;
+  /** Position in the feed — staggers the HubSpot auto-check to respect the
+   *  ~4 req/s search limit when a whole page of cards mounts at once. */
+  index?: number;
 }) {
   const type = SIGNAL_TYPE_MAP[signal.type];
   const Icon = TYPE_ICON[signal.type];
@@ -214,6 +218,8 @@ export function SignalCard({
           kind="company"
           name={signal.account}
           compact
+          autoCheck
+          autoCheckDelayMs={index * 300}
           defaultSubject={`Prospect ${signal.account} — Bito Signal (fit ${score})`}
           defaultBody={
             `${signal.account} — ${segment.label}` +

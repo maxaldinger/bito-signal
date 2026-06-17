@@ -3,9 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "@/components/Header";
 import { Sidebar, type TabId } from "@/components/Sidebar";
-import { SignalFeed } from "@/components/SignalFeed";
+import { SignalFeed, type FeedSort } from "@/components/SignalFeed";
 import { SalesAssist } from "@/components/SalesAssist";
-import { PullControls, type FeedSort } from "@/components/PullControls";
+import { PullControls } from "@/components/PullControls";
+import {
+  useDeepDiveScores,
+  useProspectedCompanies,
+  useLowPriorityCompanies,
+  companyInMap,
+  companyValue,
+} from "@/lib/clientStore";
 import {
   SEGMENTS,
   SIGNAL_TYPES,
@@ -309,16 +316,42 @@ export default function Page() {
     });
   }, [signals, minStrength, segments, types, bands, search]);
 
-  // Feed sort lives here (driven by the sidebar PullControls) so the order is
-  // applied once, upstream of the feed.
+  // Feed sort lives here (driven by the in-feed dropdown) so the order is
+  // applied once, upstream of the feed. Uses the displayed score (brief total
+  // overrides the per-signal estimate) and sinks low-priority cards to the end.
+  const scoresMap = useDeepDiveScores();
+  const prospectedMap = useProspectedCompanies();
+  const lowPriMap = useLowPriorityCompanies();
   const sortedFiltered = useMemo(() => {
-    if (sort === "feed") return filtered;
-    return [...filtered].sort((a, b) =>
-      sort === "fit"
-        ? b.strength - a.strength
-        : new Date(b.date).getTime() - new Date(a.date).getTime(),
-    );
-  }, [filtered, sort]);
+    const scoreOf = (s: Signal) => companyValue(scoresMap, s.account) ?? s.strength;
+    const cmp = (a: Signal, b: Signal): number => {
+      switch (sort) {
+        case "fit":
+          return scoreOf(b) - scoreOf(a);
+        case "size":
+          return (b.sweEstimate ?? 0) - (a.sweEstimate ?? 0);
+        case "recent":
+          return new Date(b.date).getTime() - new Date(a.date).getTime();
+        case "az":
+          return a.account.localeCompare(b.account);
+        case "hubspot":
+          return (
+            Number(companyInMap(prospectedMap, b.account)) -
+            Number(companyInMap(prospectedMap, a.account))
+          );
+        default:
+          return 0; // "feed": keep the original pull order
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      // Minimized / low-priority cards always sink to the bottom, any sort.
+      const low =
+        Number(companyInMap(lowPriMap, a.account)) -
+        Number(companyInMap(lowPriMap, b.account));
+      if (low !== 0) return low;
+      return cmp(a, b);
+    });
+  }, [filtered, sort, scoresMap, prospectedMap, lowPriMap]);
 
   const metrics = useMemo(() => {
     const accounts = new Set(filtered.map((s) => s.account));
@@ -415,8 +448,6 @@ export default function Page() {
                 signalCount={filtered.length}
                 updated={lastUpdated}
                 pulling={pulling}
-                sort={sort}
-                onSort={setSort}
                 onPullMore={runPull}
                 onPage={(p) => loadHistory(p)}
               />
@@ -454,14 +485,14 @@ export default function Page() {
                     signalCount={filtered.length}
                     updated={lastUpdated}
                     pulling={pulling}
-                    sort={sort}
-                    onSort={setSort}
                     onPullMore={runPull}
                     onPage={(p) => loadHistory(p)}
                   />
                 </div>
                 <SignalFeed
                   signals={sortedFiltered}
+                  sort={sort}
+                  onSort={setSort}
                   loading={feedLoading}
                   pulling={pulling}
                   cacheMode={cacheMode}

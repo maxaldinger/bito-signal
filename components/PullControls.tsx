@@ -5,15 +5,11 @@ import {
   ChevronRight,
   DownloadCloud,
   Loader2,
-  ArrowDownUp,
 } from "lucide-react";
 import type { RegionId } from "@/lib/data";
 
-export type FeedSort = "feed" | "fit" | "recent";
-
-// Compact pagination + pull + sort controls. Lives at the top of the sidebar
-// (and a mobile copy in the feed). The horizontal feed-header bar it replaced
-// was too tall for the sidebar, so this stacks into a narrow card.
+// Compact pagination + pull controls. Lives at the top of the sidebar (and a
+// mobile copy in the feed). Sorting lives in the feed itself, not here.
 export function PullControls({
   cacheMode,
   region,
@@ -23,8 +19,6 @@ export function PullControls({
   signalCount,
   updated,
   pulling,
-  sort,
-  onSort,
   onPullMore,
   onPage,
 }: {
@@ -37,15 +31,9 @@ export function PullControls({
   signalCount: number;
   updated: string;
   pulling: boolean;
-  sort: FeedSort;
-  onSort: (s: FeedSort) => void;
   onPullMore: () => void;
   onPage: (p: number) => void;
 }) {
-  const sortLabel =
-    sort === "feed" ? "Mixed Feed" : sort === "fit" ? "By ICP Fit" : "Most Recent";
-  const nextSort: FeedSort = sort === "feed" ? "fit" : sort === "fit" ? "recent" : "feed";
-
   return (
     <div className="rounded-lg border border-ink-700 bg-ink-900 p-3">
       {cacheMode ? (
@@ -84,13 +72,6 @@ export function PullControls({
             </button>
           </>
         )}
-        <button
-          onClick={() => onSort(nextSort)}
-          title="Change sort order"
-          className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-1 text-[11px] font-medium text-ink-300 transition-colors hover:bg-ink-800"
-        >
-          <ArrowDownUp className="h-3 w-3" /> {sortLabel}
-        </button>
       </div>
 
       {cacheMode && (

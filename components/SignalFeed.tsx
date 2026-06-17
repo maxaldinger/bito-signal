@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   RefreshCw,
   DownloadCloud,
+  ArrowDownUp,
 } from "lucide-react";
 import type { Signal, SignalTypeId, CompanyIntel as Intel } from "@/lib/types";
 import { SIGNAL_TYPE_MAP } from "@/lib/data";
@@ -19,6 +20,19 @@ import { MetricCard } from "./MetricCard";
 import { SignalCard } from "./SignalCard";
 import { AccountPriority } from "./AccountPriority";
 import { IntelExpander } from "./IntelExpander";
+
+// Feed sort. "feed" = mixed (original pull order). The rest sort the cards;
+// minimized/low-priority cards always sink to the bottom regardless (page.tsx).
+export type FeedSort = "feed" | "fit" | "size" | "recent" | "az" | "hubspot";
+
+const SORT_OPTIONS: { id: FeedSort; label: string }[] = [
+  { id: "feed", label: "Mixed feed" },
+  { id: "fit", label: "ICP fit (high → low)" },
+  { id: "size", label: "Eng team size (high → low)" },
+  { id: "recent", label: "Most recent" },
+  { id: "az", label: "Company A → Z" },
+  { id: "hubspot", label: "In HubSpot first" },
+];
 
 export function SignalFeed({
   signals,
@@ -42,8 +56,12 @@ export function SignalFeed({
   intelError,
   onCloseIntel,
   onRefreshIntel,
+  sort,
+  onSort,
 }: {
   signals: Signal[];
+  sort: FeedSort;
+  onSort: (s: FeedSort) => void;
   loading: boolean;
   pulling: boolean;
   cacheMode: boolean;
@@ -68,8 +86,8 @@ export function SignalFeed({
 }) {
   const [query, setQuery] = useState("");
 
-  // Sorting now happens upstream (page.tsx, driven by the sidebar PullControls);
-  // `signals` arrives already ordered.
+  // Sorting happens upstream (page.tsx) so order is applied once; the dropdown
+  // below just drives the `sort` state. `signals` arrives already ordered.
   const sorted = signals;
 
   const submit = (c: string) => c.trim() && onGetIntel(c.trim());
@@ -202,6 +220,28 @@ export function SignalFeed({
       {/* Account prioritization */}
       {signals.length > 0 && <AccountPriority signals={signals} onSelect={toggleCompany} />}
 
+      {/* Sort control — lives in the feed itself. Minimized/low-priority cards
+          always sort to the bottom regardless of the choice. */}
+      {!booting && sorted.length > 0 && (
+        <div className="flex items-center justify-end gap-2">
+          <label className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-400">
+            <ArrowDownUp className="h-3.5 w-3.5" />
+            sort
+          </label>
+          <select
+            value={sort}
+            onChange={(e) => onSort(e.target.value as FeedSort)}
+            className="rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Feed */}
       {booting ? (
         <div className="space-y-4">
@@ -252,6 +292,7 @@ export function SignalFeed({
             <div key={s.id}>
               <SignalCard
                 signal={s}
+                index={i}
                 onSelect={toggleCompany}
                 expanded={s.account === expandedCompany}
               />

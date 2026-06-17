@@ -189,3 +189,30 @@ export function useIsLowPriority(company: string): boolean {
   const target = normCompany(company);
   return Object.keys(s).some((k) => normCompany(k) === target);
 }
+
+// ---------------- Bulk lookups (for sorting the whole feed) ----------------
+// Hooks return the raw store map (stable reference between writes, so they're
+// safe useMemo deps). The pure helpers do normalized membership/value lookups
+// against those maps — used to sort a list without one hook per row.
+export function useDeepDiveScores(): Record<string, number> {
+  return scores.useStore();
+}
+export function useProspectedCompanies(): Record<string, number> {
+  return prospected.useStore().companies;
+}
+export function useLowPriorityCompanies(): Record<string, number> {
+  return lowPriority.useStore();
+}
+
+export function companyInMap(map: Record<string, number>, company: string): boolean {
+  if (!company) return false;
+  const target = normCompany(company);
+  for (const k in map) if (normCompany(k) === target) return true;
+  return false;
+}
+export function companyValue(map: Record<string, number>, company: string): number | undefined {
+  if (!company) return undefined;
+  const target = normCompany(company);
+  for (const k in map) if (normCompany(k) === target) return map[k];
+  return undefined;
+}
