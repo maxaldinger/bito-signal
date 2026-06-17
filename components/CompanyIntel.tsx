@@ -813,7 +813,34 @@ export function CompanyIntel({
         <ApolloStakeholders company={intel.name} domain={intel.domain} ctx={contactCtx} />
       </Section>
 
-      {/* Outreach angle — sits directly under the people to contact */}
+      {/* Suggested motion — sits right below the people to contact */}
+      <Section title="suggested motion" icon={Compass} iconColor="text-violet-400">
+        <div className="flex flex-wrap items-center gap-3">
+          <MotionBadge motion={intel.motion.primary} />
+          <p className="text-sm text-ink-400">recommended GTM motion for this account</p>
+        </div>
+        <p className="mt-3 text-sm leading-relaxed text-ink-300">{intel.motion.reasoning}</p>
+        {intel.motion.firstMove && (
+          <p className="mt-3 rounded-lg border border-ink-700 bg-ink-950/60 p-3 text-sm leading-relaxed text-ink-200">
+            <span className="font-mono text-xs font-bold uppercase tracking-wider text-violet-400">
+              first move:{" "}
+            </span>
+            {intel.motion.firstMove}
+          </p>
+        )}
+        {intel.motion.watchOuts.length > 0 && (
+          <ul className="mt-3 space-y-1.5 text-xs text-ink-400">
+            {intel.motion.watchOuts.map((w, i) => (
+              <li key={i} className="flex gap-2">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400/70" />
+                {w}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      {/* Outreach angle — sits under suggested motion */}
       <Section title="outreach angle" icon={Send} iconColor="text-neon-400">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded bg-ink-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-ink-300">
@@ -883,33 +910,6 @@ export function CompanyIntel({
           <p className="mt-3 text-xs italic leading-relaxed text-ink-500">
             Estimate, not fact — assumptions: {intel.tokenCost.notes}
           </p>
-        )}
-      </Section>
-
-      {/* Suggested motion */}
-      <Section title="suggested motion" icon={Compass} iconColor="text-violet-400">
-        <div className="flex flex-wrap items-center gap-3">
-          <MotionBadge motion={intel.motion.primary} />
-          <p className="text-sm text-ink-400">recommended GTM motion for this account</p>
-        </div>
-        <p className="mt-3 text-sm leading-relaxed text-ink-300">{intel.motion.reasoning}</p>
-        {intel.motion.firstMove && (
-          <p className="mt-3 rounded-lg border border-ink-700 bg-ink-950/60 p-3 text-sm leading-relaxed text-ink-200">
-            <span className="font-mono text-xs font-bold uppercase tracking-wider text-violet-400">
-              first move:{" "}
-            </span>
-            {intel.motion.firstMove}
-          </p>
-        )}
-        {intel.motion.watchOuts.length > 0 && (
-          <ul className="mt-3 space-y-1.5 text-xs text-ink-400">
-            {intel.motion.watchOuts.map((w, i) => (
-              <li key={i} className="flex gap-2">
-                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400/70" />
-                {w}
-              </li>
-            ))}
-          </ul>
         )}
       </Section>
 
