@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import {
   Users,
   GitBranch,
@@ -28,8 +29,83 @@ import {
   toggleLowPriority,
   collapseCard,
   restoreCard,
+  getCompanyBlurb,
+  setCompanyBlurb,
 } from "@/lib/clientStore";
 import { HubSpotActions } from "./HubSpotActions";
+
+// Derive a company domain from a signal's citation URL — skips social/code hosts
+// that aren't the company's own site (so Apollo enrich/web search stays accurate).
+function domainFromUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, "");
+    if (/linkedin\.com|twitter\.com|x\.com|github\.com|facebook\.com|crunchbase\.com|ycombinator\.com/.test(h))
+      return undefined;
+    return h;
+  } catch {
+    return undefined;
+  }
+}
+
+// A signal's own description, minus the legacy Apollo-sweep boilerplate.
+function ownDescription(signal: Signal): string {
+  const d = signal.description?.trim();
+  if (!d || d.startsWith("Surfaced by Apollo org search")) return "";
+  return d;
+}
+
+// Lazily fetch + cache a "what the company does" blurb for cards that have none.
+// Only fires once the card is on screen, so a page of blank cards doesn't fan
+// out a fetch per card up front.
+function useCompanyBlurb(signal: Signal, ref: React.RefObject<HTMLDivElement | null>) {
+  const own = ownDescription(signal);
+  const [blurb, setBlurb] = useState<string>(() => own || getCompanyBlurb(signal.account) || "");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (own || blurb) return; // already have something
+    const el = ref.current;
+    if (!el) return;
+    let done = false;
+
+    const run = async () => {
+      if (done) return;
+      done = true;
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ company: signal.account, type: signal.type });
+        const dom = domainFromUrl(signal.url);
+        if (dom) params.set("domain", dom);
+        const res = await fetch(`/api/enrich/company-blurb?${params.toString()}`);
+        const data = (await res.json()) as { blurb?: string };
+        if (data.blurb) {
+          setBlurb(data.blurb);
+          setCompanyBlurb(signal.account, data.blurb);
+        }
+      } catch {
+        /* leave blank */
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          io.disconnect();
+          void run();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signal.account, signal.type]);
+
+  return { blurb: own || blurb, loading: loading && !own && !blurb };
+}
 
 const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
   hiring: Users,
@@ -101,6 +177,11 @@ export function SignalCard({
   const lowPriority = useIsLowPriority(signal.account);
   const collapsed = useIsCollapsed(signal.account);
 
+  // Company "what they do" blurb — the signal's own description, or a lazily
+  // fetched (Apollo → web) one for cards that have none.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const { blurb, loading: blurbLoading } = useCompanyBlurb(signal, cardRef);
+
   // Minimized cards collapse to a slim row — name + score + restore — so they
   // stay on the page without dominating it. Low-priority cards also sink to the
   // bottom (page.tsx sort); a plain-collapsed card keeps its place.
@@ -135,6 +216,7 @@ export function SignalCard({
 
   return (
     <div
+      ref={cardRef}
       className={`animate-fade-in rounded-lg border bg-ink-900 p-5 transition-colors ${
         prospected
           ? "border-orange-500/60 ring-1 ring-orange-500/40"
@@ -183,13 +265,17 @@ export function SignalCard({
       <h3 className="mb-1.5 text-[15px] font-semibold leading-snug text-ink-50">
         {signal.title}
       </h3>
-      {/* Drop empty descriptions and the legacy Apollo-sweep boilerplate (cached
-          rows from before we switched to a real company blurb) — the title +
-          tags already convey keyword/band/size. */}
-      {signal.description &&
-        !signal.description.startsWith("Surfaced by Apollo org search") && (
-          <p className="text-sm leading-relaxed text-ink-300">{signal.description}</p>
-        )}
+      {/* "What the company does" — the signal's own description, or a lazily
+          fetched (Apollo → web) blurb. Skips the legacy Apollo-sweep boilerplate
+          (handled in useCompanyBlurb). */}
+      {blurb ? (
+        <p className="text-sm leading-relaxed text-ink-300">{blurb}</p>
+      ) : blurbLoading ? (
+        <div className="space-y-1.5 py-0.5">
+          <div className="skeleton h-3 w-full rounded" />
+          <div className="skeleton h-3 w-2/3 rounded" />
+        </div>
+      ) : null}
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {signal.sweEstimate ? (

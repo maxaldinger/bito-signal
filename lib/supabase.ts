@@ -118,6 +118,35 @@ export async function upsertSignals(
   }
 }
 
+/** Persist a generated company blurb onto the cached signal row(s) so it shows
+ * on reload without re-fetching. Scoped to (account, type); never throws. */
+export async function setSignalDescription(
+  account: string,
+  type: SignalTypeId,
+  description: string,
+): Promise<void> {
+  const cfg = config();
+  if (!cfg || !account || !description) return;
+  try {
+    await fetch(
+      `${cfg.url}/rest/v1/bito_signals?account=eq.${encodeURIComponent(account)}&type=eq.${encodeURIComponent(type)}`,
+      {
+        method: "PATCH",
+        headers: {
+          apikey: cfg.key,
+          Authorization: `Bearer ${cfg.key}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ description }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      },
+    );
+  } catch {
+    /* non-fatal — the blurb still returns to the client and caches there */
+  }
+}
+
 /** Most recently seen account names for one signal type — used to tell the
  * model which companies we already track so each pull hunts NEW ones. */
 export async function fetchRecentAccounts(

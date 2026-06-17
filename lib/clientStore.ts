@@ -282,6 +282,25 @@ export function useHubspotPresence(): Record<string, number> {
   return hubspotPresence.useStore();
 }
 
+// ---------------- Company blurb cache ----------------
+// Caches the generated "what the company does" blurb per company so a card that
+// already fetched one doesn't re-fetch (Apollo/web) on re-render or re-page.
+const companyBlurbs = makeStore<Record<string, string>>("bito-company-blurbs", {});
+
+export function getCompanyBlurb(company: string): string | undefined {
+  if (!company) return undefined;
+  const s = companyBlurbs.get();
+  const target = normCompany(company);
+  for (const [k, v] of Object.entries(s)) if (normCompany(k) === target) return v;
+  return undefined;
+}
+
+export function setCompanyBlurb(company: string, blurb: string): void {
+  if (!company || !blurb) return;
+  const cur = companyBlurbs.get();
+  companyBlurbs.set({ ...cur, [normCompany(company)]: blurb });
+}
+
 // ---------------- Apollo reveal cache ----------------
 // Caches revealed email/phone/name per Apollo person id so the auto-reveal on a
 // stakeholder card doesn't re-spend a credit every time a brief is reopened.

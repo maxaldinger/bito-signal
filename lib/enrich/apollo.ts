@@ -21,6 +21,8 @@ interface ApolloOrg {
   website_url?: string;
   linkedin_url?: string;
   industry?: string;
+  short_description?: string;
+  seo_description?: string;
   estimated_num_employees?: number;
   annual_revenue?: number;
   city?: string;
@@ -444,6 +446,49 @@ export async function apolloPersonContact(opts: {
         "Apollo matched the person but returned no phone number (may be delivered async / plan-gated)",
     };
   return { ...base, phone };
+}
+
+// ---------------------------------------------------------------------------
+// Org description — a grounded "what the company does" blurb from Apollo's org
+// data (short_description / seo_description). Free, no credits. Prefers a domain
+// (direct enrich); falls back to a name search, then enriches the resolved
+// domain when the search record is thin. Returns undefined when Apollo has none
+// (caller then falls back to web search).
+// ---------------------------------------------------------------------------
+export async function apolloOrgBlurb(company: string, domain?: string): Promise<string | undefined> {
+  const key = process.env.APOLLO_API_KEY;
+  if (!key) return undefined;
+
+  const enrichByDomain = async (d: string): Promise<ApolloOrg | undefined> => {
+    const qs = new URLSearchParams({ domain: d });
+    const { status, body } = await apolloJson(`${BASE}/organizations/enrich?${qs}`, key, "GET");
+    if (status !== 200) return undefined;
+    return (body as { organization?: ApolloOrg } | undefined)?.organization;
+  };
+
+  try {
+    let org: ApolloOrg | undefined;
+    if (domain) org = await enrichByDomain(domain);
+    if (!org) {
+      const qs = new URLSearchParams({ q_organization_name: company, page: "1", per_page: "1" });
+      const { status, body } = await apolloJson(`${BASE}/mixed_companies/search?${qs}`, key, "POST");
+      if (status === 200) {
+        const list =
+          (body as { organizations?: ApolloOrg[]; accounts?: ApolloOrg[] } | undefined)
+            ?.organizations ?? [];
+        org = list[0];
+      }
+    }
+    let desc = str(org?.short_description) ?? str(org?.seo_description);
+    // Thin search record → enrich the resolved domain to get a real blurb.
+    if (!desc && org?.primary_domain) {
+      const enriched = await enrichByDomain(str(org.primary_domain)!);
+      desc = str(enriched?.short_description) ?? str(enriched?.seo_description);
+    }
+    return desc;
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
