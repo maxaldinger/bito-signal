@@ -19,7 +19,7 @@ import {
   X,
   Ban,
 } from "lucide-react";
-import type { Signal, SignalTypeId, CompanyIntel as Intel } from "@/lib/types";
+import type { Signal, SignalTypeId, BriefState } from "@/lib/types";
 import { SIGNAL_TYPE_MAP } from "@/lib/data";
 import { useBlacklist, removeFromBlacklist } from "@/lib/clientStore";
 import { MetricCard } from "./MetricCard";
@@ -133,10 +133,7 @@ export function SignalFeed({
   onGetIntel,
   onRetry,
   onPullMore,
-  expandedCompany,
-  intel,
-  intelLoading,
-  intelError,
+  briefs,
   onCloseIntel,
   onRefreshIntel,
   sort,
@@ -172,11 +169,9 @@ export function SignalFeed({
   onGetIntel: (c: string) => void;
   onRetry: () => void;
   onPullMore: () => void;
-  expandedCompany: string | null;
-  intel: Intel | null;
-  intelLoading: boolean;
-  intelError: string | null;
-  onCloseIntel: () => void;
+  /** Open briefs, keyed by company — multiple can be open at once. */
+  briefs: Record<string, BriefState>;
+  onCloseIntel: (company: string) => void;
   onRefreshIntel: (company: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -187,27 +182,33 @@ export function SignalFeed({
 
   const submit = (c: string) => c.trim() && onGetIntel(c.trim());
 
-  // Toggle semantics: clicking the expanded company again closes its brief.
+  // Toggle semantics: clicking an open company again closes its brief.
   const toggleCompany = (account: string) =>
-    account === expandedCompany ? onCloseIntel() : onSelectCompany(account);
+    briefs[account] ? onCloseIntel(account) : onSelectCompany(account);
 
-  // The expander renders beneath the FIRST card for the expanded company;
-  // a searched company with no card on this page expands at the top.
-  const expandAfterIdx = expandedCompany
-    ? sorted.findIndex((s) => s.account === expandedCompany)
-    : -1;
-  const expanderEl = expandedCompany ? (
-    <IntelExpander
-      key={expandedCompany}
-      company={expandedCompany}
-      intel={intel}
-      loading={intelLoading}
-      error={intelError}
-      onClose={onCloseIntel}
-      onRetry={() => onGetIntel(expandedCompany)}
-      onRefresh={() => onRefreshIntel(expandedCompany)}
-    />
-  ) : null;
+  // Render a company's brief from the open-briefs map.
+  const renderBrief = (company: string) => {
+    const b = briefs[company];
+    if (!b) return null;
+    return (
+      <IntelExpander
+        key={company}
+        company={company}
+        intel={b.intel}
+        loading={b.loading}
+        error={b.error}
+        onClose={() => onCloseIntel(company)}
+        onRetry={() => onGetIntel(company)}
+        onRefresh={() => onRefreshIntel(company)}
+      />
+    );
+  };
+
+  // Briefs whose company has no card on this page (e.g. searched, or filtered
+  // off) render at the top so they're not lost.
+  const orphanBriefs = Object.keys(briefs).filter(
+    (c) => !sorted.some((s) => s.account === c),
+  );
 
   // Booting = nothing has landed yet; afterwards cards render progressively
   // while remaining buckets are still scanning.
@@ -349,8 +350,10 @@ export function SignalFeed({
         </div>
       )}
 
-      {/* Searched company with no card on this page — brief expands here */}
-      {expandedCompany && expandAfterIdx === -1 && expanderEl}
+      {/* Briefs for companies with no card on this page expand here */}
+      {orphanBriefs.map((c) => (
+        <div key={c}>{renderBrief(c)}</div>
+      ))}
 
       {/* Account prioritization */}
       {signals.length > 0 && <AccountPriority signals={signals} onSelect={toggleCompany} />}
@@ -433,9 +436,9 @@ export function SignalFeed({
                 signal={s}
                 index={i}
                 onSelect={toggleCompany}
-                expanded={s.account === expandedCompany}
+                expanded={Boolean(briefs[s.account])}
               />
-              {i === expandAfterIdx && expanderEl}
+              {renderBrief(s.account)}
             </div>
           ))}
         </div>

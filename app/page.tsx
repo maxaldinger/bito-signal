@@ -30,6 +30,7 @@ import type {
   SegmentId,
   SignalTypeId,
   CompanyIntel as Intel,
+  BriefState,
 } from "@/lib/types";
 
 // Read a response body honestly: non-JSON error bodies (gateway timeouts etc.)
@@ -97,11 +98,10 @@ export default function Page() {
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  const [selected, setSelected] = useState<string | null>(null);
-  const [intel, setIntel] = useState<Intel | null>(null);
-  const [intelLoading, setIntelLoading] = useState(false);
-  const [intelError, setIntelError] = useState<string | null>(null);
-  const intelReqId = useRef(0);
+  // Multiple briefs can be open at once — keyed by company. Each has its own
+  // load/error/intel so opening one never tears down another.
+  const [briefs, setBriefs] = useState<Record<string, BriefState>>({});
+  const briefReqIds = useRef<Record<string, number>>({});
 
   // Multi-select filters — empty selection means "all".
   const [segments, setSegments] = useState<SegmentId[]>([]);
@@ -418,34 +418,45 @@ export default function Page() {
     };
   }, [pageItems]);
 
+  // Open (or refresh) a company's brief. Each company tracks its own request id
+  // so concurrent briefs don't clobber each other, and a stale fetch is ignored.
   const getIntel = useCallback(async (company: string, fresh = false) => {
-    const reqId = ++intelReqId.current;
-    setSelected(company);
-    setIntel(null);
-    setIntelError(null);
-    setIntelLoading(true);
-    setTab("feed");
+    const c = company.trim();
+    if (!c) return;
+    const reqId = (briefReqIds.current[c] ?? 0) + 1;
+    briefReqIds.current[c] = reqId;
+    setBriefs((prev) => ({
+      ...prev,
+      [c]: { loading: true, error: null, intel: prev[c]?.intel ?? null },
+    }));
     try {
       const res = await fetch(
-        `/api/intel?company=${encodeURIComponent(company)}${fresh ? "&fresh=1" : ""}`,
+        `/api/intel?company=${encodeURIComponent(c)}${fresh ? "&fresh=1" : ""}`,
       );
-      if (reqId !== intelReqId.current) return;
+      if (briefReqIds.current[c] !== reqId) return;
       const data = await readJson(res);
-      if (reqId !== intelReqId.current) return;
+      if (briefReqIds.current[c] !== reqId) return;
       if (!res.ok) {
-        setIntelError(
-          typeof data.error === "string" ? data.error : `Intel pass failed (${res.status})`,
-        );
+        const error =
+          typeof data.error === "string" ? data.error : `Intel pass failed (${res.status})`;
+        setBriefs((prev) => ({ ...prev, [c]: { loading: false, error, intel: null } }));
       } else {
         const briefing = (data.intel as Intel | undefined) ?? null;
-        setIntel(briefing);
-        if (!briefing) setIntelError("No brief returned — try again.");
+        setBriefs((prev) => ({
+          ...prev,
+          [c]: {
+            loading: false,
+            error: briefing ? null : "No brief returned — try again.",
+            intel: briefing,
+          },
+        }));
       }
     } catch (e) {
-      if (reqId !== intelReqId.current) return;
-      setIntelError(String((e as Error)?.message || e));
-    } finally {
-      if (reqId === intelReqId.current) setIntelLoading(false);
+      if (briefReqIds.current[c] !== reqId) return;
+      setBriefs((prev) => ({
+        ...prev,
+        [c]: { loading: false, error: String((e as Error)?.message || e), intel: null },
+      }));
     }
   }, []);
 
@@ -461,12 +472,22 @@ export default function Page() {
     }
   };
 
-  // Leaving the brief invalidates any in-flight intel request.
+  // Close one brief — invalidates its in-flight request so a late response is
+  // dropped instead of re-opening it.
+  const closeBrief = useCallback((company: string) => {
+    briefReqIds.current[company] = (briefReqIds.current[company] ?? 0) + 1;
+    setBriefs((prev) => {
+      if (!(company in prev)) return prev;
+      const next = { ...prev };
+      delete next[company];
+      return next;
+    });
+  }, []);
+
+  // Close every open brief (tab switch / region change).
   const clearSelection = useCallback(() => {
-    intelReqId.current++;
-    setSelected(null);
-    setIntelLoading(false);
-    setIntelError(null);
+    for (const k of Object.keys(briefReqIds.current)) briefReqIds.current[k] += 1;
+    setBriefs({});
   }, []);
 
   // Pages now span the full sorted+filtered set (client-side), not a server page.
@@ -571,11 +592,8 @@ export default function Page() {
                 onGetIntel={getIntel}
                 onRetry={refresh}
                 onPullMore={runPull}
-                expandedCompany={selected}
-                intel={intel}
-                intelLoading={intelLoading}
-                intelError={intelError}
-                onCloseIntel={clearSelection}
+                briefs={briefs}
+                onCloseIntel={closeBrief}
                 onRefreshIntel={(c) => getIntel(c, true)}
                 />
               </>
@@ -584,11 +602,8 @@ export default function Page() {
                 signals={signals}
                 onSelectCompany={getIntel}
                 onGetIntel={getIntel}
-                expandedCompany={selected}
-                intel={intel}
-                intelLoading={intelLoading}
-                intelError={intelError}
-                onCloseIntel={clearSelection}
+                briefs={briefs}
+                onCloseIntel={closeBrief}
                 onRefreshIntel={(c) => getIntel(c, true)}
               />
             ) : (

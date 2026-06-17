@@ -2,32 +2,27 @@
 
 import { useMemo } from "react";
 import { Star } from "lucide-react";
-import type { Signal, CompanyIntel as Intel } from "@/lib/types";
+import type { Signal, BriefState } from "@/lib/types";
 import { useFavorites, companyInMap } from "@/lib/clientStore";
 import { SignalCard } from "./SignalCard";
 import { IntelExpander } from "./IntelExpander";
 
 // The "Signal favorites" tab — the rep's starred companies, pulled from the
-// loaded cache. Cards behave exactly like the feed (brief expands inline).
+// loaded cache. Cards behave exactly like the feed (briefs expand inline,
+// multiple at once).
 export function FavoritesView({
   signals,
   onSelectCompany,
   onGetIntel,
-  expandedCompany,
-  intel,
-  intelLoading,
-  intelError,
+  briefs,
   onCloseIntel,
   onRefreshIntel,
 }: {
   signals: Signal[];
   onSelectCompany: (c: string) => void;
   onGetIntel: (c: string) => void;
-  expandedCompany: string | null;
-  intel: Intel | null;
-  intelLoading: boolean;
-  intelError: string | null;
-  onCloseIntel: () => void;
+  briefs: Record<string, BriefState>;
+  onCloseIntel: (company: string) => void;
   onRefreshIntel: (c: string) => void;
 }) {
   const favs = useFavorites();
@@ -37,23 +32,28 @@ export function FavoritesView({
   );
 
   const toggleCompany = (account: string) =>
-    account === expandedCompany ? onCloseIntel() : onSelectCompany(account);
+    briefs[account] ? onCloseIntel(account) : onSelectCompany(account);
 
-  const expandAfterIdx = expandedCompany
-    ? favSignals.findIndex((s) => s.account === expandedCompany)
-    : -1;
-  const expanderEl = expandedCompany ? (
-    <IntelExpander
-      key={expandedCompany}
-      company={expandedCompany}
-      intel={intel}
-      loading={intelLoading}
-      error={intelError}
-      onClose={onCloseIntel}
-      onRetry={() => onGetIntel(expandedCompany)}
-      onRefresh={() => onRefreshIntel(expandedCompany)}
-    />
-  ) : null;
+  const renderBrief = (company: string) => {
+    const b = briefs[company];
+    if (!b) return null;
+    return (
+      <IntelExpander
+        key={company}
+        company={company}
+        intel={b.intel}
+        loading={b.loading}
+        error={b.error}
+        onClose={() => onCloseIntel(company)}
+        onRetry={() => onGetIntel(company)}
+        onRefresh={() => onRefreshIntel(company)}
+      />
+    );
+  };
+
+  const orphanBriefs = Object.keys(briefs).filter(
+    (c) => !favSignals.some((s) => s.account === c),
+  );
 
   return (
     <div className="space-y-6">
@@ -66,8 +66,10 @@ export function FavoritesView({
         </p>
       </div>
 
-      {/* A starred company whose card isn't in the list still expands here. */}
-      {expandedCompany && expandAfterIdx === -1 && expanderEl}
+      {/* Briefs for companies not in the favorites list expand here. */}
+      {orphanBriefs.map((c) => (
+        <div key={c}>{renderBrief(c)}</div>
+      ))}
 
       {favSignals.length === 0 ? (
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
@@ -83,9 +85,9 @@ export function FavoritesView({
                 signal={s}
                 index={i}
                 onSelect={toggleCompany}
-                expanded={s.account === expandedCompany}
+                expanded={Boolean(briefs[s.account])}
               />
-              {i === expandAfterIdx && expanderEl}
+              {renderBrief(s.account)}
             </div>
           ))}
         </div>

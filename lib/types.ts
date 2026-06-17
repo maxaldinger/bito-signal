@@ -207,3 +207,11 @@ export interface CompanyIntel {
   // Raw live citations — the actual web pages the model used.
   citations: LiveCitation[];
 }
+
+/** Per-company deep-dive state — the feed keeps a map of these so multiple
+ *  briefs can load and stay open at once. */
+export interface BriefState {
+  loading: boolean;
+  error: string | null;
+  intel: CompanyIntel | null;
+}
