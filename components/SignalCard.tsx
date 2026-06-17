@@ -183,7 +183,13 @@ export function SignalCard({
       <h3 className="mb-1.5 text-[15px] font-semibold leading-snug text-ink-50">
         {signal.title}
       </h3>
-      <p className="text-sm leading-relaxed text-ink-300">{signal.description}</p>
+      {/* Drop empty descriptions and the legacy Apollo-sweep boilerplate (cached
+          rows from before we switched to a real company blurb) — the title +
+          tags already convey keyword/band/size. */}
+      {signal.description &&
+        !signal.description.startsWith("Surfaced by Apollo org search") && (
+          <p className="text-sm leading-relaxed text-ink-300">{signal.description}</p>
+        )}
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {signal.sweEstimate ? (

@@ -421,10 +421,10 @@ function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
       type: "icp" as const,
       strength: modeledStrength(org.matchedKeyword, swe),
       title: `Profile-fit match: ${org.matchedKeyword} · ${org.employeeBand}`,
-      description:
-        about ??
-        `Surfaced by Apollo org search on Bito's ICP filters — matched "${org.matchedKeyword}" within the ${org.employeeBand} band. ` +
-          `Fit score is a rule-based profile estimate; no event signal yet — run the brief for live research.`,
+      // Only a REAL company blurb (Apollo short_description). No blurb → no
+      // description: the title + tags already say keyword/band/size, so the old
+      // "Surfaced by Apollo…" boilerplate was pure redundant filler.
+      description: about ?? "",
       tags: [org.matchedKeyword, org.employeeBand],
       source: "Apollo org search",
       url: org.linkedinUrl || org.websiteUrl,
