@@ -14,6 +14,22 @@ function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
+// Company names arrive from two sources that spell the SAME company differently:
+// the Apollo sweep ("Instabug") and the live-research brief ("Instabug, Inc.").
+// Strip punctuation + common legal suffixes so prospected badges and cached
+// scores match across both. Applied on read AND write so values stored under
+// the old (lowercase-only) rule still resolve.
+const COMPANY_SUFFIX =
+  /\b(inc|incorporated|corp|corporation|co|company|llc|ltd|limited|gmbh|plc|sa|ag|nv|bv|pte|pvt|private|holdings)\b/g;
+function normCompany(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[.,]/g, " ")
+    .replace(COMPANY_SUFFIX, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 // Generic localStorage-backed store with a stable snapshot reference.
 function makeStore<T>(key: string, empty: T) {
   let cache: T | null = null;
@@ -58,15 +74,24 @@ export function markProspected(kind: "company" | "contact", key: string): void {
   if (!key) return;
   const cur = prospected.get();
   const field = kind === "company" ? "companies" : "contacts";
-  const k = norm(key);
-  if (cur[field].includes(k)) return;
+  const k = kind === "company" ? normCompany(key) : norm(key);
+  // Compare with the same normalization so legacy values don't duplicate.
+  const exists = cur[field].some((v) =>
+    kind === "company" ? normCompany(v) === k : norm(v) === k,
+  );
+  if (exists) return;
   prospected.set({ ...cur, [field]: [...cur[field], k] });
 }
 
 export function useIsProspected(kind: "company" | "contact", key: string): boolean {
   const s = prospected.useStore();
-  const arr = kind === "company" ? s.companies : s.contacts;
-  return key ? arr.includes(norm(key)) : false;
+  if (!key) return false;
+  if (kind === "company") {
+    const target = normCompany(key);
+    return s.companies.some((v) => normCompany(v) === target);
+  }
+  const target = norm(key);
+  return s.contacts.some((v) => norm(v) === target);
 }
 
 // ---------------- Deep-dive ICP scores ----------------
@@ -76,12 +101,19 @@ const scores = makeStore<Scores>("bito-deepdive-scores", {});
 export function setDeepDiveScore(company: string, score: number): void {
   if (!company) return;
   const cur = scores.get();
-  const k = norm(company);
+  const k = normCompany(company);
   if (cur[k] === score) return;
   scores.set({ ...cur, [k]: score });
 }
 
 export function useDeepDiveScore(company: string): number | undefined {
   const s = scores.useStore();
-  return company ? s[norm(company)] : undefined;
+  if (!company) return undefined;
+  const target = normCompany(company);
+  // Match across normalization so a card ("Instabug") finds a brief score
+  // stored under its canonical name ("Instabug, Inc.").
+  for (const [k, v] of Object.entries(s)) {
+    if (normCompany(k) === target) return v;
+  }
+  return undefined;
 }
