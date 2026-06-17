@@ -10,12 +10,12 @@ import {
   Crosshair,
   ArrowRight,
   ChevronUp,
-  ExternalLink,
   Check,
   Minimize2,
   Maximize2,
   ArrowDownToLine,
   Ban,
+  Star,
   type LucideIcon,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
@@ -31,6 +31,8 @@ import {
   collapseCard,
   restoreCard,
   toggleBlacklist,
+  useIsFavorite,
+  toggleFavorite,
   getCompanyBlurb,
   setCompanyBlurb,
 } from "@/lib/clientStore";
@@ -198,6 +200,7 @@ export function SignalCard({
   const prospectedAt = useProspectedAt("company", signal.account);
   const lowPriority = useIsLowPriority(signal.account);
   const collapsed = useIsCollapsed(signal.account);
+  const favorite = useIsFavorite(signal.account);
 
   // Lead content — the signal's own title/description/url, or lazily researched
   // ones (most-relevant signal for Apollo profile-fit cards; else a blurb).
@@ -395,17 +398,18 @@ export function SignalCard({
           >
             <Ban className="h-3 w-3" /> Not a fit
           </button>
-          {displayUrl && (
-            <a
-              href={displayUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:text-ink-200"
-              title="View source"
-            >
-              Source <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
+          <button
+            onClick={() => toggleFavorite(signal.account)}
+            title={favorite ? "Remove from favorites" : "Add to Signal favorites"}
+            className={`inline-flex items-center gap-1 rounded border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              favorite
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15"
+                : "border-ink-700 text-ink-400 hover:border-amber-500/40 hover:text-amber-300"
+            }`}
+          >
+            <Star className={`h-3 w-3 ${favorite ? "fill-amber-400 text-amber-400" : ""}`} />
+            {favorite ? "Favorited" : "Favorite"}
+          </button>
           <button
             onClick={() => onSelect(signal.account)}
             className={`inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${

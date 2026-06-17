@@ -1,15 +1,17 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Radio, Sparkles, Check, SlidersHorizontal, ChevronDown, type LucideIcon } from "lucide-react";
+import { Radio, Sparkles, Star, Check, SlidersHorizontal, ChevronDown, type LucideIcon } from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
 import type { SegmentId, SignalTypeId } from "@/lib/types";
+import { useFavorites } from "@/lib/clientStore";
 import { SegmentIcon } from "./SegmentIcon";
 
-export type TabId = "feed" | "assist";
+export type TabId = "feed" | "favorites" | "assist";
 
 const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "feed", label: "Signal Feed", icon: Radio },
+  { id: "favorites", label: "Signal favorites", icon: Star },
   { id: "assist", label: "Sales Assist", icon: Sparkles },
 ];
 
@@ -114,6 +116,7 @@ export function Sidebar({
   onMinStrength: (v: number) => void;
 }) {
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const favCount = Object.keys(useFavorites()).length;
   const activeFilterCount =
     selectedSegments.length +
     selectedSweBands.length +
@@ -138,7 +141,12 @@ export function Sidebar({
                 }`}
               >
                 <item.icon className="h-[17px] w-[17px]" />
-                {item.label}
+                <span className="flex-1 text-left">{item.label}</span>
+                {item.id === "favorites" && favCount > 0 && (
+                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-300">
+                    {favCount}
+                  </span>
+                )}
               </button>
             );
           })}

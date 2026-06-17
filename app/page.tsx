@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "@/components/Header";
 import { Sidebar, type TabId } from "@/components/Sidebar";
 import { SignalFeed, type FeedSort } from "@/components/SignalFeed";
+import { FavoritesView } from "@/components/FavoritesView";
 import { SalesAssist } from "@/components/SalesAssist";
 import { PullControls } from "@/components/PullControls";
 import {
@@ -578,6 +579,18 @@ export default function Page() {
                 onRefreshIntel={(c) => getIntel(c, true)}
                 />
               </>
+            ) : tab === "favorites" ? (
+              <FavoritesView
+                signals={signals}
+                onSelectCompany={getIntel}
+                onGetIntel={getIntel}
+                expandedCompany={selected}
+                intel={intel}
+                intelLoading={intelLoading}
+                intelError={intelError}
+                onCloseIntel={clearSelection}
+                onRefreshIntel={(c) => getIntel(c, true)}
+              />
             ) : (
               <SalesAssist />
             )}

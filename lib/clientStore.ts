@@ -320,6 +320,33 @@ export function useBlacklist(): Record<string, string> {
   return blacklist.useStore();
 }
 
+// ---------------- Favorites ----------------
+// Companies the rep starred for quick access ("hot caching"). Surfaced in the
+// dedicated "Signal favorites" tab. Stores display name keyed by normalized name.
+const favorites = makeStore<Record<string, string>>("bito-favorites", {});
+
+export function toggleFavorite(company: string): void {
+  if (!company) return;
+  const cur = favorites.get();
+  const k = normCompany(company);
+  if (cur[k] !== undefined) {
+    const next = { ...cur };
+    delete next[k];
+    favorites.set(next);
+  } else {
+    favorites.set({ ...cur, [k]: company });
+  }
+}
+
+export function useIsFavorite(company: string): boolean {
+  const s = favorites.useStore();
+  return company ? companyInMap(s, company) : false;
+}
+
+export function useFavorites(): Record<string, string> {
+  return favorites.useStore();
+}
+
 // ---------------- Company blurb cache ----------------
 // Caches the generated "what the company does" blurb per company so a card that
 // already fetched one doesn't re-fetch (Apollo/web) on re-render or re-page.
