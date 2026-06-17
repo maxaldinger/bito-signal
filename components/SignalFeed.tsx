@@ -13,6 +13,8 @@ import {
   RefreshCw,
   DownloadCloud,
   ArrowDownUp,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import type { Signal, SignalTypeId, CompanyIntel as Intel } from "@/lib/types";
 import { SIGNAL_TYPE_MAP } from "@/lib/data";
@@ -31,6 +33,40 @@ export type FeedSort =
   | "az"
   | "hubspot"
   | "nothubspot";
+
+// Compact prev/next + "pg X/Y" pager, shown at the top and bottom of the feed.
+function Pager({
+  page,
+  totalPages,
+  onPage,
+  disabled,
+}: {
+  page: number;
+  totalPages: number;
+  onPage: (p: number) => void;
+  disabled: boolean;
+}) {
+  if (totalPages <= 1) return null;
+  const btn =
+    "inline-flex items-center gap-0.5 rounded border border-ink-700 px-2 py-1 text-[11px] font-medium text-ink-300 transition-colors hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-40";
+  return (
+    <div className="flex items-center gap-2 font-mono text-[11px] text-ink-400">
+      <button onClick={() => onPage(page - 1)} disabled={page <= 1 || disabled} className={btn}>
+        <ChevronLeft className="h-3 w-3" /> Prev
+      </button>
+      <span>
+        pg <span className="font-semibold text-ink-100">{page}</span> / {totalPages}
+      </span>
+      <button
+        onClick={() => onPage(page + 1)}
+        disabled={page >= totalPages || disabled}
+        className={btn}
+      >
+        Next <ChevronRight className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
 
 const SORT_OPTIONS: { id: FeedSort; label: string }[] = [
   { id: "feed", label: "Mixed feed" },
@@ -66,10 +102,17 @@ export function SignalFeed({
   onRefreshIntel,
   sort,
   onSort,
+  page,
+  totalPages,
+  onPage,
 }: {
   signals: Signal[];
   sort: FeedSort;
   onSort: (s: FeedSort) => void;
+  /** Current page + total (cache mode) and the page setter, for the in-feed pagers. */
+  page: number;
+  totalPages: number;
+  onPage: (p: number) => void;
   loading: boolean;
   pulling: boolean;
   cacheMode: boolean;
@@ -229,9 +272,12 @@ export function SignalFeed({
       {signals.length > 0 && <AccountPriority signals={signals} onSelect={toggleCompany} />}
 
       {/* Sort control — lives in the feed itself. Minimized/low-priority cards
-          always sort to the bottom regardless of the choice. */}
+          always sort to the bottom regardless of the choice. A page counter sits
+          on the left (top of feed); a matching one repeats at the bottom. */}
       {!booting && sorted.length > 0 && (
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-between gap-2">
+          {cacheMode ? <Pager page={page} totalPages={totalPages} onPage={onPage} disabled={pulling} /> : <span />}
+          <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-400">
             <ArrowDownUp className="h-3.5 w-3.5" />
             sort
@@ -247,6 +293,7 @@ export function SignalFeed({
               </option>
             ))}
           </select>
+          </div>
         </div>
       )}
 
@@ -307,6 +354,13 @@ export function SignalFeed({
               {i === expandAfterIdx && expanderEl}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Bottom pager — so you can page without scrolling back to the top. */}
+      {!booting && cacheMode && sorted.length > 0 && (
+        <div className="flex justify-center">
+          <Pager page={page} totalPages={totalPages} onPage={onPage} disabled={pulling} />
         </div>
       )}
 

@@ -502,6 +502,9 @@ export default function Page() {
                   signals={sortedFiltered}
                   sort={sort}
                   onSort={setSort}
+                  page={page}
+                  totalPages={totalPages}
+                  onPage={(p) => loadHistory(p)}
                   loading={feedLoading}
                   pulling={pulling}
                   cacheMode={cacheMode}
