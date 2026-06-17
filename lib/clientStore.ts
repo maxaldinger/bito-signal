@@ -281,3 +281,25 @@ export function setHubspotPresence(company: string, found: boolean): void {
 export function useHubspotPresence(): Record<string, number> {
   return hubspotPresence.useStore();
 }
+
+// ---------------- Apollo reveal cache ----------------
+// Caches revealed email/phone/name per Apollo person id so the auto-reveal on a
+// stakeholder card doesn't re-spend a credit every time a brief is reopened.
+export type ApolloReveal = {
+  name?: string;
+  email?: string;
+  emailStatus?: string;
+  phone?: string;
+};
+const apolloReveals = makeStore<Record<string, ApolloReveal>>("bito-apollo-reveals", {});
+
+export function getReveal(apolloId: string): ApolloReveal | undefined {
+  return apolloId ? apolloReveals.get()[apolloId] : undefined;
+}
+
+export function mergeReveal(apolloId: string, patch: ApolloReveal): void {
+  if (!apolloId) return;
+  const cur = apolloReveals.get();
+  const next = { ...(cur[apolloId] ?? {}), ...patch };
+  apolloReveals.set({ ...cur, [apolloId]: next });
+}

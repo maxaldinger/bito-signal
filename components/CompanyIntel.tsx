@@ -29,7 +29,13 @@ import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
-import { useIsProspected, useProspectedAt, setDeepDiveScore } from "@/lib/clientStore";
+import {
+  useIsProspected,
+  useProspectedAt,
+  setDeepDiveScore,
+  getReveal,
+  mergeReveal,
+} from "@/lib/clientStore";
 
 function Section({
   title,
@@ -166,7 +172,23 @@ function ApolloPersonCard({
         data = { ok: false, error: `HTTP ${res.status} — ${res.statusText || "bad response"}` };
       }
       setResult((r) => ({ ...r, [kind]: data }));
-      if (data.ok && data.name) setRevealedName(data.name);
+      if (data.ok) {
+        if (data.name) setRevealedName(data.name);
+        // Cache by Apollo id so reopening the brief reuses it (no re-spend). Use
+        // "" for an attempted-but-empty field so it reads as "tried, none found"
+        // rather than "not yet tried" (which would re-reveal next time).
+        if (person.apolloId) {
+          const patch: { name?: string; email?: string; emailStatus?: string; phone?: string } = {};
+          if (data.name) patch.name = data.name;
+          if (kind === "email") {
+            patch.email = data.email ?? "";
+            patch.emailStatus = data.emailStatus;
+          } else {
+            patch.phone = data.phone ?? "";
+          }
+          mergeReveal(person.apolloId, patch);
+        }
+      }
     } catch (e) {
       setResult((r) => ({
         ...r,
@@ -176,6 +198,38 @@ function ApolloPersonCard({
       setLoading(null);
     }
   };
+
+  // Auto-reveal email + phone on mount so names un-obfuscate and contact info is
+  // ready without manual clicks. Cached per Apollo id (reopening a brief reuses
+  // it, no re-spend) and staggered to respect Apollo's rate limit.
+  useEffect(() => {
+    const id = person.apolloId;
+    if (!id) return;
+    let cancelled = false;
+    const cached = getReveal(id);
+    if (cached?.name) setRevealedName(cached.name);
+    if (cached?.email !== undefined)
+      setResult((r) => ({
+        ...r,
+        email: { ok: true, email: cached.email, emailStatus: cached.emailStatus, name: cached.name },
+      }));
+    if (cached?.phone !== undefined)
+      setResult((r) => ({ ...r, phone: { ok: true, phone: cached.phone, name: cached.name } }));
+
+    const needEmail = cached?.email === undefined;
+    const needPhone = cached?.phone === undefined;
+    if (!needEmail && !needPhone) return;
+
+    const t = setTimeout(async () => {
+      if (!cancelled && needEmail) await reveal("email");
+      if (!cancelled && needPhone) await reveal("phone");
+    }, autoCheckDelayMs);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [person.apolloId]);
 
   // Per-person cold email draft (AI assist).
   const [drafting, setDrafting] = useState(false);
