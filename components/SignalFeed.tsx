@@ -15,6 +15,8 @@ import {
   ArrowDownUp,
   ChevronLeft,
   ChevronRight,
+  CheckCircle2,
+  X,
 } from "lucide-react";
 import type { Signal, SignalTypeId, CompanyIntel as Intel } from "@/lib/types";
 import { SIGNAL_TYPE_MAP } from "@/lib/data";
@@ -105,6 +107,8 @@ export function SignalFeed({
   page,
   totalPages,
   onPage,
+  pullResult,
+  onDismissPullResult,
 }: {
   signals: Signal[];
   sort: FeedSort;
@@ -113,6 +117,9 @@ export function SignalFeed({
   page: number;
   totalPages: number;
   onPage: (p: number) => void;
+  /** Outcome of the last "Pull More" — drives the post-pull feedback line. */
+  pullResult: { added: number; failed: SignalTypeId[] } | null;
+  onDismissPullResult: () => void;
   loading: boolean;
   pulling: boolean;
   cacheMode: boolean;
@@ -215,6 +222,47 @@ export function SignalFeed({
         <MetricCard label="avg icp fit" value={metrics.avgFit} icon={Gauge} color="text-violet-400" loading={loading} />
         <MetricCard label="hot (≥80)" value={metrics.hot} icon={Flame} color="text-amber-400" loading={loading} />
       </div>
+
+      {/* Post-pull feedback — tell the user what the pull actually did, so a
+          no-op pull (sources recycled, or some rate-limited) isn't silent. */}
+      {pullResult && !booting && (
+        <div
+          className={`flex items-start gap-3 rounded-lg border px-4 py-2.5 ${
+            pullResult.added > 0
+              ? "border-neon-600/30 bg-neon-500/10"
+              : "border-ink-700 bg-ink-900/60"
+          }`}
+        >
+          {pullResult.added > 0 ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-neon-400" />
+          ) : (
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
+          )}
+          <p className="min-w-0 flex-1 text-xs leading-relaxed text-ink-300">
+            {pullResult.added > 0 ? (
+              <span className="font-semibold text-neon-300">
+                Pulled {pullResult.added} new signal{pullResult.added === 1 ? "" : "s"}.
+              </span>
+            ) : (
+              <span className="font-semibold text-ink-200">No new signals this pull.</span>
+            )}{" "}
+            {pullResult.failed.length > 0
+              ? `Some sources errored or were rate-limited (${pullResult.failed
+                  .map(bucketLabel)
+                  .join(", ")}) — try again shortly.`
+              : pullResult.added === 0
+                ? "The sources only returned companies already in your feed. Try the other region, or check back later as new signals appear."
+                : ""}
+          </p>
+          <button
+            onClick={onDismissPullResult}
+            className="shrink-0 text-ink-500 transition-colors hover:text-ink-200"
+            title="Dismiss"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Filters hiding rows — say so loudly instead of looking like a small pull */}
       {!loading && unfilteredCount > signals.length && (

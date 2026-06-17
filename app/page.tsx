@@ -70,6 +70,12 @@ export default function Page() {
   const [cacheMode, setCacheMode] = useState<boolean>(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  // Mirror of `total` for stale-free reads inside long-lived callbacks.
+  const totalRef = useRef(0);
+  // Outcome of the last "Pull More" — drives the post-pull feedback line.
+  const [pullResult, setPullResult] = useState<{ added: number; failed: SignalTypeId[] } | null>(
+    null,
+  );
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [bucketErrors, setBucketErrors] = useState<Partial<Record<SignalTypeId, string>>>({});
   const [pendingBuckets, setPendingBuckets] = useState<SignalTypeId[]>([]);
@@ -105,9 +111,12 @@ export default function Page() {
 
   // ---- Live bucket scans (shared by both modes) -------------------------
   const scanBuckets = useCallback(
-    async (opts: { force: boolean; appendLive: boolean; reqId: number }) => {
+    async (opts: { force: boolean; appendLive: boolean; reqId: number }): Promise<{
+      failed: SignalTypeId[];
+    }> => {
       setBucketErrors({});
       setPendingBuckets([...BUCKETS]);
+      const failed: SignalTypeId[] = [];
       await Promise.allSettled(
         BUCKETS.map(async (bucket) => {
           try {
@@ -120,6 +129,7 @@ export default function Page() {
             const data = await readJson(res);
             if (opts.reqId !== feedReqId.current) return;
             if (!res.ok) {
+              failed.push(bucket);
               setBucketErrors((prev) => ({
                 ...prev,
                 [bucket]:
@@ -136,6 +146,7 @@ export default function Page() {
             }
           } catch (e) {
             if (opts.reqId !== feedReqId.current) return;
+            failed.push(bucket);
             setBucketErrors((prev) => ({
               ...prev,
               [bucket]: String((e as Error)?.message || e),
@@ -147,6 +158,7 @@ export default function Page() {
           }
         }),
       );
+      return { failed };
     },
     [],
   );
@@ -174,6 +186,7 @@ export default function Page() {
       if (configured) {
         setSignals(Array.isArray(data.signals) ? (data.signals as Signal[]) : []);
         setTotal(Number(data.total) || 0);
+        totalRef.current = Number(data.total) || 0;
         setPage(p);
         setLastFetchAt(Date.now());
         setFeedLoading(false);
@@ -188,14 +201,18 @@ export default function Page() {
     }
   }, []);
 
-  // Pull = live scans (which upsert server-side) + reload page 1.
+  // Pull = live scans (which upsert server-side) + reload page 1. Report the net
+  // new count (and any failed sources) so a no-op pull is visible, not silent.
   const runPull = useCallback(async () => {
     if (pulling) return;
     setPulling(true);
+    setPullResult(null);
+    const before = totalRef.current;
     const reqId = ++feedReqId.current;
-    await scanBuckets({ force: true, appendLive: false, reqId });
+    const { failed } = await scanBuckets({ force: true, appendLive: false, reqId });
     if (reqId === feedReqId.current) {
-      await loadHistory(1);
+      const { total: after } = await loadHistory(1);
+      setPullResult({ added: Math.max(0, after - before), failed });
       setPulling(false);
     }
   }, [pulling, scanBuckets, loadHistory]);
@@ -505,6 +522,8 @@ export default function Page() {
                   page={page}
                   totalPages={totalPages}
                   onPage={(p) => loadHistory(p)}
+                  pullResult={pullResult}
+                  onDismissPullResult={() => setPullResult(null)}
                   loading={feedLoading}
                   pulling={pulling}
                   cacheMode={cacheMode}
