@@ -190,6 +190,50 @@ export function useIsLowPriority(company: string): boolean {
   return Object.keys(s).some((k) => normCompany(k) === target);
 }
 
+// ---------------- Collapsed (minimized, but NOT deprioritized) ----------------
+// A plain visual collapse: the card shrinks to a slim row but KEEPS its place in
+// the sort. (Low-priority also collapses, but additionally sinks to the bottom.)
+type Collapsed = Record<string, number>;
+const collapsed = makeStore<Collapsed>("bito-collapsed", {}, (raw) => {
+  const out: Collapsed = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const k of Object.keys(raw as Record<string, unknown>)) out[normCompany(k)] = 1;
+  }
+  return out;
+});
+
+export function collapseCard(company: string): void {
+  if (!company) return;
+  const cur = collapsed.get();
+  const target = normCompany(company);
+  if (Object.keys(cur).some((k) => normCompany(k) === target)) return;
+  collapsed.set({ ...cur, [target]: 1 });
+}
+
+export function useIsCollapsed(company: string): boolean {
+  const s = collapsed.useStore();
+  if (!company) return false;
+  const target = normCompany(company);
+  return Object.keys(s).some((k) => normCompany(k) === target);
+}
+
+// Restore a card to full size, clearing BOTH collapse and low-priority state.
+export function restoreCard(company: string): void {
+  if (!company) return;
+  const target = normCompany(company);
+  const clear = (store: { get: () => Record<string, number>; set: (v: Record<string, number>) => void }) => {
+    const cur = store.get();
+    const k = Object.keys(cur).find((kk) => normCompany(kk) === target);
+    if (k) {
+      const next = { ...cur };
+      delete next[k];
+      store.set(next);
+    }
+  };
+  clear(collapsed);
+  clear(lowPriority);
+}
+
 // ---------------- Bulk lookups (for sorting the whole feed) ----------------
 // Hooks return the raw store map (stable reference between writes, so they're
 // safe useMemo deps). The pure helpers do normalized membership/value lookups

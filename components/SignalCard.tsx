@@ -13,6 +13,7 @@ import {
   Check,
   Minimize2,
   Maximize2,
+  ArrowDownToLine,
   type LucideIcon,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
@@ -23,7 +24,10 @@ import {
   useIsProspected,
   useProspectedAt,
   useIsLowPriority,
+  useIsCollapsed,
   toggleLowPriority,
+  collapseCard,
+  restoreCard,
 } from "@/lib/clientStore";
 import { HubSpotActions } from "./HubSpotActions";
 
@@ -95,15 +99,17 @@ export function SignalCard({
   const prospected = useIsProspected("company", signal.account);
   const prospectedAt = useProspectedAt("company", signal.account);
   const lowPriority = useIsLowPriority(signal.account);
+  const collapsed = useIsCollapsed(signal.account);
 
-  // Minimized (low-priority) cards collapse to a slim row — name + score + a
-  // restore button — so they stay on the page without dominating it.
-  if (lowPriority) {
+  // Minimized cards collapse to a slim row — name + score + restore — so they
+  // stay on the page without dominating it. Low-priority cards also sink to the
+  // bottom (page.tsx sort); a plain-collapsed card keeps its place.
+  if (lowPriority || collapsed) {
     return (
       <div className="animate-fade-in flex items-center justify-between gap-3 rounded-lg border border-ink-800 bg-ink-900/40 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-500">
-            low priority
+            {lowPriority ? "low priority" : "collapsed"}
           </span>
           <button
             onClick={() => onSelect(signal.account)}
@@ -116,7 +122,7 @@ export function SignalCard({
         <div className="flex shrink-0 items-center gap-3">
           <span className="font-mono text-xs tabular-nums text-ink-500">{score}</span>
           <button
-            onClick={() => toggleLowPriority(signal.account)}
+            onClick={() => restoreCard(signal.account)}
             title="Restore card"
             className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-1 font-mono text-[11px] text-ink-400 transition-colors hover:border-neon-600/40 hover:text-neon-200"
           >
@@ -236,11 +242,18 @@ export function SignalCard({
         </span>
         <div className="flex shrink-0 items-center gap-2">
           <button
-            onClick={() => toggleLowPriority(signal.account)}
-            title="Minimize — mark low priority"
+            onClick={() => collapseCard(signal.account)}
+            title="Collapse — shrink this card but keep its place in the sort"
             className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200"
           >
-            <Minimize2 className="h-3 w-3" /> Minimize
+            <Minimize2 className="h-3 w-3" /> Collapse
+          </button>
+          <button
+            onClick={() => toggleLowPriority(signal.account)}
+            title="Low priority — collapse and sink this card to the bottom"
+            className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200"
+          >
+            <ArrowDownToLine className="h-3 w-3" /> Low priority
           </button>
           {signal.url && (
             <a
