@@ -212,11 +212,26 @@ export function SignalCard({
   // bottom (page.tsx sort); a plain-collapsed card keeps its place.
   if (lowPriority || collapsed) {
     return (
-      <div className="animate-fade-in flex items-center justify-between gap-3 rounded-lg border border-ink-800 bg-ink-900/40 px-4 py-2">
+      <div
+        className={`animate-fade-in flex items-center justify-between gap-3 rounded-lg border bg-ink-900/40 px-4 py-2 ${
+          prospected ? "border-orange-500/50 ring-1 ring-orange-500/30" : "border-ink-800"
+        }`}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-500">
             {lowPriority ? "low priority" : "collapsed"}
           </span>
+          {prospected && (
+            <span
+              title={`Already prospected — sent to HubSpot${prospectedAt ? ` on ${fmtDate(prospectedAt)}` : ""}`}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-orange-500/40 bg-orange-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-orange-200"
+            >
+              <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-neon-500 text-ink-950">
+                <Check className="h-2 w-2" strokeWidth={3.5} />
+              </span>
+              Prospected
+            </span>
+          )}
           <button
             onClick={() => onSelect(signal.account)}
             className="min-w-0 truncate font-mono text-sm text-ink-300 transition-colors hover:text-neon-300"
