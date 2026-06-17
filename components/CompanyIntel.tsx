@@ -238,7 +238,7 @@ function ApolloPersonCard({
   return (
     <div
       className={`rounded-lg border bg-ink-950/50 p-4 ${
-        contactProspected ? "border-neon-500/50 ring-1 ring-neon-500/30" : "border-ink-700"
+        contactProspected ? "border-orange-500/50 ring-1 ring-orange-500/30" : "border-ink-700"
       }`}
     >
       <div className="flex items-center justify-between gap-2">
@@ -247,7 +247,7 @@ function ApolloPersonCard({
           {contactProspected && (
             <span
               title="Already prospected — a HubSpot task has been created for this contact"
-              className="inline-flex items-center gap-1 rounded-md border border-neon-500/40 bg-neon-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-neon-200"
+              className="inline-flex items-center gap-1 rounded-md border border-orange-500/40 bg-orange-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-orange-200"
             >
               <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
                 <Check className="h-2.5 w-2.5" strokeWidth={3.5} />
@@ -601,7 +601,7 @@ export function CompanyIntel({
             {companyProspected && (
               <span
                 title="Already prospected — a HubSpot task exists for this company or one of its contacts"
-                className="inline-flex items-center gap-1.5 rounded-md border border-neon-500/40 bg-neon-500/15 px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-wide text-neon-200"
+                className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/40 bg-orange-500/15 px-2.5 py-1 font-mono text-xs font-semibold uppercase tracking-wide text-orange-200"
               >
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
                   <Check className="h-3.5 w-3.5" strokeWidth={3.5} />

@@ -87,7 +87,7 @@ export function SignalCard({
     <div
       className={`animate-fade-in rounded-lg border bg-ink-900 p-5 transition-colors ${
         prospected
-          ? "border-neon-500/60 ring-1 ring-neon-500/40"
+          ? "border-orange-500/60 ring-1 ring-orange-500/40"
           : expanded
             ? "border-neon-600/40"
             : "border-ink-700 hover:border-ink-600"
@@ -96,12 +96,12 @@ export function SignalCard({
       {prospected && (
         <div
           title="Already prospected — a HubSpot task exists for this company or one of its contacts"
-          className="mb-3 flex items-center gap-2 rounded-md border border-neon-500/40 bg-neon-500/15 px-3 py-2"
+          className="mb-3 flex items-center gap-2 rounded-md border border-orange-500/40 bg-orange-500/15 px-3 py-2"
         >
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
             <Check className="h-4 w-4" strokeWidth={3.5} />
           </span>
-          <span className="font-mono text-xs font-semibold uppercase tracking-wide text-neon-200">
+          <span className="font-mono text-xs font-semibold uppercase tracking-wide text-orange-200">
             Prospected · sent to HubSpot{prospectedAt ? ` · ${fmtDate(prospectedAt)}` : ""}
           </span>
         </div>
