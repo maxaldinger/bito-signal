@@ -199,9 +199,11 @@ function ApolloPersonCard({
     }
   };
 
-  // Auto-reveal email + phone on mount so names un-obfuscate and contact info is
-  // ready without manual clicks. Cached per Apollo id (reopening a brief reuses
-  // it, no re-spend) and staggered to respect Apollo's rate limit.
+  // Auto-reveal email on mount so names un-obfuscate and contact info is ready
+  // without manual clicks. Phone is intentionally NOT auto-revealed: Apollo only
+  // delivers phones async via webhook (we have none), so it always fails here —
+  // phones are pulled via the Apollo Chrome extension once a contact's in the
+  // CRM. Cached per Apollo id (reopening reuses it) and staggered for rate limits.
   useEffect(() => {
     const id = person.apolloId;
     if (!id) return;
@@ -213,16 +215,11 @@ function ApolloPersonCard({
         ...r,
         email: { ok: true, email: cached.email, emailStatus: cached.emailStatus, name: cached.name },
       }));
-    if (cached?.phone !== undefined)
-      setResult((r) => ({ ...r, phone: { ok: true, phone: cached.phone, name: cached.name } }));
 
-    const needEmail = cached?.email === undefined;
-    const needPhone = cached?.phone === undefined;
-    if (!needEmail && !needPhone) return;
+    if (cached?.email !== undefined) return; // already revealed/attempted
 
-    const t = setTimeout(async () => {
-      if (!cancelled && needEmail) await reveal("email");
-      if (!cancelled && needPhone) await reveal("phone");
+    const t = setTimeout(() => {
+      if (!cancelled) void reveal("email");
     }, autoCheckDelayMs);
     return () => {
       cancelled = true;

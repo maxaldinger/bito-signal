@@ -48,16 +48,41 @@ interface ApolloPerson {
   country?: string | null;
 }
 
-const ENG_LEADERSHIP_TITLES = [
+// Engineering people we want on the stakeholder map — leaders (who sign/gate a
+// deal) AND senior practitioners (who feel the pain). Kept broad so research- or
+// ML-heavy orgs (whose titles are "ML/Research Engineer", not "VP Eng") still
+// surface a full map, not one lone match. Apollo ORs these person_titles.
+const ENG_TITLES = [
+  // Leadership / decision-makers
   "CTO",
   "Chief Technology Officer",
+  "Chief Information Officer",
   "VP of Engineering",
   "VP Engineering",
+  "SVP Engineering",
   "Head of Engineering",
   "Head of Platform",
+  "Head of Infrastructure",
+  "Head of Machine Learning",
   "Director of Engineering",
-  "Staff Engineer",
+  "Senior Director of Engineering",
+  "Engineering Manager",
+  "Senior Engineering Manager",
+  // Senior practitioners / ICs
   "Principal Engineer",
+  "Staff Engineer",
+  "Senior Staff Engineer",
+  "Lead Engineer",
+  "Tech Lead",
+  "Senior Software Engineer",
+  "Machine Learning Engineer",
+  "ML Engineer",
+  "Research Engineer",
+  "Research Scientist",
+  "Platform Engineer",
+  "Infrastructure Engineer",
+  "Site Reliability Engineer",
+  "DevOps Engineer",
 ];
 
 function apiHeaders(key: string): Record<string, string> {
@@ -221,7 +246,7 @@ export async function enrichApollo(
   let people: EnrichContact[] = [];
   try {
     const qs = new URLSearchParams({ page: "1", per_page: "10" });
-    for (const t of ENG_LEADERSHIP_TITLES) qs.append("person_titles[]", t);
+    for (const t of ENG_TITLES) qs.append("person_titles[]", t);
     const orgId = str(org.id);
     const orgDomain = str(org.primary_domain) ?? (domain ? domain : undefined);
     if (orgId) qs.append("organization_ids[]", orgId);
@@ -480,15 +505,15 @@ export async function apolloPeopleByTitle(
   }
 
   try {
-    const qs = new URLSearchParams({ page: "1", per_page: "12" });
-    for (const t of ENG_LEADERSHIP_TITLES) qs.append("person_titles[]", t);
+    const qs = new URLSearchParams({ page: "1", per_page: "30" });
+    for (const t of ENG_TITLES) qs.append("person_titles[]", t);
     if (orgId) qs.append("organization_ids[]", orgId);
     else if (orgDomain) qs.append("q_organization_domains_list[]", orgDomain);
 
     const { status, body } = await apolloJson(`${BASE}/mixed_people/api_search?${qs}`, key, "POST");
     if (status !== 200) return fail(true, statusError(status, "people search"));
     const b = body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
-    const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])].slice(0, 12);
+    const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])].slice(0, 30);
     const people = raw.map(toContact).filter((c): c is EnrichContact => c !== undefined);
     if (people.length === 0)
       return { configured: true, ok: false, error: "No engineering leaders found", orgName, people: [] };
