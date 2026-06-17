@@ -402,7 +402,7 @@ function ApolloPersonCard({
           compact
           autoCheck
           autoCheckDelayMs={autoCheckDelayMs}
-          defaultSubject={`Call ${displayName}${person.title ? ` (${person.title})` : ""} — ${company}`}
+          defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}`}
           defaultBody={
             `WHO: ${displayName}${person.title ? ` — ${person.title}` : ""}` +
             `${person.seniority ? ` (${person.seniority.replace(/_/g, " ")})` : ""} at ${company}\n` +
@@ -672,7 +672,7 @@ export function CompanyIntel({
         name={intel.name}
         domain={intel.domain}
         autoCheck
-        defaultSubject={`Prospect ${intel.name} — Bito Signal (ICP ${intel.icp.total}/99)`}
+        defaultSubject={`SIGNAL DASH - ${intel.name}`}
         defaultBody={
           `${intel.name} — ${intel.segment.label}` +
           `${intel.employeeBand ? `, ${intel.employeeBand} employees` : ""}` +

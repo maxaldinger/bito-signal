@@ -226,7 +226,7 @@ export function SignalCard({
           compact
           autoCheck
           autoCheckDelayMs={index * 300}
-          defaultSubject={`Prospect ${signal.account} — Bito Signal (fit ${score})`}
+          defaultSubject={`SIGNAL DASH - ${signal.account}`}
           defaultBody={
             `${signal.account} — ${segment.label}` +
             `${signal.sweEstimate ? `, ~${fmtNum(signal.sweEstimate)} SWEs` : ""}.\n` +
