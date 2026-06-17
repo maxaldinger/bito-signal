@@ -17,9 +17,11 @@ import {
   ChevronRight,
   CheckCircle2,
   X,
+  Ban,
 } from "lucide-react";
 import type { Signal, SignalTypeId, CompanyIntel as Intel } from "@/lib/types";
 import { SIGNAL_TYPE_MAP } from "@/lib/data";
+import { useBlacklist, removeFromBlacklist } from "@/lib/clientStore";
 import { MetricCard } from "./MetricCard";
 import { SignalCard } from "./SignalCard";
 import { AccountPriority } from "./AccountPriority";
@@ -66,6 +68,41 @@ function Pager({
       >
         Next <ChevronRight className="h-3 w-3" />
       </button>
+    </div>
+  );
+}
+
+// Collapsible list of companies removed as "not a fit", with one-click restore.
+function NotAFitList() {
+  const map = useBlacklist();
+  const [open, setOpen] = useState(false);
+  const entries = Object.entries(map);
+  if (entries.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-ink-700 bg-ink-900/50 p-3">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between font-mono text-[11px] uppercase tracking-wider text-ink-400 transition-colors hover:text-ink-200"
+      >
+        <span className="flex items-center gap-1.5">
+          <Ban className="h-3.5 w-3.5" /> removed as not a fit ({entries.length})
+        </span>
+        <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {entries.map(([k, name]) => (
+            <button
+              key={k}
+              onClick={() => removeFromBlacklist(name)}
+              title="Restore to feed"
+              className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-950 px-2 py-0.5 font-mono text-[11px] text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200"
+            >
+              {name} <X className="h-3 w-3" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -410,6 +447,9 @@ export function SignalFeed({
           <Pager page={page} totalPages={totalPages} onPage={onPage} disabled={pulling} />
         </div>
       )}
+
+      {/* Companies removed as "not a fit" — collapsible, restorable */}
+      <NotAFitList />
 
       {/* Honest data-source note */}
       <div className="flex items-start gap-2 rounded-lg border border-ink-700 bg-ink-900/50 p-3 text-xs text-ink-500">

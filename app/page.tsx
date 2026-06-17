@@ -11,6 +11,7 @@ import {
   useProspectedCompanies,
   useLowPriorityCompanies,
   useHubspotPresence,
+  useBlacklist,
   companyInMap,
   companyValue,
 } from "@/lib/clientStore";
@@ -286,35 +287,42 @@ export default function Page() {
     return min <= 0 ? "just now" : `${min}m ago`;
   }, [lastFetchAt, now]);
 
+  // Drop blacklisted ("not a fit") companies before anything else sees them.
+  const blacklistMap = useBlacklist();
+  const activeSignals = useMemo(
+    () => signals.filter((s) => !companyInMap(blacklistMap, s.account)),
+    [signals, blacklistMap],
+  );
+
   const segmentCounts = useMemo(() => {
     const c = {} as Record<SegmentId, number>;
     for (const s of SEGMENTS) c[s.id] = 0;
-    for (const sig of signals) c[sig.segment] = (c[sig.segment] ?? 0) + 1;
+    for (const sig of activeSignals) c[sig.segment] = (c[sig.segment] ?? 0) + 1;
     return c;
-  }, [signals]);
+  }, [activeSignals]);
 
   const signalCounts = useMemo(() => {
     const c = {} as Record<SignalTypeId, number>;
     for (const s of SIGNAL_TYPES) c[s.id] = 0;
-    for (const sig of signals) c[sig.type] = (c[sig.type] ?? 0) + 1;
+    for (const sig of activeSignals) c[sig.type] = (c[sig.type] ?? 0) + 1;
     return c;
-  }, [signals]);
+  }, [activeSignals]);
 
   const { sweBandCounts, unknownSweCount } = useMemo(() => {
     const counts = {} as Record<SweBandId, number>;
     for (const b of SWE_BANDS) counts[b.id] = 0;
     let unknown = 0;
-    for (const sig of signals) {
+    for (const sig of activeSignals) {
       const band = sweBandOf(sig.sweEstimate);
       if (band) counts[band] += 1;
       else unknown += 1;
     }
     return { sweBandCounts: counts, unknownSweCount: unknown };
-  }, [signals]);
+  }, [activeSignals]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return signals.filter((s) => {
+    return activeSignals.filter((s) => {
       if (s.strength < minStrength) return false;
       if (segments.length > 0 && !segments.includes(s.segment)) return false;
       if (types.length > 0 && !types.includes(s.type)) return false;
@@ -333,7 +341,7 @@ export default function Page() {
         return false;
       return true;
     });
-  }, [signals, minStrength, segments, types, bands, search]);
+  }, [activeSignals, minStrength, segments, types, bands, search]);
 
   // Feed sort lives here (driven by the in-feed dropdown) so the order is
   // applied once, upstream of the feed. Uses the displayed score (brief total
@@ -387,8 +395,8 @@ export default function Page() {
     () => sortedFiltered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
     [sortedFiltered, safePage],
   );
-  // How many cached signals the active filters are hiding (global, not per page).
-  const hiddenByFilters = signals.length - filtered.length;
+  // How many (non-blacklisted) cached signals the active filters are hiding.
+  const hiddenByFilters = activeSignals.length - filtered.length;
 
   // Changing filters/sort/region resets to page 1 so you never land past the end.
   useEffect(() => {

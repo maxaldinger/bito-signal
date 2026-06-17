@@ -248,7 +248,7 @@ export function useLowPriorityCompanies(): Record<string, number> {
   return lowPriority.useStore();
 }
 
-export function companyInMap(map: Record<string, number>, company: string): boolean {
+export function companyInMap(map: Record<string, unknown>, company: string): boolean {
   if (!company) return false;
   const target = normCompany(company);
   for (const k in map) if (normCompany(k) === target) return true;
@@ -280,6 +280,44 @@ export function setHubspotPresence(company: string, found: boolean): void {
 
 export function useHubspotPresence(): Record<string, number> {
   return hubspotPresence.useStore();
+}
+
+// ---------------- Blacklist (not-a-fit) ----------------
+// Companies the rep marked as not a fit (e.g. an OSS project, not a buyer).
+// Hidden from the feed entirely and kept hidden across pulls. Stores the display
+// name (value) keyed by normalized name (key) for a restore list.
+const blacklist = makeStore<Record<string, string>>("bito-blacklist", {});
+
+export function toggleBlacklist(company: string): void {
+  if (!company) return;
+  const cur = blacklist.get();
+  const k = normCompany(company);
+  if (cur[k] !== undefined) {
+    const next = { ...cur };
+    delete next[k];
+    blacklist.set(next);
+  } else {
+    blacklist.set({ ...cur, [k]: company });
+  }
+}
+
+export function removeFromBlacklist(company: string): void {
+  if (!company) return;
+  const cur = blacklist.get();
+  const k = normCompany(company);
+  if (cur[k] === undefined) return;
+  const next = { ...cur };
+  delete next[k];
+  blacklist.set(next);
+}
+
+export function useIsBlacklisted(company: string): boolean {
+  const s = blacklist.useStore();
+  return company ? companyInMap(s, company) : false;
+}
+
+export function useBlacklist(): Record<string, string> {
+  return blacklist.useStore();
 }
 
 // ---------------- Company blurb cache ----------------

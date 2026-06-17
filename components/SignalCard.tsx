@@ -15,6 +15,7 @@ import {
   Minimize2,
   Maximize2,
   ArrowDownToLine,
+  Ban,
   type LucideIcon,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
@@ -29,6 +30,7 @@ import {
   toggleLowPriority,
   collapseCard,
   restoreCard,
+  toggleBlacklist,
   getCompanyBlurb,
   setCompanyBlurb,
 } from "@/lib/clientStore";
@@ -385,6 +387,13 @@ export function SignalCard({
             className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200"
           >
             <ArrowDownToLine className="h-3 w-3" /> Low priority
+          </button>
+          <button
+            onClick={() => toggleBlacklist(signal.account)}
+            title="Not a fit — remove this company from the feed (kept hidden across pulls)"
+            className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-red-500/40 hover:text-red-300"
+          >
+            <Ban className="h-3 w-3" /> Not a fit
           </button>
           {displayUrl && (
             <a
