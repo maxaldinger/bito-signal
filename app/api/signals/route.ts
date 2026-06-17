@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
-import { apolloIcpSweep, type IcpSweepOrg } from "@/lib/enrich/apollo";
+import { apolloIcpSweep, SWEEP_PAGE_SIZE, type IcpSweepOrg } from "@/lib/enrich/apollo";
 import { fetchHNItems } from "@/lib/sources/hn";
 import { fetchGitHubTrendingItems } from "@/lib/sources/github";
 import { fetchGdeltItems } from "@/lib/sources/gdelt";
@@ -448,12 +448,13 @@ export async function GET(req: NextRequest) {
 
   // Apollo-powered bucket: structured org search, no Anthropic involved.
   if (bucket === "icp") {
-    // Advance one results-page per ~60 cached rows so repeat pulls bring NEW
-    // organizations instead of re-fetching page 1 forever.
+    // Advance one results-page per full sweep-page of cached rows so repeat
+    // pulls bring NEW organizations instead of re-fetching page 1 forever.
+    // SWEEP_PAGE_SIZE = orgs returned by one full page across all queries.
     const cachedIcp = supabaseConfigured()
       ? await countSignalsByType("icp", region)
       : 0;
-    const sweepPage = Math.min(100, Math.floor(cachedIcp / 60) + 1);
+    const sweepPage = Math.min(100, Math.floor(cachedIcp / SWEEP_PAGE_SIZE) + 1);
     const sweep = await apolloIcpSweep(sweepPage, region);
     if (!sweep.configured) {
       // Not an error — just absent. The client treats `skipped` as a quiet no-op

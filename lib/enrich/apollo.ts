@@ -110,6 +110,24 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
+// Run async tasks with a fixed concurrency cap (avoids bursting rate limits).
+async function runPooled<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const idx = next++;
+      results[idx] = await fn(items[idx]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
 function toContact(p: ApolloPerson): EnrichContact | undefined {
   const name =
     str(p.name) ??
@@ -524,20 +542,39 @@ interface SweepQuery {
   perPage: number;
 }
 
-const SWEEP_QUERIES: SweepQuery[] = [
-  // Tech-native — mid-size companies, software IS the company.
-  { keyword: "developer tools", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 10 },
-  { keyword: "saas", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 10 },
-  { keyword: "fintech", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 10 },
-  { keyword: "artificial intelligence", ranges: ["100,500", "501,2000"], bandLabel: "100-2000 employees", perPage: 10 },
-  // Traditional industries — big totals, big in-house software orgs.
-  { keyword: "retail", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
-  { keyword: "automotive", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
-  { keyword: "manufacturing", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
-  { keyword: "healthcare", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
-  { keyword: "logistics", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
-  { keyword: "media", ranges: ["5001,1000000"], bandLabel: "5,000+ employees", perPage: 6 },
+// Each (keyword × employee-band) is a DISTINCT Apollo filter that paginates its
+// own result set — so splitting one broad band into several narrow ones returns
+// far more distinct companies per pull (and avoids cross-page overlap) than a
+// single wide band ever could. That's what lets the feed scale into the
+// thousands instead of dribbling in ~76 orgs per pull.
+const TECH_KEYWORDS = ["developer tools", "saas", "fintech", "artificial intelligence"];
+// Mid-market tech bands (total headcount → ~50-900 SWE sweet spot). Kept at
+// 100+ employees to stay above Bito's ~50-engineer ICP floor.
+const TECH_BANDS: { range: string; label: string }[] = [
+  { range: "100,300", label: "100-300 employees" },
+  { range: "301,800", label: "301-800 employees" },
+  { range: "801,2500", label: "801-2500 employees" },
 ];
+const TRAD_KEYWORDS = ["retail", "automotive", "manufacturing", "healthcare", "logistics", "media"];
+
+const SWEEP_QUERIES: SweepQuery[] = [
+  // Tech-native — software IS the company; sweep several narrow size bands.
+  ...TECH_KEYWORDS.flatMap((keyword) =>
+    TECH_BANDS.map((b) => ({ keyword, ranges: [b.range], bandLabel: b.label, perPage: 20 })),
+  ),
+  // Traditional industries — big totals, big in-house software orgs.
+  ...TRAD_KEYWORDS.map((keyword) => ({
+    keyword,
+    ranges: ["5001,1000000"],
+    bandLabel: "5,000+ employees",
+    perPage: 12,
+  })),
+];
+
+// Total orgs one full sweep page returns across every query. The signals route
+// uses this to advance the sweep cursor by exactly one page per pull, so pages
+// neither stall (re-fetching the same orgs) nor skip ahead past results.
+export const SWEEP_PAGE_SIZE = SWEEP_QUERIES.reduce((n, q) => n + q.perPage, 0);
 
 interface ApolloAccountRecord {
   name?: string;
@@ -575,35 +612,36 @@ export async function apolloIcpSweep(page = 1, region: RegionId = "us"): Promise
   }
 
   try {
-    // One sub-query per keyword (parallel) so every result carries the exact
+    // One sub-query per (keyword × band) so every result carries the exact
     // filter that surfaced it. Results arrive under BOTH `accounts` and
-    // `organizations` depending on workspace state — read both.
-    const batches = await Promise.all(
-      SWEEP_QUERIES.map(async (q) => {
-        const qs = new URLSearchParams({
-          page: String(Math.max(1, Math.min(100, page))),
-          per_page: String(q.perPage),
-        });
-        for (const r of q.ranges) qs.append("organization_num_employees_ranges[]", r);
-        qs.append("q_organization_keyword_tags[]", q.keyword);
-        qs.append("organization_locations[]", REGION_LOCATION[region]);
+    // `organizations` depending on workspace state — read both. Pooled at a
+    // modest concurrency so the ~18 queries don't burst Apollo's rate limit.
+    const runQuery = async (q: SweepQuery) => {
+      const qs = new URLSearchParams({
+        page: String(Math.max(1, Math.min(100, page))),
+        per_page: String(q.perPage),
+      });
+      for (const r of q.ranges) qs.append("organization_num_employees_ranges[]", r);
+      qs.append("q_organization_keyword_tags[]", q.keyword);
+      qs.append("organization_locations[]", REGION_LOCATION[region]);
 
-        const { status, body } = await apolloJson(
-          `${BASE}/mixed_companies/search?${qs}`,
-          key,
-          "POST",
-        );
-        if (status !== 200) return { query: q, error: statusError(status, "ICP org sweep"), records: [] as ApolloAccountRecord[] };
-        const b = body as
-          | { accounts?: ApolloAccountRecord[]; organizations?: ApolloAccountRecord[] }
-          | undefined;
-        return {
-          query: q,
-          error: undefined,
-          records: [...(b?.accounts ?? []), ...(b?.organizations ?? [])],
-        };
-      }),
-    );
+      const { status, body } = await apolloJson(
+        `${BASE}/mixed_companies/search?${qs}`,
+        key,
+        "POST",
+      );
+      if (status !== 200)
+        return { query: q, error: statusError(status, "ICP org sweep"), records: [] as ApolloAccountRecord[] };
+      const b = body as
+        | { accounts?: ApolloAccountRecord[]; organizations?: ApolloAccountRecord[] }
+        | undefined;
+      return {
+        query: q,
+        error: undefined as string | undefined,
+        records: [...(b?.accounts ?? []), ...(b?.organizations ?? [])],
+      };
+    };
+    const batches = await runPooled(SWEEP_QUERIES, 6, runQuery);
 
     const errors = batches
       .filter((b) => b.error)
