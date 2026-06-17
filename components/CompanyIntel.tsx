@@ -427,6 +427,7 @@ interface ApolloPeopleResponse {
   orgName?: string;
   people: EnrichContact[];
   hasMore?: boolean;
+  pinned?: EnrichContact;
 }
 
 // How many to show per column, and how many more each "pull more" adds. 4 per
@@ -440,12 +441,16 @@ function ApolloStakeholders({
   company,
   domain,
   ctx,
+  keyContact,
 }: {
   company: string;
   domain?: string;
   ctx: ContactTaskContext;
+  /** Person named in the suggested motion — pinned at the top of the list. */
+  keyContact?: { name: string; title?: string };
 }) {
   const [people, setPeople] = useState<EnrichContact[]>([]);
+  const [pinned, setPinned] = useState<EnrichContact | null>(null);
   const [perColumn, setPerColumn] = useState(PER_COLUMN_STEP);
   const [pageFetched, setPageFetched] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -453,12 +458,16 @@ function ApolloStakeholders({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const pinName = keyContact?.name;
+
   // Fetch one page of people; append (pull more) or replace (initial load).
-  // Dedupes by Apollo id so overlapping pages don't double-list a person.
+  // Dedupes by Apollo id so overlapping pages don't double-list a person. On the
+  // initial load, also asks Apollo to look up the motion's named contact (pin).
   const fetchPage = useCallback(
     async (p: number, append: boolean): Promise<void> => {
       const params = new URLSearchParams({ company, page: String(p) });
       if (domain) params.set("domain", domain);
+      if (!append && pinName) params.set("pin", pinName);
       const res = await fetch(`/api/enrich/apollo/people?${params.toString()}`);
       let body: ApolloPeopleResponse | { error?: string };
       try {
@@ -477,10 +486,11 @@ function ApolloStakeholders({
         const seen = new Set(prev.map((x) => x.apolloId || x.name));
         return [...prev, ...fresh.filter((x) => !seen.has(x.apolloId || x.name))];
       });
+      if (!append) setPinned((body as ApolloPeopleResponse).pinned ?? null);
       setHasMore(Boolean((body as ApolloPeopleResponse).hasMore));
       setPageFetched(p);
     },
-    [company, domain],
+    [company, domain, pinName],
   );
 
   useEffect(() => {
@@ -510,12 +520,26 @@ function ApolloStakeholders({
     );
   }
   if (error) return <p className="text-sm text-red-400">{error}</p>;
-  if (people.length === 0) {
+
+  // The motion's named contact: Apollo's match if found, else a card built from
+  // the motion's own name/title so the person is always surfaced.
+  const pinnedContact: EnrichContact | undefined =
+    pinned ?? (keyContact?.name ? { name: keyContact.name, title: keyContact.title } : undefined);
+
+  if (people.length === 0 && !pinnedContact) {
     return <p className="text-xs text-ink-500">No engineering stakeholders surfaced from Apollo.</p>;
   }
 
-  const decisionMakers = people.filter(isDecisionMaker);
-  const practitioners = people.filter((p) => !isDecisionMaker(p));
+  const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const isPinned = (p: EnrichContact) =>
+    !!pinnedContact &&
+    ((!!p.apolloId && p.apolloId === pinnedContact.apolloId) ||
+      nameKey(p.name) === nameKey(pinnedContact.name));
+
+  // Drop the pinned person from the columns so they're not listed twice.
+  const rest = pinnedContact ? people.filter((p) => !isPinned(p)) : people;
+  const decisionMakers = rest.filter(isDecisionMaker);
+  const practitioners = rest.filter((p) => !isDecisionMaker(p));
   const dmShown = decisionMakers.slice(0, perColumn);
   const prShown = practitioners.slice(0, perColumn);
 
@@ -537,6 +561,21 @@ function ApolloStakeholders({
 
   return (
     <div className="space-y-4">
+      {pinnedContact && (
+        <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
+          <p className="mb-3 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-violet-300">
+            <Compass className="h-3.5 w-3.5" /> first move — named in the suggested motion
+          </p>
+          <ApolloPersonCard
+            person={pinnedContact}
+            company={company}
+            domain={domain}
+            ctx={ctx}
+            autoCheckDelayMs={0}
+          />
+        </div>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-2">
         <div>
           <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
@@ -810,7 +849,16 @@ export function CompanyIntel({
         icon={Users}
         iconColor="text-sky-400"
       >
-        <ApolloStakeholders company={intel.name} domain={intel.domain} ctx={contactCtx} />
+        <ApolloStakeholders
+          company={intel.name}
+          domain={intel.domain}
+          ctx={contactCtx}
+          keyContact={
+            intel.motion.keyContactName
+              ? { name: intel.motion.keyContactName, title: intel.motion.keyContactTitle }
+              : undefined
+          }
+        />
       </Section>
 
       {/* Suggested motion — sits right below the people to contact */}

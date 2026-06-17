@@ -507,16 +507,21 @@ export interface ApolloPeopleResult {
   people: EnrichContact[];
   /** Whether another page of people likely exists (for "pull more contacts"). */
   hasMore?: boolean;
+  /** A specific person looked up by name (the motion's first-move contact). */
+  pinned?: EnrichContact;
 }
 
 /**
  * Find engineering-leadership people at a company by title. Resolves the org
  * from `domain` (preferred — direct, no extra call) or by `company` name.
+ * `pinName` additionally looks up one specific person by name within the org
+ * (so a motion's named contact can be pinned into the list).
  */
 export async function apolloPeopleByTitle(
   company: string,
   domain?: string,
-  page = 1
+  page = 1,
+  pinName?: string
 ): Promise<ApolloPeopleResult> {
   const fail = (configured: boolean, error: string): ApolloPeopleResult => ({
     configured,
@@ -552,6 +557,28 @@ export async function apolloPeopleByTitle(
     }
   }
 
+  // Look up the motion's named contact by name within the org (best-effort).
+  const findPinned = async (): Promise<EnrichContact | undefined> => {
+    if (!pinName) return undefined;
+    try {
+      const pq = new URLSearchParams({ page: "1", per_page: "5", q_keywords: pinName });
+      if (orgId) pq.append("organization_ids[]", orgId);
+      else if (orgDomain) pq.append("q_organization_domains_list[]", orgDomain);
+      const { status, body } = await apolloJson(`${BASE}/mixed_people/api_search?${pq}`, key, "POST");
+      if (status !== 200) return undefined;
+      const b = body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
+      const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])];
+      const target = normName(pinName);
+      // Prefer an exact-ish name match, else the first result.
+      const match =
+        raw.find((p) => normName(str(p.name) ?? `${p.first_name ?? ""} ${p.last_name ?? ""}`).includes(target)) ??
+        raw[0];
+      return match ? toContact(match) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
   try {
     const perPage = 30;
     const qs = new URLSearchParams({
@@ -562,7 +589,10 @@ export async function apolloPeopleByTitle(
     if (orgId) qs.append("organization_ids[]", orgId);
     else if (orgDomain) qs.append("q_organization_domains_list[]", orgDomain);
 
-    const { status, body } = await apolloJson(`${BASE}/mixed_people/api_search?${qs}`, key, "POST");
+    const [{ status, body }, pinned] = await Promise.all([
+      apolloJson(`${BASE}/mixed_people/api_search?${qs}`, key, "POST"),
+      findPinned(),
+    ]);
     if (status !== 200) return fail(true, statusError(status, "people search"));
     const b = body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
     const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])];
@@ -576,8 +606,9 @@ export async function apolloPeopleByTitle(
         orgName,
         people: [],
         hasMore: false,
+        pinned,
       };
-    return { configured: true, ok: true, orgName, people, hasMore };
+    return { configured: true, ok: true, orgName, people, hasMore, pinned };
   } catch (e) {
     return fail(true, isTimeout(e) ? "Apollo people search timed out" : "Apollo people search failed");
   }

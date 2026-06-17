@@ -134,6 +134,10 @@ export interface MotionRecommendation {
   reasoning: string;
   firstMove: string;
   watchOuts: string[];
+  /** The specific person the first move targets, if the motion names one — so
+   *  the UI can pin them into the people-to-contact list. */
+  keyContactName?: string;
+  keyContactTitle?: string;
 }
 
 export interface TokenCostExposure {

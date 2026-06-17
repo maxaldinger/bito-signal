@@ -99,7 +99,7 @@ Output ONLY one JSON object — no prose, no code fences:
   "competitors": [
     { "name": "", "category": "", "weakness": "", "bitoAdvantage": "", "pitch": "one-liner the rep can say" }
   ],
-  "motion": { "primary": "PLG|Top-Down|Champion-Led|Land-and-Expand", "reasoning": "", "firstMove": "concrete first action", "watchOuts": ["", ""] },
+  "motion": { "primary": "PLG|Top-Down|Champion-Led|Land-and-Expand", "reasoning": "", "firstMove": "concrete first action", "watchOuts": ["", ""], "keyContactName": "the specific person the first move targets (real full name) or null if generic", "keyContactTitle": "that person's title or null" },
   "tokenCost": { "estimatedMonthlyUsd": number, "estimatedSeats": number, "perSeatUsd": number, "notes": "assumptions, anchors used", "bitoOffsetUsd": number or null },
   "onboarding": { "score": 0-99, "level": "Low|Medium|High", "drivers": ["", ""], "mitigations": ["", ""] },
   "outreach": { "hook": "", "channel": "Email|LinkedIn|Engineering Community|Warm Intro", "proof": "the specific signal behind the hook", "draftMessage": "3-5 lines" },
@@ -131,6 +131,12 @@ const clamp = (n: unknown, lo: number, hi: number, dflt: number): number => {
   const x = Number(n);
   if (!Number.isFinite(x)) return dflt;
   return Math.max(lo, Math.min(hi, Math.round(x)));
+};
+
+// Trim a model-supplied name/title; treat empty or literal "null" as absent.
+const cleanName = (v: unknown): string | undefined => {
+  const s = typeof v === "string" ? v.trim() : "";
+  return s && s.toLowerCase() !== "null" && s.toLowerCase() !== "none" ? s : undefined;
 };
 
 // Scores must come from the model, not from defaults — a brief with a missing
@@ -294,6 +300,8 @@ export async function GET(req: NextRequest) {
         reasoning: String(parsed.motion?.reasoning || ""),
         firstMove: String(parsed.motion?.firstMove || ""),
         watchOuts: (parsed.motion?.watchOuts ?? []).map(String).slice(0, 4),
+        keyContactName: cleanName(parsed.motion?.keyContactName),
+        keyContactTitle: cleanName(parsed.motion?.keyContactTitle),
       },
       tokenCost: {
         estimatedMonthlyUsd: clamp(parsed.tokenCost?.estimatedMonthlyUsd, 0, 10_000_000, 0),
