@@ -399,11 +399,21 @@ function modeledSweFromOrg(org: IcpSweepOrg): number | undefined {
   return swe > 0 ? swe : undefined;
 }
 
+// Trim Apollo's company blurb to a single, brief "what they do" sentence.
+function briefAbout(text: string): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  const firstSentence = clean.split(/(?<=[.!?])\s/)[0] ?? clean;
+  return firstSentence.length > 200 ? `${clean.slice(0, 197).trimEnd()}…` : firstSentence;
+}
+
 function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
   return orgs.map((org, i) => {
     // Modeled engineer-share of Apollo's total headcount (see modeledSweFromOrg)
     // — drives both the size filter and the fit score below. Rough by design.
     const swe = modeledSweFromOrg(org);
+    // Prefer a real "what the company does" blurb (Apollo short_description) for
+    // the overview; fall back to the Apollo-match explainer when none exists.
+    const about = org.about ? briefAbout(org.about) : undefined;
     return {
       id: `icp-${i}-${Date.now().toString(36)}`,
       account: org.name,
@@ -412,8 +422,9 @@ function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
       strength: modeledStrength(org.matchedKeyword, swe),
       title: `Profile-fit match: ${org.matchedKeyword} · ${org.employeeBand}`,
       description:
+        about ??
         `Surfaced by Apollo org search on Bito's ICP filters — matched "${org.matchedKeyword}" within the ${org.employeeBand} band. ` +
-        `Fit score is a rule-based profile estimate; no event signal yet — run the brief for live research.`,
+          `Fit score is a rule-based profile estimate; no event signal yet — run the brief for live research.`,
       tags: [org.matchedKeyword, org.employeeBand],
       source: "Apollo org search",
       url: org.linkedinUrl || org.websiteUrl,
