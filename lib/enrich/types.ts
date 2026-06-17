@@ -34,6 +34,8 @@ export interface EnrichContact {
   phone?: string;
   seniority?: string;
   department?: string;
+  /** Country the person is based in, when the provider returns it. */
+  country?: string;
 }
 
 // --------- Apollo.io ---------

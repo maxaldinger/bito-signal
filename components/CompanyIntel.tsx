@@ -316,7 +316,13 @@ function ApolloPersonCard({
           )}
         </div>
       </div>
-      {person.title && <p className="mt-1 text-xs text-ink-400">{person.title}</p>}
+      {(person.title || person.country) && (
+        <p className="mt-1 text-xs text-ink-400">
+          {person.title}
+          {person.title && person.country ? " · " : ""}
+          {person.country && <span className="text-ink-500">{person.country}</span>}
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <a

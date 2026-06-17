@@ -45,6 +45,7 @@ interface ApolloPerson {
   email_status?: string | null;
   seniority?: string | null;
   departments?: string[] | null;
+  country?: string | null;
 }
 
 const ENG_LEADERSHIP_TITLES = [
@@ -129,6 +130,7 @@ function toContact(p: ApolloPerson): EnrichContact | undefined {
     linkedinUrl: str(p.linkedin_url),
     seniority: str(p.seniority),
     department: Array.isArray(p.departments) ? str(p.departments[0]) : undefined,
+    country: str(p.country),
   };
 }
 
