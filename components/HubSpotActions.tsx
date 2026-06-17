@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { markProspected, setHubspotPresence } from "@/lib/clientStore";
-import { stripEmDashes } from "@/lib/format";
+import { stripEmDashes, stripMarkdown } from "@/lib/format";
 
 // Swap the body's outreach section for a freshly generated one (the section is
 // last in the task body, so replace from the marker to the end).
@@ -254,10 +254,13 @@ function TaskModal({
       const who = name.split(" ")[0] || name;
       const role = jobtitle || "an engineering leader";
       const content =
-        `Draft a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${companyName || "their company"}. ` +
-        `Address them by first name only. Subject line + tight body under 120 words + one clear CTA. ` +
-        `Tie it to Bito's AI code-review value for an engineering team. Don't invent specific facts about them. ` +
-        `Use plain punctuation only — do NOT use em dashes or en dashes.`;
+        `Write a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${companyName || "their company"}. ` +
+        `Address them by first name only. Tie it to Bito's AI code-review value for an engineering team. ` +
+        `Output ONLY the email: a "Subject:" line, then the body (under 120 words, one clear CTA). ` +
+        `Plain text only — NO markdown, asterisks, bold, headings, or "---" separators. ` +
+        `Do NOT add any notes, caveats, or commentary to the rep, and no placeholders like [Your name]. ` +
+        `Don't invent facts; if you can't verify a detail, just leave it out. ` +
+        `Use plain punctuation only — no em or en dashes.`;
       const res = await fetch("/api/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -273,7 +276,7 @@ function TaskModal({
         setGenError(data.error || `Could not generate (${res.status})`);
         return;
       }
-      setBody((b) => replaceOutreachSection(b, stripEmDashes(data.text!)));
+      setBody((b) => replaceOutreachSection(b, stripEmDashes(stripMarkdown(data.text!))));
     } catch (e) {
       setGenError(e instanceof Error ? e.message : String(e));
     } finally {

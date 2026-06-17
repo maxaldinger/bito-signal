@@ -9,6 +9,8 @@
 // Project rule (shared with the enrichment layer): never fabricate data — every
 // function returns either real HubSpot fields or an honest error.
 
+import { plainToHtml } from "./format";
+
 const BASE = "https://api.hubapi.com";
 const TIMEOUT_MS = 15_000;
 
@@ -437,7 +439,9 @@ export async function hubspotCreateTask(input: {
   const payload = {
     properties: {
       hs_task_subject: input.subject.trim(),
-      hs_task_body: input.body ?? "",
+      // HubSpot renders the body as rich text/HTML — convert our plain-text note
+      // (markdown-stripped, line breaks preserved) so it isn't one wall of text.
+      hs_task_body: plainToHtml(input.body ?? ""),
       hs_timestamp: input.dueDateMs,
       hs_task_status: "NOT_STARTED",
       hs_task_priority: "MEDIUM",

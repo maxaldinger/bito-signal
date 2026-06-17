@@ -50,3 +50,40 @@ export function stripEmDashes(text: string): string {
     .replace(/,\s*,/g, ",")
     .replace(/[ \t]{2,}/g, " ");
 }
+
+/**
+ * Strip Markdown syntax the model sometimes emits (bold, headings, code ticks,
+ * `---` rules) so it doesn't show up as literal **asterisks** / dashes in a
+ * plain-text destination like a HubSpot task note.
+ */
+export function stripMarkdown(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "")
+    .replace(/`+/g, "")
+    .replace(/(^|\n)[ \t]*([-*=_]){3,}[ \t]*(?=\n|$)/g, "$1") // horizontal rules
+    .replace(/(^|\n)#{1,6}[ \t]+/g, "$1") // headings
+    .replace(/[ \t]{2,}/g, " ");
+}
+
+/**
+ * Turn a plain-text note (with `\n` line breaks and "LABEL:" lines) into clean
+ * HTML for HubSpot's rich-text task body, which otherwise collapses whitespace
+ * into one wall of text. Strips markdown + em dashes and bold-faces leading
+ * ALL-CAPS labels (WHO:, COMPANY:, SIGNAL:, …) and "Subject:".
+ */
+export function plainToHtml(text: string): string {
+  const clean = stripEmDashes(stripMarkdown(text || "")).trim();
+  if (!clean) return "";
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const fmtLine = (line: string) => {
+    const m = line.match(/^([A-Z][A-Z ]{1,30}|Subject):(.*)$/);
+    return m ? `<strong>${esc(m[1])}:</strong>${esc(m[2])}` : esc(line);
+  };
+  return clean
+    .split(/\n{2,}/)
+    .map((block) => `<p>${block.split("\n").map(fmtLine).join("<br>")}</p>`)
+    .join("");
+}

@@ -27,7 +27,7 @@ const K8S_NOTE =
   "K8s shops typically run 10+ services across multiple repos — high probability of agent context failure without live knowledge graph. Strong Bito fit.";
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
-import { fmtUSD, fmtNum, fmtDate, stripEmDashes } from "@/lib/format";
+import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
   useIsProspected,
@@ -254,10 +254,13 @@ function ApolloPersonCard({
       const who = (revealedName || person.name).split(" ")[0];
       const role = person.title || "an engineering leader";
       const content =
-        `Draft a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
-        `Address them by first name only. Subject line + tight body under 120 words + one clear CTA. ` +
-        `Tie it to Bito's AI code-review value for an engineering team. Don't invent specific facts about them. ` +
-        `Use plain punctuation only — do NOT use em dashes or en dashes; use commas, periods, or parentheses.`;
+        `Write a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
+        `Address them by first name only. Tie it to Bito's AI code-review value for an engineering team. ` +
+        `Output ONLY the email: a "Subject:" line, then the body (under 120 words, one clear CTA). ` +
+        `Plain text only — NO markdown, asterisks, bold, headings, or "---" separators. ` +
+        `Do NOT add any notes, caveats, or commentary to the rep, and no placeholders like [Your name]. ` +
+        `Don't invent facts; if you can't verify a detail, just leave it out. ` +
+        `Use plain punctuation only — no em or en dashes.`;
       const res = await fetch("/api/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -271,7 +274,7 @@ function ApolloPersonCard({
       }
       setDraft(
         res.ok
-          ? { text: data.text ? stripEmDashes(data.text) : data.text }
+          ? { text: data.text ? stripEmDashes(stripMarkdown(data.text)) : data.text }
           : { error: data.error || `Draft failed (${res.status})` },
       );
     } catch (e) {
