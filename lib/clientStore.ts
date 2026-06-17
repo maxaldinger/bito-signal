@@ -156,3 +156,36 @@ export function useDeepDiveScore(company: string): number | undefined {
   }
   return undefined;
 }
+
+// ---------------- Low priority (minimized cards) ----------------
+// Companies the rep has minimized on the feed — collapsed to just the name so
+// they're out of the way without being hidden. Keyed by normalized company.
+type LowPriority = Record<string, number>;
+const lowPriority = makeStore<LowPriority>("bito-lowpriority", {}, (raw) => {
+  const out: LowPriority = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const k of Object.keys(raw as Record<string, unknown>)) out[normCompany(k)] = 1;
+  }
+  return out;
+});
+
+export function toggleLowPriority(company: string): void {
+  if (!company) return;
+  const cur = lowPriority.get();
+  const target = normCompany(company);
+  const existing = Object.keys(cur).find((k) => normCompany(k) === target);
+  if (existing) {
+    const next = { ...cur };
+    delete next[existing];
+    lowPriority.set(next);
+  } else {
+    lowPriority.set({ ...cur, [target]: 1 });
+  }
+}
+
+export function useIsLowPriority(company: string): boolean {
+  const s = lowPriority.useStore();
+  if (!company) return false;
+  const target = normCompany(company);
+  return Object.keys(s).some((k) => normCompany(k) === target);
+}

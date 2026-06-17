@@ -11,12 +11,20 @@ import {
   ChevronUp,
   ExternalLink,
   Check,
+  Minimize2,
+  Maximize2,
   type LucideIcon,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
 import { SIGNAL_TYPE_MAP, SEGMENT_MAP } from "@/lib/data";
 import { timeAgo, fmtNum, fmtDate } from "@/lib/format";
-import { useDeepDiveScore, useIsProspected, useProspectedAt } from "@/lib/clientStore";
+import {
+  useDeepDiveScore,
+  useIsProspected,
+  useProspectedAt,
+  useIsLowPriority,
+  toggleLowPriority,
+} from "@/lib/clientStore";
 import { HubSpotActions } from "./HubSpotActions";
 
 const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
@@ -82,6 +90,38 @@ export function SignalCard({
   const score = briefScore ?? signal.strength;
   const prospected = useIsProspected("company", signal.account);
   const prospectedAt = useProspectedAt("company", signal.account);
+  const lowPriority = useIsLowPriority(signal.account);
+
+  // Minimized (low-priority) cards collapse to a slim row — name + score + a
+  // restore button — so they stay on the page without dominating it.
+  if (lowPriority) {
+    return (
+      <div className="animate-fade-in flex items-center justify-between gap-3 rounded-lg border border-ink-800 bg-ink-900/40 px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-500">
+            low priority
+          </span>
+          <button
+            onClick={() => onSelect(signal.account)}
+            className="min-w-0 truncate font-mono text-sm text-ink-300 transition-colors hover:text-neon-300"
+            title="Open brief"
+          >
+            {signal.account}
+          </button>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="font-mono text-xs tabular-nums text-ink-500">{score}</span>
+          <button
+            onClick={() => toggleLowPriority(signal.account)}
+            title="Restore card"
+            className="inline-flex items-center gap-1 rounded border border-ink-700 px-2 py-1 font-mono text-[11px] text-ink-400 transition-colors hover:border-neon-600/40 hover:text-neon-200"
+          >
+            <Maximize2 className="h-3 w-3" /> Restore
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -189,6 +229,13 @@ export function SignalCard({
           {timeAgo(signal.date)} · {signal.source}
         </span>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => toggleLowPriority(signal.account)}
+            title="Minimize — mark low priority"
+            className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200"
+          >
+            <Minimize2 className="h-3 w-3" /> Minimize
+          </button>
           {signal.url && (
             <a
               href={signal.url}
