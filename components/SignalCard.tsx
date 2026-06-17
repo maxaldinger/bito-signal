@@ -55,16 +55,27 @@ function ownDescription(signal: Signal): string {
   return d;
 }
 
-// Lazily fetch + cache a "what the company does" blurb for cards that have none.
-// Only fires once the card is on screen, so a page of blank cards doesn't fan
-// out a fetch per card up front.
-function useCompanyBlurb(signal: Signal, ref: React.RefObject<HTMLDivElement | null>) {
+// Lazily fetch the card's lead content once it's on screen (so a page of cards
+// doesn't fan out a fetch per card up front), cache + persist it:
+//  - Apollo profile-fit cards (type "icp", title still "Profile-fit match…")
+//    research the single most relevant buying SIGNAL and lead with it; if none
+//    exists they fall back to a company blurb.
+//  - Any other card lacking a description just gets a blurb.
+// Returns the title / description / source url to display (overriding the raw
+// signal fields once enrichment lands).
+function useCardContent(signal: Signal, ref: React.RefObject<HTMLDivElement | null>) {
   const own = ownDescription(signal);
-  const [blurb, setBlurb] = useState<string>(() => own || getCompanyBlurb(signal.account) || "");
+  const isProfileFit = signal.type === "icp" && signal.title.startsWith("Profile-fit match");
+  const [title, setTitle] = useState(signal.title);
+  const [description, setDescription] = useState<string>(
+    () => own || getCompanyBlurb(signal.account) || "",
+  );
+  const [url, setUrl] = useState(signal.url);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (own || blurb) return; // already have something
+    // Non-profile-fit cards that already have content need nothing.
+    if (!isProfileFit && (own || description)) return;
     const el = ref.current;
     if (!el) return;
     let done = false;
@@ -77,14 +88,23 @@ function useCompanyBlurb(signal: Signal, ref: React.RefObject<HTMLDivElement | n
         const params = new URLSearchParams({ company: signal.account, type: signal.type });
         const dom = domainFromUrl(signal.url);
         if (dom) params.set("domain", dom);
-        const res = await fetch(`/api/enrich/company-blurb?${params.toString()}`);
-        const data = (await res.json()) as { blurb?: string };
-        if (data.blurb) {
-          setBlurb(data.blurb);
-          setCompanyBlurb(signal.account, data.blurb);
+        const endpoint = isProfileFit ? "company-signal" : "company-blurb";
+        const res = await fetch(`/api/enrich/${endpoint}?${params.toString()}`);
+        const data = (await res.json()) as {
+          blurb?: string;
+          signal?: { title?: string; description?: string; url?: string } | null;
+        };
+        const sig = data.signal;
+        if (isProfileFit && sig?.title && sig?.description) {
+          setTitle(sig.title);
+          setDescription(sig.description);
+          if (sig.url) setUrl(sig.url);
+        } else if (data.blurb) {
+          setDescription(data.blurb);
         }
+        if (data.blurb) setCompanyBlurb(signal.account, data.blurb);
       } catch {
-        /* leave blank */
+        /* leave as-is */
       } finally {
         setLoading(false);
       }
@@ -104,7 +124,7 @@ function useCompanyBlurb(signal: Signal, ref: React.RefObject<HTMLDivElement | n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signal.account, signal.type]);
 
-  return { blurb: own || blurb, loading: loading && !own && !blurb };
+  return { title, description, url, loading: loading && !description };
 }
 
 const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
@@ -177,10 +197,15 @@ export function SignalCard({
   const lowPriority = useIsLowPriority(signal.account);
   const collapsed = useIsCollapsed(signal.account);
 
-  // Company "what they do" blurb — the signal's own description, or a lazily
-  // fetched (Apollo → web) one for cards that have none.
+  // Lead content — the signal's own title/description/url, or lazily researched
+  // ones (most-relevant signal for Apollo profile-fit cards; else a blurb).
   const cardRef = useRef<HTMLDivElement>(null);
-  const { blurb, loading: blurbLoading } = useCompanyBlurb(signal, cardRef);
+  const {
+    title: displayTitle,
+    description: displayDesc,
+    url: displayUrl,
+    loading: contentLoading,
+  } = useCardContent(signal, cardRef);
 
   // Minimized cards collapse to a slim row — name + score + restore — so they
   // stay on the page without dominating it. Low-priority cards also sink to the
@@ -263,14 +288,13 @@ export function SignalCard({
       </button>
 
       <h3 className="mb-1.5 text-[15px] font-semibold leading-snug text-ink-50">
-        {signal.title}
+        {displayTitle}
       </h3>
-      {/* "What the company does" — the signal's own description, or a lazily
-          fetched (Apollo → web) blurb. Skips the legacy Apollo-sweep boilerplate
-          (handled in useCompanyBlurb). */}
-      {blurb ? (
-        <p className="text-sm leading-relaxed text-ink-300">{blurb}</p>
-      ) : blurbLoading ? (
+      {/* Lead text — the most relevant researched signal for Apollo profile-fit
+          cards, else the signal's own description or a company blurb. */}
+      {displayDesc ? (
+        <p className="text-sm leading-relaxed text-ink-300">{displayDesc}</p>
+      ) : contentLoading ? (
         <div className="space-y-1.5 py-0.5">
           <div className="skeleton h-3 w-full rounded" />
           <div className="skeleton h-3 w-2/3 rounded" />
@@ -322,8 +346,8 @@ export function SignalCard({
           defaultBody={
             `${signal.account} — ${segment.label}` +
             `${signal.sweEstimate ? `, ~${fmtNum(signal.sweEstimate)} SWEs` : ""}.\n` +
-            `SIGNAL: ${signal.title}\n${signal.description}\n` +
-            `${signal.url ? `SOURCE: ${signal.source} — ${signal.url}\n` : ""}`
+            `SIGNAL: ${displayTitle}\n${displayDesc}\n` +
+            `${displayUrl ? `SOURCE: ${signal.source} — ${displayUrl}\n` : ""}`
           }
         />
       </div>
@@ -347,9 +371,9 @@ export function SignalCard({
           >
             <ArrowDownToLine className="h-3 w-3" /> Low priority
           </button>
-          {signal.url && (
+          {displayUrl && (
             <a
-              href={signal.url}
+              href={displayUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:text-ink-200"

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apolloOrgBlurb } from "@/lib/enrich/apollo";
 import { callClaudeWithWebSearch, FAST_MODEL } from "@/lib/anthropic";
-import { setSignalDescription } from "@/lib/supabase";
+import { updateSignalRow } from "@/lib/supabase";
 import { stripEmDashes } from "@/lib/format";
 import type { SignalTypeId } from "@/lib/types";
 
@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Persist onto the cached signal row (best-effort) so reloads reuse it.
-  if (type) await setSignalDescription(company, type, blurb);
+  if (type) await updateSignalRow(company, type, { description: blurb });
 
   return NextResponse.json(
     { blurb, source },

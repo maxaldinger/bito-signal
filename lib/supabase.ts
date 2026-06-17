@@ -118,15 +118,21 @@ export async function upsertSignals(
   }
 }
 
-/** Persist a generated company blurb onto the cached signal row(s) so it shows
- * on reload without re-fetching. Scoped to (account, type); never throws. */
-export async function setSignalDescription(
+/** Persist enriched fields (title/description/url) onto the cached signal
+ * row(s) so they show on reload without re-fetching. Scoped to (account, type);
+ * never throws. Used by the company-blurb and company-signal enrichment. */
+export async function updateSignalRow(
   account: string,
   type: SignalTypeId,
-  description: string,
+  fields: { title?: string; description?: string; url?: string },
 ): Promise<void> {
   const cfg = config();
-  if (!cfg || !account || !description) return;
+  if (!cfg || !account) return;
+  const body: Record<string, string> = {};
+  if (fields.title) body.title = fields.title;
+  if (fields.description) body.description = fields.description;
+  if (fields.url) body.url = fields.url;
+  if (Object.keys(body).length === 0) return;
   try {
     await fetch(
       `${cfg.url}/rest/v1/bito_signals?account=eq.${encodeURIComponent(account)}&type=eq.${encodeURIComponent(type)}`,
@@ -138,12 +144,12 @@ export async function setSignalDescription(
           "Content-Type": "application/json",
           Prefer: "return=minimal",
         },
-        body: JSON.stringify({ description }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       },
     );
   } catch {
-    /* non-fatal — the blurb still returns to the client and caches there */
+    /* non-fatal — the value still returns to the client and caches there */
   }
 }
 
