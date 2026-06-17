@@ -13,7 +13,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { markProspected } from "@/lib/clientStore";
+import { markProspected, setHubspotPresence } from "@/lib/clientStore";
 import { stripEmDashes } from "@/lib/format";
 
 // Swap the body's outreach section for a freshly generated one (the section is
@@ -115,6 +115,8 @@ export function HubSpotActions({
         data = { ok: false, found: false, records: [], error: `HTTP ${res.status}` };
       }
       setCheck(data);
+      // Share the live company result so the feed can sort by HubSpot presence.
+      if (kind === "company" && data.ok) setHubspotPresence(name, data.found);
     } catch (e) {
       setCheck({ ok: false, found: false, records: [], error: e instanceof Error ? e.message : String(e) });
     } finally {

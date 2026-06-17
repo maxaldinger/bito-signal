@@ -10,6 +10,7 @@ import {
   useDeepDiveScores,
   useProspectedCompanies,
   useLowPriorityCompanies,
+  useHubspotPresence,
   companyInMap,
   companyValue,
 } from "@/lib/clientStore";
@@ -322,8 +323,17 @@ export default function Page() {
   const scoresMap = useDeepDiveScores();
   const prospectedMap = useProspectedCompanies();
   const lowPriMap = useLowPriorityCompanies();
+  const presenceMap = useHubspotPresence();
   const sortedFiltered = useMemo(() => {
     const scoreOf = (s: Signal) => companyValue(scoresMap, s.account) ?? s.strength;
+    // In HubSpot = the live card check (1/0) when available, else the local
+    // prospected flag. Live results trickle in as the staggered checks finish,
+    // so this sort settles over a few seconds after a pull/page change.
+    const inHubspot = (s: Signal): boolean => {
+      const live = companyValue(presenceMap, s.account);
+      if (live !== undefined) return live === 1;
+      return companyInMap(prospectedMap, s.account);
+    };
     const cmp = (a: Signal, b: Signal): number => {
       switch (sort) {
         case "fit":
@@ -335,10 +345,7 @@ export default function Page() {
         case "az":
           return a.account.localeCompare(b.account);
         case "hubspot":
-          return (
-            Number(companyInMap(prospectedMap, b.account)) -
-            Number(companyInMap(prospectedMap, a.account))
-          );
+          return Number(inHubspot(b)) - Number(inHubspot(a));
         default:
           return 0; // "feed": keep the original pull order
       }
@@ -351,7 +358,7 @@ export default function Page() {
       if (low !== 0) return low;
       return cmp(a, b);
     });
-  }, [filtered, sort, scoresMap, prospectedMap, lowPriMap]);
+  }, [filtered, sort, scoresMap, prospectedMap, lowPriMap, presenceMap]);
 
   const metrics = useMemo(() => {
     const accounts = new Set(filtered.map((s) => s.account));

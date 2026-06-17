@@ -216,3 +216,24 @@ export function companyValue(map: Record<string, number>, company: string): numb
   for (const k in map) if (normCompany(k) === target) return map[k];
   return undefined;
 }
+
+// ---------------- HubSpot live presence ----------------
+// Filled by the card's HubSpot auto-check: 1 = found in HubSpot, 0 = checked &
+// not found, absent = not checked yet. Lets the feed sort by the LIVE result
+// (not just the local prospected flag). Re-checks on each card mount keep it
+// fresh, so persisting it only avoids a flash on reload.
+type Presence = Record<string, number>;
+const hubspotPresence = makeStore<Presence>("bito-hs-presence", {});
+
+export function setHubspotPresence(company: string, found: boolean): void {
+  if (!company) return;
+  const cur = hubspotPresence.get();
+  const k = normCompany(company);
+  const v = found ? 1 : 0;
+  if (cur[k] === v) return;
+  hubspotPresence.set({ ...cur, [k]: v });
+}
+
+export function useHubspotPresence(): Record<string, number> {
+  return hubspotPresence.useStore();
+}
