@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   X,
   Target,
@@ -426,10 +426,16 @@ interface ApolloPeopleResponse {
   error?: string;
   orgName?: string;
   people: EnrichContact[];
+  hasMore?: boolean;
 }
 
+// How many to show per column, and how many more each "pull more" adds. 4 per
+// column = an 8-person, 50/50 map; the rest stay in the pool until pulled.
+const PER_COLUMN_STEP = 4;
+
 // Drives the stakeholder map from Apollo's live people-by-title search (real
-// people + ids), replacing the model's invented roles.
+// people + ids), replacing the model's invented roles. Shows a small balanced
+// set and lets the rep pull more (next Apollo page) on demand.
 function ApolloStakeholders({
   company,
   domain,
@@ -439,45 +445,57 @@ function ApolloStakeholders({
   domain?: string;
   ctx: ContactTaskContext;
 }) {
-  const [data, setData] = useState<ApolloPeopleResponse | null>(null);
+  const [people, setPeople] = useState<EnrichContact[]>([]);
+  const [perColumn, setPerColumn] = useState(PER_COLUMN_STEP);
+  const [pageFetched, setPageFetched] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch one page of people; append (pull more) or replace (initial load).
+  // Dedupes by Apollo id so overlapping pages don't double-list a person.
+  const fetchPage = useCallback(
+    async (p: number, append: boolean): Promise<void> => {
+      const params = new URLSearchParams({ company, page: String(p) });
+      if (domain) params.set("domain", domain);
+      const res = await fetch(`/api/enrich/apollo/people?${params.toString()}`);
+      let body: ApolloPeopleResponse | { error?: string };
+      try {
+        body = await res.json();
+      } catch {
+        body = { error: `HTTP ${res.status} — ${res.statusText || "non-JSON response"}` };
+      }
+      if (!res.ok) {
+        if (!append) setError((body as { error?: string }).error || `Apollo people lookup failed (${res.status})`);
+        setHasMore(false);
+        return;
+      }
+      const fresh = (body as ApolloPeopleResponse).people ?? [];
+      setPeople((prev) => {
+        if (!append) return fresh;
+        const seen = new Set(prev.map((x) => x.apolloId || x.name));
+        return [...prev, ...fresh.filter((x) => !seen.has(x.apolloId || x.name))];
+      });
+      setHasMore(Boolean((body as ApolloPeopleResponse).hasMore));
+      setPageFetched(p);
+    },
+    [company, domain],
+  );
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setData(null);
-
-    const params = new URLSearchParams({ company });
-    if (domain) params.set("domain", domain);
-
-    fetch(`/api/enrich/apollo/people?${params.toString()}`)
-      .then(async (res) => {
-        let body: ApolloPeopleResponse | { error?: string };
-        try {
-          body = await res.json();
-        } catch {
-          body = { error: `HTTP ${res.status} — ${res.statusText || "non-JSON response"}` };
-        }
-        if (cancelled) return;
-        if (!res.ok) {
-          setError((body as { error?: string }).error || `Apollo people lookup failed (${res.status})`);
-        } else {
-          setData(body as ApolloPeopleResponse);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e?.message || e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
+    setPeople([]);
+    setPerColumn(PER_COLUMN_STEP);
+    fetchPage(1, false).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
     return () => {
       cancelled = true;
     };
-  }, [company, domain]);
+  }, [fetchPage]);
 
   if (loading) {
     return (
@@ -492,57 +510,90 @@ function ApolloStakeholders({
     );
   }
   if (error) return <p className="text-sm text-red-400">{error}</p>;
-  if (!data || data.people.length === 0) {
+  if (people.length === 0) {
     return <p className="text-xs text-ink-500">No engineering stakeholders surfaced from Apollo.</p>;
   }
 
-  const decisionMakers = data.people.filter(isDecisionMaker);
-  const practitioners = data.people.filter((p) => !isDecisionMaker(p));
+  const decisionMakers = people.filter(isDecisionMaker);
+  const practitioners = people.filter((p) => !isDecisionMaker(p));
+  const dmShown = decisionMakers.slice(0, perColumn);
+  const prShown = practitioners.slice(0, perColumn);
+
+  // More to show if either column has unshown people, or Apollo has more pages.
+  const poolHasMore = decisionMakers.length > perColumn || practitioners.length > perColumn;
+  const canPullMore = poolHasMore || hasMore;
+
+  const pullMore = async () => {
+    if (loadingMore) return;
+    const next = perColumn + PER_COLUMN_STEP;
+    // Top up the pool from Apollo when showing more would run either column dry.
+    const willRunDry = decisionMakers.length < next || practitioners.length < next;
+    if (willRunDry && hasMore) {
+      setLoadingMore(true);
+      await fetchPage(pageFetched + 1, true).finally(() => setLoadingMore(false));
+    }
+    setPerColumn(next);
+  };
 
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
-      <div>
-        <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
-          signs / gates the deal
-        </p>
-        <div className="space-y-3">
-          {decisionMakers.length === 0 ? (
-            <p className="text-xs text-ink-500">None surfaced.</p>
-          ) : (
-            decisionMakers.map((p, i) => (
-              <ApolloPersonCard
-                key={p.apolloId || i}
-                person={p}
-                company={company}
-                domain={domain}
-                ctx={ctx}
-                autoCheckDelayMs={i * 300}
-              />
-            ))
-          )}
+    <div className="space-y-4">
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div>
+          <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
+            signs / gates the deal
+          </p>
+          <div className="space-y-3">
+            {dmShown.length === 0 ? (
+              <p className="text-xs text-ink-500">None surfaced.</p>
+            ) : (
+              dmShown.map((p, i) => (
+                <ApolloPersonCard
+                  key={p.apolloId || `dm-${i}`}
+                  person={p}
+                  company={company}
+                  domain={domain}
+                  ctx={ctx}
+                  autoCheckDelayMs={i * 300}
+                />
+              ))
+            )}
+          </div>
+        </div>
+        <div>
+          <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-amber-400/90">
+            feels the pain
+          </p>
+          <div className="space-y-3">
+            {prShown.length === 0 ? (
+              <p className="text-xs text-ink-500">None surfaced.</p>
+            ) : (
+              prShown.map((p, i) => (
+                <ApolloPersonCard
+                  key={p.apolloId || `pr-${i}`}
+                  person={p}
+                  company={company}
+                  domain={domain}
+                  ctx={ctx}
+                  autoCheckDelayMs={(dmShown.length + i) * 300}
+                />
+              ))
+            )}
+          </div>
         </div>
       </div>
-      <div>
-        <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-amber-400/90">
-          feels the pain
-        </p>
-        <div className="space-y-3">
-          {practitioners.length === 0 ? (
-            <p className="text-xs text-ink-500">None surfaced.</p>
-          ) : (
-            practitioners.map((p, i) => (
-              <ApolloPersonCard
-                key={p.apolloId || i}
-                person={p}
-                company={company}
-                domain={domain}
-                ctx={ctx}
-                autoCheckDelayMs={(decisionMakers.length + i) * 300}
-              />
-            ))
-          )}
+
+      {canPullMore && (
+        <div className="flex justify-center">
+          <button
+            onClick={pullMore}
+            disabled={loadingMore}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-4 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200 disabled:opacity-50"
+          >
+            {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Users className="h-3.5 w-3.5" />}
+            {loadingMore ? "Pulling…" : "Pull more contacts"}
+          </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }

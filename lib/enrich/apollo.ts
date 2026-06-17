@@ -460,6 +460,8 @@ export interface ApolloPeopleResult {
   /** Resolved org name Apollo matched (may differ from the query). */
   orgName?: string;
   people: EnrichContact[];
+  /** Whether another page of people likely exists (for "pull more contacts"). */
+  hasMore?: boolean;
 }
 
 /**
@@ -468,7 +470,8 @@ export interface ApolloPeopleResult {
  */
 export async function apolloPeopleByTitle(
   company: string,
-  domain?: string
+  domain?: string,
+  page = 1
 ): Promise<ApolloPeopleResult> {
   const fail = (configured: boolean, error: string): ApolloPeopleResult => ({
     configured,
@@ -505,7 +508,11 @@ export async function apolloPeopleByTitle(
   }
 
   try {
-    const qs = new URLSearchParams({ page: "1", per_page: "30" });
+    const perPage = 30;
+    const qs = new URLSearchParams({
+      page: String(Math.max(1, Math.min(100, page))),
+      per_page: String(perPage),
+    });
     for (const t of ENG_TITLES) qs.append("person_titles[]", t);
     if (orgId) qs.append("organization_ids[]", orgId);
     else if (orgDomain) qs.append("q_organization_domains_list[]", orgDomain);
@@ -513,11 +520,19 @@ export async function apolloPeopleByTitle(
     const { status, body } = await apolloJson(`${BASE}/mixed_people/api_search?${qs}`, key, "POST");
     if (status !== 200) return fail(true, statusError(status, "people search"));
     const b = body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
-    const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])].slice(0, 30);
+    const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])];
+    const hasMore = raw.length >= perPage;
     const people = raw.map(toContact).filter((c): c is EnrichContact => c !== undefined);
     if (people.length === 0)
-      return { configured: true, ok: false, error: "No engineering leaders found", orgName, people: [] };
-    return { configured: true, ok: true, orgName, people };
+      return {
+        configured: true,
+        ok: page <= 1 ? false : true,
+        error: page <= 1 ? "No engineering leaders found" : undefined,
+        orgName,
+        people: [],
+        hasMore: false,
+      };
+    return { configured: true, ok: true, orgName, people, hasMore };
   } catch (e) {
     return fail(true, isTimeout(e) ? "Apollo people search timed out" : "Apollo people search failed");
   }
