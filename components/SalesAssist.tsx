@@ -193,7 +193,7 @@ function ChatTool({ ctx }: { ctx: Ctx }) {
     <div>
       {messages.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-14 text-center">
-          <h2 className="font-mono text-3xl font-bold tracking-tight text-ink-50">
+          <h2 className="font-mono text-2xl font-bold tracking-tight text-ink-50 sm:text-3xl">
             what do you need<span className="text-neon-400">?</span>
           </h2>
           <p className="mt-2 text-sm text-ink-400">

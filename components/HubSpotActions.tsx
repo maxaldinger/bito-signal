@@ -110,6 +110,13 @@ export function HubSpotActions({
       setCheck(data);
       // Share the live company result so the feed can sort by HubSpot presence.
       if (kind === "company" && data.ok) setHubspotPresence(name, data.found);
+      // If the live check finds it in HubSpot, badge it prospected (orange) too —
+      // so the state reflects HubSpot truth even if a task-create earlier failed
+      // (e.g. a 429) or the record was added outside this tool.
+      if (data.ok && data.found) {
+        markProspected(kind, kind === "contact" ? apolloId || name : name);
+        if (kind === "contact" && companyName) markProspected("company", companyName);
+      }
     } catch (e) {
       setCheck({ ok: false, found: false, records: [], error: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -155,19 +162,21 @@ export function HubSpotActions({
         </button>
 
         {check && (
-          <span className="inline-flex items-center gap-1 font-mono text-[11px]">
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 font-mono text-[11px]">
             {check.error ? (
-              <span className="text-amber-400/90">{check.error}</span>
+              <span className="break-words text-amber-400/90">{check.error}</span>
             ) : check.found ? (
               <a
                 href={check.records[0]?.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-neon-300 hover:text-neon-200"
+                className="inline-flex min-w-0 items-center gap-1 text-neon-300 hover:text-neon-200"
               >
-                <CircleCheck className="h-3.5 w-3.5" />
-                In HubSpot: {check.records[0]?.name || check.records[0]?.detail || "record"}
-                <ArrowUpRight className="h-3 w-3" />
+                <CircleCheck className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  In HubSpot: {check.records[0]?.name || check.records[0]?.detail || "record"}
+                </span>
+                <ArrowUpRight className="h-3 w-3 shrink-0" />
               </a>
             ) : (
               <span className="inline-flex items-center gap-1 text-ink-400">

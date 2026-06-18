@@ -8,7 +8,7 @@ import {
   TrendingUp,
   Cpu,
   Crosshair,
-  ArrowRight,
+  ChevronDown,
   ChevronUp,
   Check,
   Minimize2,
@@ -428,26 +428,28 @@ export function SignalCard({
             <Star className={`h-3 w-3 ${favorite ? "fill-amber-400 text-amber-400" : ""}`} />
             {favorite ? "Favorited" : "Favorite"}
           </button>
-          <button
-            onClick={() => onSelect(signal.account)}
-            className={`inline-flex items-center gap-1 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${
-              expanded
-                ? "border-neon-600/40 bg-neon-500/10 text-neon-300 hover:bg-neon-500/20"
-                : "border-ink-700 text-ink-300 hover:border-neon-600/40 hover:bg-ink-800 hover:text-ink-50"
-            }`}
-          >
-            {expanded ? (
-              <>
-                Close Brief <ChevronUp className="h-3.5 w-3.5" />
-              </>
-            ) : (
-              <>
-                View Brief <ArrowRight className="h-3.5 w-3.5" />
-              </>
-            )}
-          </button>
         </div>
       </div>
+
+      {/* Full-width toggle that doubles as the divider into the in-card brief. */}
+      <button
+        onClick={() => onSelect(signal.account)}
+        className={`mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border py-2.5 text-sm font-semibold transition-colors ${
+          expanded
+            ? "border-neon-600/40 bg-neon-500/10 text-neon-300 hover:bg-neon-500/20"
+            : "border-ink-700 text-ink-300 hover:border-neon-600/40 hover:bg-ink-800 hover:text-ink-50"
+        }`}
+      >
+        {expanded ? (
+          <>
+            Close Brief <ChevronUp className="h-4 w-4" />
+          </>
+        ) : (
+          <>
+            View Full Brief <ChevronDown className="h-4 w-4" />
+          </>
+        )}
+      </button>
 
       {/* Brief expands in place, inside the card, when opened. */}
       {brief}

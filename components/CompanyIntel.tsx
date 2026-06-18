@@ -369,7 +369,7 @@ function ApolloPersonCard({
             <p className="font-mono text-[11px] text-amber-400/90">Draft: {draft.error}</p>
           ) : draft.text ? (
             <div className="relative">
-              <pre className="whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-3 pr-16 font-mono text-[12px] leading-relaxed text-ink-200">
+              <pre className="whitespace-pre-wrap break-words rounded-lg border border-ink-700 bg-ink-950 p-3 pr-16 font-mono text-[12px] leading-relaxed text-ink-200">
                 {draft.text}
               </pre>
               <button
@@ -391,7 +391,7 @@ function ApolloPersonCard({
           {emailRes?.ok && emailRes.email && (
             <p className="flex items-center gap-1.5 text-ink-200">
               <Mail className="h-3 w-3 text-sky-400" />
-              <a href={`mailto:${emailRes.email}`} className="hover:text-sky-300">
+              <a href={`mailto:${emailRes.email}`} className="break-all hover:text-sky-300">
                 {emailRes.email}
               </a>
               {emailRes.emailStatus && (
@@ -726,7 +726,9 @@ export function CompanyIntel({
       {/* Title row */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-3xl font-bold tracking-tight text-ink-50">{intel.name}</h2>
+          <h2 className="break-words text-2xl font-bold tracking-tight text-ink-50 sm:text-3xl">
+            {intel.name}
+          </h2>
           {intel.oneLiner ? (
             <p className="mt-1 text-sm text-ink-300">{intel.oneLiner}</p>
           ) : null}
@@ -923,7 +925,7 @@ export function CompanyIntel({
           )}
           {intel.outreach.draftMessage && (
             <div className="relative mt-3">
-              <pre className="whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-4 font-mono text-[13px] leading-relaxed text-ink-200">
+              <pre className="whitespace-pre-wrap break-words rounded-lg border border-ink-700 bg-ink-950 p-4 font-mono text-[13px] leading-relaxed text-ink-200">
                 {stripEmDashes(intel.outreach.draftMessage)}
               </pre>
               <button

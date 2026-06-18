@@ -540,7 +540,7 @@ export default function Page() {
   const totalPages = pageCount;
 
   return (
-    <div className="min-h-screen bg-ink-950">
+    <div className="min-h-screen overflow-x-hidden bg-ink-950">
       <Header
         search={search}
         onSearch={setSearch}
