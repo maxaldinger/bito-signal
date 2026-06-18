@@ -183,6 +183,35 @@ export function Sidebar({
           <div className="mt-2">
         <div className="mb-3 border-t border-ink-700" />
 
+        {/* HubSpot presence — first so the most common cut (untouched accounts)
+            is right at the top of the filters. */}
+        <h3 className="mb-3 px-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+          hubspot
+        </h3>
+        <div className="grid grid-cols-3 gap-1">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "not", label: "Not in" },
+              { id: "in", label: "In" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => onHubspotFilter(opt.id)}
+              className={`rounded-lg border px-2 py-1.5 font-mono text-[11px] font-medium transition-colors ${
+                hubspotFilter === opt.id
+                  ? "border-orange-500/40 bg-orange-500/10 text-orange-300"
+                  : "border-ink-700 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="my-4 border-t border-ink-700" />
+
         {/* Segments — multi-select */}
         <FilterHeading
           label="segments"
@@ -330,33 +359,6 @@ export function Sidebar({
           <span>100</span>
         </div>
 
-        <div className="my-4 border-t border-ink-700" />
-
-        {/* HubSpot presence */}
-        <h3 className="mb-3 px-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
-          hubspot
-        </h3>
-        <div className="grid grid-cols-3 gap-1">
-          {(
-            [
-              { id: "all", label: "All" },
-              { id: "not", label: "Not in" },
-              { id: "in", label: "In" },
-            ] as const
-          ).map((opt) => (
-            <button
-              key={opt.id}
-              onClick={() => onHubspotFilter(opt.id)}
-              className={`rounded-lg border px-2 py-1.5 font-mono text-[11px] font-medium transition-colors ${
-                hubspotFilter === opt.id
-                  ? "border-orange-500/40 bg-orange-500/10 text-orange-300"
-                  : "border-ink-700 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
           </div>
         )}
 
