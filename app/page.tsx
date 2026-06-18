@@ -13,6 +13,8 @@ import {
   useLowPriorityCompanies,
   useHubspotPresence,
   useBlacklist,
+  getSweepPage,
+  setSweepPage,
   companyInMap,
   companyValue,
 } from "@/lib/clientStore";
@@ -126,9 +128,16 @@ export default function Page() {
           try {
             const delay = BUCKET_STAGGER_MS[bucket] ?? 0;
             if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+            // Apollo sweep: drive the page from the persisted cursor so each
+            // pull fetches NEW orgs (not page 1 over and over).
+            const sweepParam =
+              bucket === "icp"
+                ? `&sweepPage=${getSweepPage(regionRef.current) ?? ""}`
+                : "";
             const url =
               `/api/signals?type=${bucket}&region=${regionRef.current}` +
-              (opts.force ? `&fresh=${Date.now()}` : "");
+              (opts.force ? `&fresh=${Date.now()}` : "") +
+              sweepParam;
             const res = await fetch(url, opts.force ? { cache: "no-store" } : {});
             const data = await readJson(res);
             if (opts.reqId !== feedReqId.current) return;
@@ -141,12 +150,18 @@ export default function Page() {
               }));
             } else if (data.skipped) {
               // Bucket not configured (e.g. ICP sweep without APOLLO_API_KEY).
-            } else if (opts.appendLive) {
-              const fresh = Array.isArray(data.signals)
-                ? (data.signals as Signal[])
-                : [];
-              setSignals((prev) => [...prev, ...fresh]);
-              setLastFetchAt(Date.now());
+            } else {
+              // Advance the Apollo sweep cursor so the next pull pages forward.
+              if (bucket === "icp" && typeof data.nextSweepPage === "number") {
+                setSweepPage(regionRef.current, data.nextSweepPage);
+              }
+              if (opts.appendLive) {
+                const fresh = Array.isArray(data.signals)
+                  ? (data.signals as Signal[])
+                  : [];
+                setSignals((prev) => [...prev, ...fresh]);
+                setLastFetchAt(Date.now());
+              }
             }
           } catch (e) {
             if (opts.reqId !== feedReqId.current) return;

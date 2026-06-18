@@ -347,6 +347,22 @@ export function useFavorites(): Record<string, string> {
   return favorites.useStore();
 }
 
+// ---------------- Apollo sweep cursor ----------------
+// The page the next Apollo ICP sweep should fetch, per region. Persisted so the
+// cursor marches forward across pulls instead of restarting (which would
+// re-fetch page 1 and return only duplicates).
+const sweepCursor = makeStore<Record<string, number>>("bito-sweep-cursor", {});
+
+export function getSweepPage(region: string): number | undefined {
+  const v = sweepCursor.get()[region];
+  return typeof v === "number" && v >= 1 ? v : undefined;
+}
+
+export function setSweepPage(region: string, page: number): void {
+  if (!region || !(page >= 1)) return;
+  sweepCursor.set({ ...sweepCursor.get(), [region]: Math.min(100, Math.floor(page)) });
+}
+
 // ---------------- Company blurb cache ----------------
 // Caches the generated "what the company does" blurb per company so a card that
 // already fetched one doesn't re-fetch (Apollo/web) on re-render or re-page.

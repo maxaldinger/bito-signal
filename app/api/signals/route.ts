@@ -448,13 +448,23 @@ export async function GET(req: NextRequest) {
 
   // Apollo-powered bucket: structured org search, no Anthropic involved.
   if (bucket === "icp") {
-    // Advance one results-page per full sweep-page of cached rows so repeat
-    // pulls bring NEW organizations instead of re-fetching page 1 forever.
-    // SWEEP_PAGE_SIZE = orgs returned by one full page across all queries.
-    const cachedIcp = supabaseConfigured()
-      ? await countSignalsByType("icp", region)
-      : 0;
-    const sweepPage = Math.min(100, Math.floor(cachedIcp / SWEEP_PAGE_SIZE) + 1);
+    // Page cursor: the client passes the page to fetch (it persists the
+    // `nextSweepPage` we return), guaranteeing every pull advances to NEW orgs.
+    // First pull (no cursor) falls back to a count estimate — divided by the
+    // REAL distinct-per-page yield (~60% of theoretical, after dedup), not the
+    // theoretical page size, so it doesn't get stuck re-fetching page 1.
+    const clientPage = Number(req.nextUrl.searchParams.get("sweepPage"));
+    const realisticYield = Math.max(1, Math.round(SWEEP_PAGE_SIZE * 0.6));
+    const cachedIcp =
+      Number.isFinite(clientPage) && clientPage >= 1
+        ? 0
+        : supabaseConfigured()
+          ? await countSignalsByType("icp", region)
+          : 0;
+    const sweepPage =
+      Number.isFinite(clientPage) && clientPage >= 1
+        ? Math.min(100, Math.floor(clientPage))
+        : Math.min(100, Math.floor(cachedIcp / realisticYield) + 1);
     const sweep = await apolloIcpSweep(sweepPage, region);
     if (!sweep.configured) {
       // Not an error — just absent. The client treats `skipped` as a quiet no-op
@@ -479,6 +489,10 @@ export async function GET(req: NextRequest) {
         signals: icpSignals,
         persisted,
         updated: new Date().toISOString(),
+        sweepPage,
+        // The client persists this and sends it back next pull, so the cursor
+        // marches forward regardless of how many rows dedup into the cache.
+        nextSweepPage: Math.min(100, sweepPage + 1),
       },
       {
         headers: {
