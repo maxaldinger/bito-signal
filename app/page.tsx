@@ -110,6 +110,8 @@ export default function Page() {
   const [minStrength, setMinStrength] = useState(0);
   const [sort, setSort] = useState<FeedSort>("feed");
   const [search, setSearch] = useState("");
+  // HubSpot presence filter: all / not-in / in.
+  const [hubspotFilter, setHubspotFilter] = useState<"all" | "not" | "in">("all");
 
   // ---- Live bucket scans (shared by both modes) -------------------------
   const scanBuckets = useCallback(
@@ -295,6 +297,21 @@ export default function Page() {
     [signals, blacklistMap],
   );
 
+  // HubSpot state (live per-card check, else local prospected flag) — drives the
+  // sort AND the "in / not in HubSpot" filter. Live results fill in as the
+  // staggered per-card checks finish, so this settles over a few seconds.
+  const scoresMap = useDeepDiveScores();
+  const prospectedMap = useProspectedCompanies();
+  const lowPriMap = useLowPriorityCompanies();
+  const presenceMap = useHubspotPresence();
+  const isInHubspot = useCallback(
+    (s: Signal): boolean => {
+      const live = companyValue(presenceMap, s.account);
+      return live !== undefined ? live === 1 : companyInMap(prospectedMap, s.account);
+    },
+    [presenceMap, prospectedMap],
+  );
+
   const segmentCounts = useMemo(() => {
     const c = {} as Record<SegmentId, number>;
     for (const s of SEGMENTS) c[s.id] = 0;
@@ -340,27 +357,18 @@ export default function Page() {
         !s.title.toLowerCase().includes(q)
       )
         return false;
+      if (hubspotFilter === "not" && isInHubspot(s)) return false;
+      if (hubspotFilter === "in" && !isInHubspot(s)) return false;
       return true;
     });
-  }, [activeSignals, minStrength, segments, types, bands, search]);
+  }, [activeSignals, minStrength, segments, types, bands, search, hubspotFilter, isInHubspot]);
 
   // Feed sort lives here (driven by the in-feed dropdown) so the order is
   // applied once, upstream of the feed. Uses the displayed score (brief total
   // overrides the per-signal estimate) and sinks low-priority cards to the end.
-  const scoresMap = useDeepDiveScores();
-  const prospectedMap = useProspectedCompanies();
-  const lowPriMap = useLowPriorityCompanies();
-  const presenceMap = useHubspotPresence();
   const sortedFiltered = useMemo(() => {
     const scoreOf = (s: Signal) => companyValue(scoresMap, s.account) ?? s.strength;
-    // In HubSpot = the live card check (1/0) when available, else the local
-    // prospected flag. Live results trickle in as the staggered checks finish,
-    // so this sort settles over a few seconds after a pull/page change.
-    const inHubspot = (s: Signal): boolean => {
-      const live = companyValue(presenceMap, s.account);
-      if (live !== undefined) return live === 1;
-      return companyInMap(prospectedMap, s.account);
-    };
+    const inHubspot = isInHubspot;
     const cmp = (a: Signal, b: Signal): number => {
       switch (sort) {
         case "fit":
@@ -387,7 +395,7 @@ export default function Page() {
       if (low !== 0) return low;
       return cmp(a, b);
     });
-  }, [filtered, sort, scoresMap, prospectedMap, lowPriMap, presenceMap]);
+  }, [filtered, sort, scoresMap, lowPriMap, isInHubspot]);
 
   // Client-side pagination over the globally sorted+filtered set.
   const pageCount = Math.max(1, Math.ceil(sortedFiltered.length / PAGE_SIZE));
@@ -402,7 +410,7 @@ export default function Page() {
   // Changing filters/sort/region resets to page 1 so you never land past the end.
   useEffect(() => {
     setPage(1);
-  }, [segments, types, bands, minStrength, search, sort, region]);
+  }, [segments, types, bands, minStrength, search, sort, region, hubspotFilter]);
 
   // Metrics describe the current page (label is "signals on page").
   const metrics = useMemo(() => {
@@ -542,6 +550,8 @@ export default function Page() {
           onSetSignalTypes={setTypes}
           minStrength={minStrength}
           onMinStrength={setMinStrength}
+          hubspotFilter={hubspotFilter}
+          onHubspotFilter={setHubspotFilter}
         />
 
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -587,6 +597,7 @@ export default function Page() {
                   setBands([]);
                   setMinStrength(0);
                   setSearch("");
+                  setHubspotFilter("all");
                 }}
                 onSelectCompany={getIntel}
                 onGetIntel={getIntel}

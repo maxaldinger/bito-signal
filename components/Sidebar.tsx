@@ -93,6 +93,8 @@ export function Sidebar({
   onSetSignalTypes,
   minStrength,
   onMinStrength,
+  hubspotFilter,
+  onHubspotFilter,
   pullControls,
 }: {
   activeTab: TabId;
@@ -114,10 +116,13 @@ export function Sidebar({
   onSetSignalTypes: (s: SignalTypeId[]) => void;
   minStrength: number;
   onMinStrength: (v: number) => void;
+  hubspotFilter: "all" | "not" | "in";
+  onHubspotFilter: (v: "all" | "not" | "in") => void;
 }) {
   const [filtersOpen, setFiltersOpen] = useState(true);
   const favCount = Object.keys(useFavorites()).length;
   const activeFilterCount =
+    (hubspotFilter !== "all" ? 1 : 0) +
     selectedSegments.length +
     selectedSweBands.length +
     selectedSignalTypes.length +
@@ -323,6 +328,34 @@ export function Sidebar({
           <span>0</span>
           <span>50</span>
           <span>100</span>
+        </div>
+
+        <div className="my-4 border-t border-ink-700" />
+
+        {/* HubSpot presence */}
+        <h3 className="mb-3 px-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+          hubspot
+        </h3>
+        <div className="grid grid-cols-3 gap-1">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "not", label: "Not in" },
+              { id: "in", label: "In" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => onHubspotFilter(opt.id)}
+              className={`rounded-lg border px-2 py-1.5 font-mono text-[11px] font-medium transition-colors ${
+                hubspotFilter === opt.id
+                  ? "border-orange-500/40 bg-orange-500/10 text-orange-300"
+                  : "border-ink-700 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
           </div>
         )}
