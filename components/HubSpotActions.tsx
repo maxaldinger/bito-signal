@@ -48,6 +48,26 @@ function tomorrowISO(): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Serialize all HubSpot "Check" calls with a min gap so a busy feed (dozens of
+// card + contact auto-checks) stays under HubSpot's ~4 req/s search limit and
+// stops tripping 429s.
+let hsSearchChain: Promise<unknown> = Promise.resolve();
+let hsSearchLast = 0;
+function throttledSearch(url: string): Promise<Response> {
+  const run = async () => {
+    const gap = 320 - (Date.now() - hsSearchLast);
+    if (gap > 0) await new Promise((r) => setTimeout(r, gap));
+    hsSearchLast = Date.now();
+    return fetch(url);
+  };
+  const p = hsSearchChain.then(run, run);
+  hsSearchChain = p.then(
+    () => undefined,
+    () => undefined,
+  );
+  return p as Promise<Response>;
+}
+
 export function HubSpotActions({
   kind,
   name,
@@ -100,7 +120,7 @@ export function HubSpotActions({
       const params = new URLSearchParams({ kind, name });
       if (domain) params.set("domain", domain);
       if (email) params.set("email", email);
-      const res = await fetch(`/api/hubspot/search?${params.toString()}`);
+      const res = await throttledSearch(`/api/hubspot/search?${params.toString()}`);
       let data: SearchResp;
       try {
         data = (await res.json()) as SearchResp;

@@ -122,23 +122,34 @@ async function hsFetch(
   init: { method: "GET" | "POST" | "PATCH" | "PUT"; body?: unknown },
   key: string
 ): Promise<{ status: number; body: unknown }> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: init.method,
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: init.body ? JSON.stringify(init.body) : undefined,
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    body = undefined;
+  // HubSpot search caps at ~4 req/s; on a busy feed we trip it. Retry 429s a
+  // couple of times with a short backoff so a transient rate-limit doesn't fail
+  // the whole task (and the internal record lookups still find existing rows).
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${BASE}${path}`, {
+      method: init.method,
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: init.body ? JSON.stringify(init.body) : undefined,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 429 && attempt < 2) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const waitMs = Math.min(3000, (Number.isFinite(retryAfter) ? retryAfter : attempt + 1) * 1000);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = undefined;
+    }
+    return { status: res.status, body };
   }
-  return { status: res.status, body };
 }
 
 // portalId is needed to build app.hubspot.com record links. Fetched once and
@@ -375,12 +386,13 @@ export async function hubspotCreateTask(input: {
     taskAssociations.push({ id: co.id, typeId: TASK_TO_COMPANY });
     primary = { ...(co.record as HsRecord), kind: "company", created: Boolean(co.created) };
   } else {
-    // 1. Parent company (so the contact + task hang off it).
+    // 1. Parent company (so the contact + task hang off it). Best-effort: a
+    // failed lookup/create here (e.g. a 429 or a duplicate-company 400) must NOT
+    // kill the contact task — we just skip the company association.
     const co = await resolveCompany(
       { name: input.companyName, domain: input.companyDomain, objectId: input.companyObjectId },
       key
     );
-    if (!co.ok) return fail(true, co.error || "Could not resolve the parent company");
 
     // 2. Contact — find or create, then fill email/phone/jobtitle.
     let contactId = input.objectId;
