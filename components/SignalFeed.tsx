@@ -365,24 +365,28 @@ export function SignalFeed({
           always sort to the bottom regardless of the choice. A page counter sits
           on the left (top of feed); a matching one repeats at the bottom. */}
       {!booting && sorted.length > 0 && (
-        <div className="flex items-center justify-between gap-2">
-          {cacheMode ? <Pager page={page} totalPages={totalPages} onPage={onPage} disabled={pulling} /> : <span />}
-          <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-400">
-            <ArrowDownUp className="h-3.5 w-3.5" />
-            sort
-          </label>
-          <select
-            value={sort}
-            onChange={(e) => onSort(e.target.value as FeedSort)}
-            className="rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none"
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {cacheMode && (
+            <div className="flex justify-center sm:justify-start">
+              <Pager page={page} totalPages={totalPages} onPage={onPage} disabled={pulling} />
+            </div>
+          )}
+          <div className="flex min-w-0 items-center gap-2 sm:ml-auto">
+            <label className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-400">
+              <ArrowDownUp className="h-3.5 w-3.5" />
+              sort
+            </label>
+            <select
+              value={sort}
+              onChange={(e) => onSort(e.target.value as FeedSort)}
+              className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none sm:flex-none"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       )}

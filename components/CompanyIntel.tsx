@@ -49,7 +49,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="animate-fade-in rounded-lg border border-ink-700 bg-ink-900 p-6">
+    <section className="animate-fade-in rounded-lg border border-ink-700 bg-ink-900 p-4 sm:p-6">
       <h3 className="mb-4 flex items-center gap-2.5 font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-ink-200">
         <Icon className={`h-4 w-4 ${iconColor}`} />
         {title}

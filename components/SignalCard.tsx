@@ -269,7 +269,7 @@ export function SignalCard({
   return (
     <div
       ref={cardRef}
-      className={`animate-fade-in rounded-lg border bg-ink-900 p-5 transition-colors ${
+      className={`animate-fade-in rounded-lg border bg-ink-900 p-4 transition-colors sm:p-5 ${
         prospected
           ? "border-orange-500/60 ring-1 ring-orange-500/40"
           : expanded
