@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Users,
   GitBranch,
@@ -181,6 +181,7 @@ export function SignalCard({
   onSelect,
   expanded = false,
   index = 0,
+  brief,
 }: {
   signal: Signal;
   onSelect: (company: string) => void;
@@ -189,6 +190,8 @@ export function SignalCard({
   /** Position in the feed — staggers the HubSpot auto-check to respect the
    *  ~4 req/s search limit when a whole page of cards mounts at once. */
   index?: number;
+  /** The intel brief, rendered INSIDE the card so it expands from the card. */
+  brief?: ReactNode;
 }) {
   const type = SIGNAL_TYPE_MAP[signal.type];
   const Icon = TYPE_ICON[signal.type];
@@ -445,6 +448,9 @@ export function SignalCard({
           </button>
         </div>
       </div>
+
+      {/* Brief expands in place, inside the card, when opened. */}
+      {brief}
     </div>
   );
 }

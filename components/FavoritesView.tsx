@@ -34,7 +34,7 @@ export function FavoritesView({
   const toggleCompany = (account: string) =>
     briefs[account] ? onCloseIntel(account) : onSelectCompany(account);
 
-  const renderBrief = (company: string) => {
+  const renderBrief = (company: string, framed = false) => {
     const b = briefs[company];
     if (!b) return null;
     return (
@@ -44,6 +44,7 @@ export function FavoritesView({
         intel={b.intel}
         loading={b.loading}
         error={b.error}
+        framed={framed}
         onClose={() => onCloseIntel(company)}
         onRetry={() => onGetIntel(company)}
         onRefresh={() => onRefreshIntel(company)}
@@ -68,7 +69,7 @@ export function FavoritesView({
 
       {/* Briefs for companies not in the favorites list expand here. */}
       {orphanBriefs.map((c) => (
-        <div key={c}>{renderBrief(c)}</div>
+        <div key={c}>{renderBrief(c, true)}</div>
       ))}
 
       {favSignals.length === 0 ? (
@@ -86,8 +87,8 @@ export function FavoritesView({
                 index={i}
                 onSelect={toggleCompany}
                 expanded={Boolean(briefs[s.account])}
+                brief={renderBrief(s.account)}
               />
-              {renderBrief(s.account)}
             </div>
           ))}
         </div>

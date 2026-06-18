@@ -27,6 +27,7 @@ export function IntelExpander({
   onClose,
   onRetry,
   onRefresh,
+  framed = false,
 }: {
   company: string;
   intel: Intel | null;
@@ -35,6 +36,9 @@ export function IntelExpander({
   onClose: () => void;
   onRetry: () => void;
   onRefresh: () => void;
+  /** Standalone (orphan/searched) briefs get their own card box; briefs nested
+   *  inside a signal card render flush (just a divider) so the card "expands". */
+  framed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -62,7 +66,13 @@ export function IntelExpander({
   return (
     <div ref={ref} className={`expander ${open ? "expander-open" : ""}`}>
       <div>
-        <div className="my-3 rounded-xl border border-neon-600/30 bg-ink-950/40 p-4 shadow-glow-sm sm:p-6">
+        <div
+          className={
+            framed
+              ? "my-3 rounded-xl border border-neon-600/30 bg-ink-950/40 p-4 shadow-glow-sm sm:p-6"
+              : "mt-5 border-t border-neon-600/30 pt-5"
+          }
+        >
           {loading ? (
             <BriefSkeleton company={company} />
           ) : error || !intel ? (

@@ -186,8 +186,10 @@ export function SignalFeed({
   const toggleCompany = (account: string) =>
     briefs[account] ? onCloseIntel(account) : onSelectCompany(account);
 
-  // Render a company's brief from the open-briefs map.
-  const renderBrief = (company: string) => {
+  // Render a company's brief from the open-briefs map. `framed` standalone
+  // briefs (no card on this page) get their own box; in-card briefs render
+  // flush so the card itself expands into the brief.
+  const renderBrief = (company: string, framed = false) => {
     const b = briefs[company];
     if (!b) return null;
     return (
@@ -197,6 +199,7 @@ export function SignalFeed({
         intel={b.intel}
         loading={b.loading}
         error={b.error}
+        framed={framed}
         onClose={() => onCloseIntel(company)}
         onRetry={() => onGetIntel(company)}
         onRefresh={() => onRefreshIntel(company)}
@@ -352,7 +355,7 @@ export function SignalFeed({
 
       {/* Briefs for companies with no card on this page expand here */}
       {orphanBriefs.map((c) => (
-        <div key={c}>{renderBrief(c)}</div>
+        <div key={c}>{renderBrief(c, true)}</div>
       ))}
 
       {/* Account prioritization */}
@@ -437,8 +440,8 @@ export function SignalFeed({
                 index={i}
                 onSelect={toggleCompany}
                 expanded={Boolean(briefs[s.account])}
+                brief={renderBrief(s.account)}
               />
-              {renderBrief(s.account)}
             </div>
           ))}
         </div>
