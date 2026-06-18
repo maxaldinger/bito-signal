@@ -67,6 +67,7 @@ const toggleIn = <T,>(arr: T[], v: T): T[] =>
 
 export default function Page() {
   const [tab, setTab] = useState<TabId>("feed");
+  const [mobileNav, setMobileNav] = useState(false);
 
   // Feed state. Two modes:
   //  - cache mode (Supabase configured): the feed shows a 50-per-page window
@@ -548,6 +549,7 @@ export default function Page() {
         lastUpdated={lastUpdated}
         region={region}
         onRegion={changeRegion}
+        onMenu={() => setMobileNav(true)}
       />
       <div className="flex">
         <Sidebar
@@ -556,6 +558,10 @@ export default function Page() {
             setTab(t);
             clearSelection();
           }}
+          mobileOpen={mobileNav}
+          onMobileClose={() => setMobileNav(false)}
+          search={search}
+          onSearch={setSearch}
           pullControls={
             tab === "feed" ? (
               <PullControls

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, RefreshCw, Activity, Sun, Moon } from "lucide-react";
+import { Search, RefreshCw, Activity, Sun, Moon, Menu } from "lucide-react";
 import { REGIONS, type RegionId } from "@/lib/data";
 
 // US / India intel scope — switching reloads the feed for that region.
@@ -82,6 +82,7 @@ export function Header({
   lastUpdated,
   region,
   onRegion,
+  onMenu,
 }: {
   search: string;
   onSearch: (v: string) => void;
@@ -90,10 +91,21 @@ export function Header({
   lastUpdated: string;
   region: RegionId;
   onRegion: (r: RegionId) => void;
+  /** Opens the mobile nav/filters drawer (hidden on desktop). */
+  onMenu?: () => void;
 }) {
   return (
     <header className="sticky top-0 z-50 border-b border-ink-700 bg-ink-950/85 backdrop-blur-xl">
-      <div className="flex h-[64px] items-center gap-4 px-4 sm:px-6">
+      <div className="flex h-[64px] items-center gap-3 px-4 sm:gap-4 sm:px-6">
+        {/* Mobile menu */}
+        <button
+          onClick={onMenu}
+          aria-label="Open menu and filters"
+          className="rounded-lg border border-ink-700 p-2 text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-300 lg:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+
         {/* Brand */}
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-neon-600/50 bg-ink-900 shadow-glow-sm">

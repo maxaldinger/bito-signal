@@ -821,7 +821,7 @@ export function CompanyIntel({
             const pct = Math.round((v / 20) * 100);
             return (
               <div key={key} className="flex items-center gap-3">
-                <span className="w-56 shrink-0 text-sm text-ink-300">{label}</span>
+                <span className="w-32 shrink-0 text-xs text-ink-300 sm:w-56 sm:text-sm">{label}</span>
                 <div className="h-2 flex-1 overflow-hidden rounded-full bg-ink-800">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-neon-600 to-neon-400"

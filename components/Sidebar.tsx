@@ -1,7 +1,17 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Radio, Sparkles, Star, Check, SlidersHorizontal, ChevronDown, type LucideIcon } from "lucide-react";
+import {
+  Radio,
+  Sparkles,
+  Star,
+  Check,
+  SlidersHorizontal,
+  ChevronDown,
+  Search as SearchIcon,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
 import type { SegmentId, SignalTypeId } from "@/lib/types";
 import { useFavorites } from "@/lib/clientStore";
@@ -98,6 +108,10 @@ export function Sidebar({
   reviewedFilter,
   onReviewedFilter,
   pullControls,
+  mobileOpen = false,
+  onMobileClose,
+  search,
+  onSearch,
 }: {
   activeTab: TabId;
   onTab: (t: TabId) => void;
@@ -122,6 +136,12 @@ export function Sidebar({
   onHubspotFilter: (v: "all" | "not" | "in") => void;
   reviewedFilter: "all" | "not" | "reviewed";
   onReviewedFilter: (v: "all" | "not" | "reviewed") => void;
+  /** Mobile drawer: open state + close handler (desktop ignores these). */
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+  /** Feed text filter — shown inside the mobile drawer (desktop uses the header). */
+  search?: string;
+  onSearch?: (v: string) => void;
 }) {
   const [filtersOpen, setFiltersOpen] = useState(true);
   const favCount = Object.keys(useFavorites()).length;
@@ -134,16 +154,59 @@ export function Sidebar({
     (minStrength > 0 ? 1 : 0);
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r border-ink-700 bg-ink-950 lg:flex">
-      <div className="sticky top-[64px] flex h-[calc(100vh-64px)] flex-col overflow-y-auto p-4">
-        {/* Primary nav */}
-        <nav className="flex flex-col gap-1">
-          {NAV.map((item) => {
-            const active = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onTab(item.id)}
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-[55] bg-black/60 lg:hidden"
+          onClick={onMobileClose}
+          aria-hidden
+        />
+      )}
+      <aside
+        className={`${
+          mobileOpen ? "fixed inset-y-0 left-0 z-[60] flex w-[86vw] max-w-xs" : "hidden"
+        } shrink-0 flex-col border-r border-ink-700 bg-ink-950 lg:static lg:z-auto lg:flex lg:w-64`}
+      >
+        <div className="flex h-full flex-col overflow-y-auto p-4 lg:sticky lg:top-[64px] lg:h-[calc(100vh-64px)]">
+          {/* Mobile drawer header */}
+          <div className="mb-3 flex items-center justify-between lg:hidden">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+              menu &amp; filters
+            </span>
+            <button
+              onClick={onMobileClose}
+              aria-label="Close menu"
+              className="rounded-lg border border-ink-700 p-1.5 text-ink-400 transition-colors hover:text-ink-100"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Mobile feed search (desktop uses the header search) */}
+          {onSearch && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 lg:hidden">
+              <SearchIcon className="h-4 w-4 shrink-0 text-ink-400" />
+              <input
+                value={search ?? ""}
+                onChange={(e) => onSearch(e.target.value)}
+                placeholder="Filter the feed…"
+                className="w-full bg-transparent font-mono text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none"
+              />
+            </div>
+          )}
+
+          {/* Primary nav */}
+          <nav className="flex flex-col gap-1">
+            {NAV.map((item) => {
+              const active = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    onTab(item.id);
+                    onMobileClose?.();
+                  }}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
                   active
                     ? "border border-neon-600/30 bg-neon-500/10 text-neon-300"
@@ -163,7 +226,8 @@ export function Sidebar({
         </nav>
 
         {/* Pull / pagination controls — sit above the collapsible filters */}
-        {pullControls && <div className="mt-3">{pullControls}</div>}
+        {/* Desktop only — mobile shows its own always-visible copy in the feed. */}
+        {pullControls && <div className="mt-3 hidden lg:block">{pullControls}</div>}
 
         {/* Collapsible filters */}
         <button
@@ -399,7 +463,8 @@ export function Sidebar({
         <p className="mt-auto pt-6 text-center font-mono text-[10px] text-ink-500">
           built for bito.ai
         </p>
-      </div>
-    </aside>
+        </div>
+      </aside>
+    </>
   );
 }
