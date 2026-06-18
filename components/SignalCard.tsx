@@ -16,6 +16,7 @@ import {
   ArrowDownToLine,
   Ban,
   Star,
+  Eye,
   type LucideIcon,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
@@ -33,6 +34,8 @@ import {
   toggleBlacklist,
   useIsFavorite,
   toggleFavorite,
+  useIsReviewed,
+  toggleReviewed,
   getCompanyBlurb,
   setCompanyBlurb,
 } from "@/lib/clientStore";
@@ -201,6 +204,7 @@ export function SignalCard({
   const lowPriority = useIsLowPriority(signal.account);
   const collapsed = useIsCollapsed(signal.account);
   const favorite = useIsFavorite(signal.account);
+  const reviewed = useIsReviewed(signal.account);
 
   // Lead content — the signal's own title/description/url, or lazily researched
   // ones (most-relevant signal for Apollo profile-fit cards; else a blurb).
@@ -376,7 +380,18 @@ export function SignalCard({
         <span className="min-w-0 truncate font-mono text-[11px] text-ink-500">
           {timeAgo(signal.date)} · {signal.source}
         </span>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <button
+            onClick={() => toggleReviewed(signal.account)}
+            title={reviewed ? "Mark not reviewed" : "Mark reviewed"}
+            className={`inline-flex items-center gap-1 rounded border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              reviewed
+                ? "border-neon-600/40 bg-neon-500/10 text-neon-300 hover:bg-neon-500/20"
+                : "border-ink-700 text-ink-400 hover:border-neon-600/40 hover:text-neon-200"
+            }`}
+          >
+            <Eye className="h-3 w-3" /> {reviewed ? "Reviewed" : "Review"}
+          </button>
           <button
             onClick={() => collapseCard(signal.account)}
             title="Collapse — shrink this card but keep its place in the sort"

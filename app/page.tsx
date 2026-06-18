@@ -13,6 +13,8 @@ import {
   useLowPriorityCompanies,
   useHubspotPresence,
   useBlacklist,
+  useReviewedCompanies,
+  markReviewed,
   getSweepPage,
   setSweepPage,
   companyInMap,
@@ -114,6 +116,8 @@ export default function Page() {
   const [search, setSearch] = useState("");
   // HubSpot presence filter: all / not-in / in.
   const [hubspotFilter, setHubspotFilter] = useState<"all" | "not" | "in">("all");
+  // Reviewed filter: all / not-reviewed / reviewed.
+  const [reviewedFilter, setReviewedFilter] = useState<"all" | "not" | "reviewed">("all");
 
   // ---- Live bucket scans (shared by both modes) -------------------------
   const scanBuckets = useCallback(
@@ -307,6 +311,7 @@ export default function Page() {
 
   // Drop blacklisted ("not a fit") companies before anything else sees them.
   const blacklistMap = useBlacklist();
+  const reviewedMap = useReviewedCompanies();
   const activeSignals = useMemo(
     () => signals.filter((s) => !companyInMap(blacklistMap, s.account)),
     [signals, blacklistMap],
@@ -374,9 +379,25 @@ export default function Page() {
         return false;
       if (hubspotFilter === "not" && isInHubspot(s)) return false;
       if (hubspotFilter === "in" && !isInHubspot(s)) return false;
+      if (reviewedFilter !== "all") {
+        const seen = companyInMap(reviewedMap, s.account);
+        if (reviewedFilter === "not" && seen) return false;
+        if (reviewedFilter === "reviewed" && !seen) return false;
+      }
       return true;
     });
-  }, [activeSignals, minStrength, segments, types, bands, search, hubspotFilter, isInHubspot]);
+  }, [
+    activeSignals,
+    minStrength,
+    segments,
+    types,
+    bands,
+    search,
+    hubspotFilter,
+    isInHubspot,
+    reviewedFilter,
+    reviewedMap,
+  ]);
 
   // Feed sort lives here (driven by the in-feed dropdown) so the order is
   // applied once, upstream of the feed. Uses the displayed score (brief total
@@ -425,7 +446,7 @@ export default function Page() {
   // Changing filters/sort/region resets to page 1 so you never land past the end.
   useEffect(() => {
     setPage(1);
-  }, [segments, types, bands, minStrength, search, sort, region, hubspotFilter]);
+  }, [segments, types, bands, minStrength, search, sort, region, hubspotFilter, reviewedFilter]);
 
   // Metrics describe the current page (label is "signals on page").
   const metrics = useMemo(() => {
@@ -446,6 +467,7 @@ export default function Page() {
   const getIntel = useCallback(async (company: string, fresh = false) => {
     const c = company.trim();
     if (!c) return;
+    markReviewed(c); // opening a brief = reviewed
     const reqId = (briefReqIds.current[c] ?? 0) + 1;
     briefReqIds.current[c] = reqId;
     setBriefs((prev) => ({
@@ -567,6 +589,8 @@ export default function Page() {
           onMinStrength={setMinStrength}
           hubspotFilter={hubspotFilter}
           onHubspotFilter={setHubspotFilter}
+          reviewedFilter={reviewedFilter}
+          onReviewedFilter={setReviewedFilter}
         />
 
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -613,6 +637,7 @@ export default function Page() {
                   setMinStrength(0);
                   setSearch("");
                   setHubspotFilter("all");
+                  setReviewedFilter("all");
                 }}
                 onSelectCompany={getIntel}
                 onGetIntel={getIntel}

@@ -320,6 +320,43 @@ export function useBlacklist(): Record<string, string> {
   return blacklist.useStore();
 }
 
+// ---------------- Reviewed ----------------
+// Companies the rep has triaged. Auto-set when a brief is opened, and toggleable
+// per card — drives the "reviewed / not reviewed" filter so you can work through
+// the feed without re-covering the same accounts.
+const reviewed = makeStore<Record<string, number>>("bito-reviewed", {});
+
+export function markReviewed(company: string): void {
+  if (!company) return;
+  const cur = reviewed.get();
+  const k = normCompany(company);
+  if (Object.keys(cur).some((kk) => normCompany(kk) === k)) return;
+  reviewed.set({ ...cur, [k]: 1 });
+}
+
+export function toggleReviewed(company: string): void {
+  if (!company) return;
+  const cur = reviewed.get();
+  const k = normCompany(company);
+  const existing = Object.keys(cur).find((kk) => normCompany(kk) === k);
+  if (existing) {
+    const next = { ...cur };
+    delete next[existing];
+    reviewed.set(next);
+  } else {
+    reviewed.set({ ...cur, [k]: 1 });
+  }
+}
+
+export function useIsReviewed(company: string): boolean {
+  const s = reviewed.useStore();
+  return company ? companyInMap(s, company) : false;
+}
+
+export function useReviewedCompanies(): Record<string, number> {
+  return reviewed.useStore();
+}
+
 // ---------------- Favorites ----------------
 // Companies the rep starred for quick access ("hot caching"). Surfaced in the
 // dedicated "Signal favorites" tab. Stores display name keyed by normalized name.

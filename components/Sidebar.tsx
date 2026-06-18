@@ -95,6 +95,8 @@ export function Sidebar({
   onMinStrength,
   hubspotFilter,
   onHubspotFilter,
+  reviewedFilter,
+  onReviewedFilter,
   pullControls,
 }: {
   activeTab: TabId;
@@ -118,11 +120,14 @@ export function Sidebar({
   onMinStrength: (v: number) => void;
   hubspotFilter: "all" | "not" | "in";
   onHubspotFilter: (v: "all" | "not" | "in") => void;
+  reviewedFilter: "all" | "not" | "reviewed";
+  onReviewedFilter: (v: "all" | "not" | "reviewed") => void;
 }) {
   const [filtersOpen, setFiltersOpen] = useState(true);
   const favCount = Object.keys(useFavorites()).length;
   const activeFilterCount =
     (hubspotFilter !== "all" ? 1 : 0) +
+    (reviewedFilter !== "all" ? 1 : 0) +
     selectedSegments.length +
     selectedSweBands.length +
     selectedSignalTypes.length +
@@ -202,6 +207,35 @@ export function Sidebar({
               className={`rounded-lg border px-2 py-1.5 font-mono text-[11px] font-medium transition-colors ${
                 hubspotFilter === opt.id
                   ? "border-orange-500/40 bg-orange-500/10 text-orange-300"
+                  : "border-ink-700 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="my-4 border-t border-ink-700" />
+
+        {/* Reviewed — triage progress (a company is reviewed once its brief is
+            opened, or you toggle it on the card). */}
+        <h3 className="mb-3 px-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+          reviewed
+        </h3>
+        <div className="grid grid-cols-3 gap-1">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "not", label: "Not yet" },
+              { id: "reviewed", label: "Reviewed" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => onReviewedFilter(opt.id)}
+              className={`rounded-lg border px-2 py-1.5 font-mono text-[11px] font-medium transition-colors ${
+                reviewedFilter === opt.id
+                  ? "border-neon-600/40 bg-neon-500/10 text-neon-300"
                   : "border-ink-700 text-ink-400 hover:bg-ink-800 hover:text-ink-200"
               }`}
             >
