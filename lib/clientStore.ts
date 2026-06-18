@@ -347,6 +347,19 @@ export function useFavorites(): Record<string, string> {
   return favorites.useStore();
 }
 
+// ---------------- Last task due date ----------------
+// Remembers the due date last picked in a HubSpot task, so scheduling across
+// several contacts stays on that date instead of resetting each time.
+const lastDue = makeStore<{ date?: string }>("bito-last-due", {});
+
+export function getLastDueDate(): string | undefined {
+  return lastDue.get().date;
+}
+
+export function setLastDueDate(date: string): void {
+  if (date) lastDue.set({ date });
+}
+
 // ---------------- Apollo sweep cursor ----------------
 // The page the next Apollo ICP sweep should fetch, per region. Persisted so the
 // cursor marches forward across pulls instead of restarting (which would

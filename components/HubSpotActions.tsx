@@ -12,7 +12,12 @@ import {
   ArrowUpRight,
   X,
 } from "lucide-react";
-import { markProspected, setHubspotPresence } from "@/lib/clientStore";
+import {
+  markProspected,
+  setHubspotPresence,
+  getLastDueDate,
+  setLastDueDate,
+} from "@/lib/clientStore";
 
 type HsKind = "company" | "contact";
 type HsTaskType = "CALL" | "EMAIL" | "TODO";
@@ -225,15 +230,24 @@ function TaskModal({
 }) {
   const [subject, setSubject] = useState(defaultSubject);
   const [body, setBody] = useState(defaultBody);
-  const [due, setDue] = useState(tomorrowISO());
+  // Earliest allowed due date is tomorrow (never same-day). Default to the last
+  // date the rep picked (sticky across contacts), clamped to that floor.
+  const minDue = tomorrowISO();
+  const [due, setDue] = useState(() => {
+    const last = getLastDueDate();
+    return last && last >= minDue ? last : minDue;
+  });
   const [taskType, setTaskType] = useState<HsTaskType>("CALL");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<TaskResp | null>(null);
 
   const submit = async () => {
     if (saving) return;
+    // Never schedule same-day or in the past — floor at tomorrow.
+    const dueDate = due >= minDue ? due : minDue;
+    setLastDueDate(dueDate);
     // Schedule at local noon so the date lands as picked regardless of timezone.
-    const dueDateMs = new Date(`${due}T12:00:00`).getTime();
+    const dueDateMs = new Date(`${dueDate}T12:00:00`).getTime();
     if (!subject.trim() || !Number.isFinite(dueDateMs)) return;
     setSaving(true);
     setResult(null);
@@ -350,7 +364,12 @@ function TaskModal({
                   <input
                     type="date"
                     value={due}
-                    onChange={(e) => setDue(e.target.value)}
+                    min={minDue}
+                    onChange={(e) => {
+                      const v = e.target.value && e.target.value >= minDue ? e.target.value : minDue;
+                      setDue(v);
+                      setLastDueDate(v);
+                    }}
                     className="mt-1 block rounded-lg border border-ink-700 bg-ink-950 px-3 py-2.5 text-sm text-ink-100 focus:border-orange-500/40 focus:outline-none"
                   />
                 </label>
