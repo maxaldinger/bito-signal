@@ -118,12 +118,12 @@ const QUICK = [
   {
     label: "Draft a cold email",
     prompt:
-      "Draft a cold email to a VP of Engineering at a 200-engineer fintech that just raised a Series C and is hiring platform engineers. Angle: review bottleneck at scale.",
+      "Draft a cold email to a VP of Engineering at a 200-engineer fintech that just raised a Series C and is hiring platform engineers. Angle: AI coding tools are shipping context-blind code across their repos — Bito AI Architect is the context layer that grounds them.",
   },
   {
     label: '"We already have Copilot"',
     prompt:
-      'Prospect says: "We already pay for GitHub Copilot — why would we add Bito?" Handle it.',
+      'Prospect says: "We already pay for GitHub Copilot — why would we add Bito?" Handle it (Bito AI Architect grounds Copilot in their real cross-repo codebase, it is not a replacement).',
   },
   {
     label: "Prep a discovery call",

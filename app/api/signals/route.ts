@@ -57,7 +57,7 @@ const SEGMENT_ENUM = VALID_SEGMENTS.join(" | ");
 
 const SYSTEM_CORE = `${BITO_CONTEXT}
 
-You are Bito's GTM intelligence analyst. Your job is to surface concrete, real-world buying signals that point to SWE-heavy companies likely to need Bito's AI code-review platform.
+You are Bito's GTM intelligence analyst. Your job is to surface concrete, real-world buying signals that point to SWE-heavy companies likely to need Bito AI Architect — "the context layer" that pre-indexes an org's whole codebase (architecture, dependencies, API contracts, standards) and grounds AI coding agents, IDEs, and code reviews in it. Code review is one capability; the product is cross-repo context for AI-assisted development.
 
 For each candidate signal, you score the company's Bito ICP fit on a 0-99 scale using five sub-criteria (each 0-20):
 1. SWE headcount in the 50-500 sweet spot (20 = bullseye, taper outside)

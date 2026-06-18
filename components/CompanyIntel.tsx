@@ -255,7 +255,7 @@ function ApolloPersonCard({
       const role = person.title || "an engineering leader";
       const content =
         `Write a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
-        `Address them by first name only. Tie it to Bito's AI code-review value for an engineering team. ` +
+        `Address them by first name only. Tie it to Bito AI Architect's value (the context layer that grounds their AI coding tools and reviews in their real cross-repo codebase) for an engineering team. ` +
         `Output ONLY the email: a "Subject:" line, then the body (under 120 words, one clear CTA). ` +
         `Plain text only — NO markdown, asterisks, bold, headings, or "---" separators. ` +
         `Do NOT add any notes, caveats, or commentary to the rep, and no placeholders like [Your name]. ` +

@@ -61,7 +61,7 @@ Onboarding friction score (0-99, higher = harder to onboard onto Bito): consider
 
 Motion: pick exactly one of PLG, Top-Down, Champion-Led, Land-and-Expand and justify from the evidence (e.g. bottoms-up dev culture => PLG; strict procurement => Top-Down).
 
-Stakeholder map: 4-7 entries. Each is typed: "feels-pain" (lives the review bottleneck), "signs" (owns budget/signature), "champion" (would internally sell), "blocker" (could veto — security, procurement), "influencer". Use real names ONLY when you found them in public sources; otherwise describe the role.
+Stakeholder map: 4-7 entries. Each is typed: "feels-pain" (lives the cross-repo context, AI-code, and review pain), "signs" (owns budget/signature), "champion" (would internally sell), "blocker" (could veto — security, procurement), "influencer". Use real names ONLY when you found them in public sources; otherwise describe the role.
 
 Outreach angle: one concrete angle tied to a specific live signal you found, with a 3-5 line draft message a rep could send today.
 

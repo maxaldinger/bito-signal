@@ -52,7 +52,7 @@ const MODES: Record<string, ModeCfg> = {
   proposal: {
     type: "json",
     instruction:
-      "Build a structured proposal outline from the notes and the recommended products. Include an executive summary, the prospect's situation, recommended Bito solution mapped to their needs, value/ROI framing (reviewer-hours saved, escaped-bug cost, AI-spend offset), implementation phases, and next steps. Do not invent specific prices.",
+      "Build a structured proposal outline from the notes and the recommended products. Include an executive summary, the prospect's situation, recommended Bito solution mapped to their needs, value/ROI framing (faster delivery from grounded AI context, reduced AI-tooling waste/token cost, faster onboarding, fewer escaped bugs and architecture/standards violations), implementation phases, and next steps. Do not invent specific prices.",
     schema: `{"title":"proposal title","sections":[{"heading":"section heading","content":"section body (plain text, may use - bullets)"}]}`,
     maxSearches: 1,
   },

@@ -18,11 +18,11 @@ function clean(s: unknown): string {
   return typeof s === "string" ? stripEmDashes(s.replace(/\s+/g, " ").trim()) : "";
 }
 
-const SIGNAL_SYSTEM = `You are a GTM research analyst for Bito, an AI code-review tool. Bito's ICP is software-heavy companies (roughly 50-500 engineers) with active, complex codebases.
+const SIGNAL_SYSTEM = `You are a GTM research analyst for Bito AI Architect — "the context layer" that pre-indexes an org's whole codebase (architecture, dependencies, API contracts, standards) and grounds AI coding agents, IDEs, and code reviews in it. Bito's ICP is software-heavy companies (roughly 50-500 engineers) with active, complex, multi-repo codebases adopting AI coding tools.
 
 Using web search, do TWO things for the given company:
 
-1. SIGNAL — find the SINGLE most relevant, RECENT (last ~6 months) buying signal: concrete public evidence of growing engineering / code-review need. Good signals: an engineering hiring wave, a funding round earmarked for scaling engineering, public commentary on AI dev-tool adoption or cost, a major open-source release, or an acquisition creating codebase-integration work. It MUST be real and citable. If you cannot find a concrete, recent, cited signal, return null — never invent one. Pick the type from: hiring, funding, ai, oss, ma.
+1. SIGNAL — find the SINGLE most relevant, RECENT (last ~6 months) buying signal: concrete public evidence of growing need for grounded AI-assisted development. Good signals: an engineering hiring wave, funding earmarked for scaling engineering, public commentary on AI dev-tool adoption or cost, a major open-source release, or an acquisition creating cross-codebase integration work. It MUST be real and citable. If you cannot find a concrete, recent, cited signal, return null — never invent one. Pick the type from: hiring, funding, ai, oss, ma.
 
 2. DESCRIPTION — a 2-3 sentence factual description of what the company does.
 

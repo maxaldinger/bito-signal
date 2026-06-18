@@ -17,7 +17,7 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Bito Signal | SWE-Heavy Account Intelligence",
   description:
-    "Live buying-signal intelligence for Bito's AI code-review platform — ICP scoring, account prioritization and outreach intel for engineering-heavy targets.",
+    "Live buying-signal intelligence for Bito AI Architect, the context layer for AI-assisted development — ICP scoring, account prioritization and outreach intel for engineering-heavy targets.",
 };
 
 // Applied before paint so a stored "dark" preference never flashes light.
