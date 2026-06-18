@@ -794,7 +794,26 @@ export function CompanyIntel({
         }
       />
 
-      {/* ICP breakdown */}
+      {/* Executive summary — the single narrative for the account (the ICP
+          rationale used to duplicate this, so it's dropped; the score lives in
+          the breakdown below). */}
+      <Section title="executive summary" icon={Zap} iconColor="text-amber-400">
+        <p className="text-sm leading-relaxed text-ink-200">{intel.summary}</p>
+        {intel.whyBito.length > 0 && (
+          <ol className="mt-4 space-y-3 border-t border-ink-700 pt-4">
+            {intel.whyBito.map((reason, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neon-600/30 bg-neon-500/10 font-mono text-xs font-semibold text-neon-300">
+                  {i + 1}
+                </span>
+                <p className="text-sm leading-relaxed text-ink-300">{reason}</p>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Section>
+
+      {/* ICP score breakdown — the quantified score behind the summary. */}
       <Section title="icp score breakdown" icon={Target} iconColor="text-neon-400">
         <div className="space-y-3">
           {ICP_BARS.map(({ key, label }) => {
@@ -837,28 +856,6 @@ export function CompanyIntel({
             </p>
           </div>
         )}
-        {intel.icp.rationale && (
-          <p className="mt-4 border-t border-ink-700 pt-3 text-sm leading-relaxed text-ink-400">
-            {intel.icp.rationale}
-          </p>
-        )}
-      </Section>
-
-      {/* Executive summary */}
-      <Section title="executive summary" icon={Zap} iconColor="text-amber-400">
-        <p className="text-sm leading-relaxed text-ink-200">{intel.summary}</p>
-        {intel.whyBito.length > 0 && (
-          <ol className="mt-4 space-y-3 border-t border-ink-700 pt-4">
-            {intel.whyBito.map((reason, i) => (
-              <li key={i} className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neon-600/30 bg-neon-500/10 font-mono text-xs font-semibold text-neon-300">
-                  {i + 1}
-                </span>
-                <p className="text-sm leading-relaxed text-ink-300">{reason}</p>
-              </li>
-            ))}
-          </ol>
-        )}
       </Section>
 
       {/* Stakeholder map — real people, live from Apollo people search */}
@@ -879,8 +876,8 @@ export function CompanyIntel({
         />
       </Section>
 
-      {/* Suggested motion — sits right below the people to contact */}
-      <Section title="suggested motion" icon={Compass} iconColor="text-violet-400">
+      {/* Motion + outreach — one box: how to approach, then the angle/message */}
+      <Section title="suggested motion & outreach" icon={Compass} iconColor="text-violet-400">
         <div className="flex flex-wrap items-center gap-3">
           <MotionBadge motion={intel.motion.primary} />
           <p className="text-sm text-ink-400">recommended GTM motion for this account</p>
@@ -904,40 +901,43 @@ export function CompanyIntel({
             ))}
           </ul>
         )}
-      </Section>
 
-      {/* Outreach angle — sits under suggested motion */}
-      <Section title="outreach angle" icon={Send} iconColor="text-neon-400">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded bg-ink-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-ink-300">
-            {intel.outreach.channel}
-          </span>
-          <p className="text-sm font-semibold italic text-ink-100">
-            &ldquo;{stripEmDashes(intel.outreach.hook)}&rdquo;
+        {/* Outreach angle */}
+        <div className="mt-5 border-t border-ink-700 pt-4">
+          <p className="mb-3 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
+            <Send className="h-3.5 w-3.5" /> outreach angle
           </p>
-        </div>
-        {intel.outreach.proof && (
-          <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-ink-400">
-            <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-ink-500" />
-            Backed by: {intel.outreach.proof}
-          </p>
-        )}
-        {intel.outreach.draftMessage && (
-          <div className="relative mt-3">
-            <pre className="whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-4 font-mono text-[13px] leading-relaxed text-ink-200">
-              {stripEmDashes(intel.outreach.draftMessage)}
-            </pre>
-            <button
-              onClick={copyDraft}
-              className={`absolute right-2 top-2 inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 text-[11px] font-medium transition-colors ${
-                copyFailed ? "text-red-400" : "text-ink-400 hover:text-neon-300"
-              }`}
-            >
-              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-              {copyFailed ? "copy failed — select manually" : copied ? "copied" : "copy"}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-ink-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-ink-300">
+              {intel.outreach.channel}
+            </span>
+            <p className="text-sm font-semibold italic text-ink-100">
+              &ldquo;{stripEmDashes(intel.outreach.hook)}&rdquo;
+            </p>
           </div>
-        )}
+          {intel.outreach.proof && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-ink-400">
+              <Link2 className="mt-0.5 h-3 w-3 shrink-0 text-ink-500" />
+              Backed by: {intel.outreach.proof}
+            </p>
+          )}
+          {intel.outreach.draftMessage && (
+            <div className="relative mt-3">
+              <pre className="whitespace-pre-wrap rounded-lg border border-ink-700 bg-ink-950 p-4 font-mono text-[13px] leading-relaxed text-ink-200">
+                {stripEmDashes(intel.outreach.draftMessage)}
+              </pre>
+              <button
+                onClick={copyDraft}
+                className={`absolute right-2 top-2 inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 text-[11px] font-medium transition-colors ${
+                  copyFailed ? "text-red-400" : "text-ink-400 hover:text-neon-300"
+                }`}
+              >
+                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {copyFailed ? "copy failed — select manually" : copied ? "copied" : "copy"}
+              </button>
+            </div>
+          )}
+        </div>
       </Section>
 
       {/* Token cost exposure */}
