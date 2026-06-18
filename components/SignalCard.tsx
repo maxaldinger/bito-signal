@@ -379,11 +379,11 @@ export function SignalCard({
         />
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink-700 pt-3">
-        <span className="min-w-0 truncate font-mono text-[11px] text-ink-500">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-ink-700 pt-3">
+        <span className="min-w-0 shrink truncate font-mono text-[11px] text-ink-500">
           {timeAgo(signal.date)} · {signal.source}
         </span>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             onClick={() => toggleReviewed(signal.account)}
             title={reviewed ? "Mark not reviewed" : "Mark reviewed"}
