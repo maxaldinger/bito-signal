@@ -304,6 +304,20 @@ function ApolloPersonCard({
   const phoneRes = result.phone;
   const contactProspected = useIsProspected("contact", person.apolloId || displayName);
 
+  // Only a COMPANY-domain email is usable — a personal/off-domain one would
+  // mis-associate the contact in HubSpot, so we treat it as "none surfaced".
+  const rootOf = (d?: string) => {
+    if (!d) return "";
+    const p = d.toLowerCase().trim().replace(/^www\./, "").split(".").filter(Boolean);
+    return p.length <= 2 ? p.join(".") : p.slice(-2).join(".");
+  };
+  const revealedEmail = emailRes?.ok && emailRes.email ? emailRes.email : undefined;
+  const companyEmail =
+    revealedEmail && domain && rootOf(revealedEmail.split("@")[1]) === rootOf(domain)
+      ? revealedEmail
+      : undefined;
+  const emailChecked = emailRes !== undefined; // reveal finished (found or not)
+
   return (
     <div
       className={`rounded-lg border bg-ink-950/50 p-4 ${
@@ -384,21 +398,26 @@ function ApolloPersonCard({
         </div>
       )}
 
-      {/* Only show contact info we actually surfaced — no "not found" / error
-          noise, since the reveal runs automatically. */}
-      {((emailRes?.ok && emailRes.email) || (phoneRes?.ok && phoneRes.phone)) && (
+      {/* Contact email — only a COMPANY-domain address is shown/usable; if Apollo
+          only has a personal/off-domain one (or none), say so plainly rather than
+          surface an address that would mis-associate the contact. */}
+      {(companyEmail || emailChecked || (phoneRes?.ok && phoneRes.phone)) && (
         <div className="mt-2 space-y-1 font-mono text-[11px]">
-          {emailRes?.ok && emailRes.email && (
+          {companyEmail ? (
             <p className="flex items-center gap-1.5 text-ink-200">
               <Mail className="h-3 w-3 text-sky-400" />
-              <a href={`mailto:${emailRes.email}`} className="break-all hover:text-sky-300">
-                {emailRes.email}
+              <a href={`mailto:${companyEmail}`} className="break-all hover:text-sky-300">
+                {companyEmail}
               </a>
-              {emailRes.emailStatus && (
+              {emailRes?.emailStatus && (
                 <span className="text-[10px] text-ink-500">({emailRes.emailStatus})</span>
               )}
             </p>
-          )}
+          ) : emailChecked ? (
+            <p className="flex items-center gap-1.5 text-amber-400/90">
+              <Mail className="h-3 w-3" /> No company email surfaced
+            </p>
+          ) : null}
           {phoneRes?.ok && phoneRes.phone && (
             <p className="flex items-center gap-1.5 text-ink-200">
               <Phone className="h-3 w-3 text-violet-400" />
@@ -415,7 +434,7 @@ function ApolloPersonCard({
           kind="contact"
           name={displayName}
           apolloId={person.apolloId}
-          email={emailRes?.ok ? emailRes.email : undefined}
+          email={companyEmail}
           phone={phoneRes?.ok ? phoneRes.phone : undefined}
           jobtitle={person.title}
           companyName={company}
@@ -427,7 +446,7 @@ function ApolloPersonCard({
           defaultBody={
             `WHO: ${displayName}${person.title ? ` — ${person.title}` : ""}` +
             `${person.seniority ? ` (${person.seniority.replace(/_/g, " ")})` : ""} at ${company}\n` +
-            `${emailRes?.ok && emailRes.email ? `Email: ${emailRes.email}\n` : ""}` +
+            `${companyEmail ? `Email: ${companyEmail}\n` : ""}` +
             `${phoneRes?.ok && phoneRes.phone ? `Phone: ${phoneRes.phone}\n` : ""}` +
             `\nCOMPANY: ${ctx.companyLine}\n` +
             `\nSIGNAL: ${ctx.signal}\n` +

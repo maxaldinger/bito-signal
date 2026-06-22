@@ -125,6 +125,12 @@ export function HubSpotActions({
     !!emailDomain &&
     !!companyDomain &&
     rootOf(emailDomain) !== rootOf(companyDomain);
+  // A contact with no company-domain email is not pushable — pushing it would
+  // either create a contactless task or let HubSpot mis-associate it. The card
+  // only passes a company-domain email, so an empty `email` here means Apollo
+  // surfaced nothing usable.
+  const noCompanyEmail = kind === "contact" && !!companyDomain && !email;
+  const blockContact = domainMismatch || noCompanyEmail;
 
   const runCheck = async () => {
     if (checking) return;
@@ -185,11 +191,13 @@ export function HubSpotActions({
         <button
           type="button"
           onClick={() => setModalOpen(true)}
-          disabled={domainMismatch}
+          disabled={blockContact}
           title={
             domainMismatch
               ? `${email} isn't on the company domain — pushing would mis-associate this contact`
-              : `Create a HubSpot task for this ${kind} with the signal context`
+              : noCompanyEmail
+                ? `No company email surfaced — won't push a contact without a ${companyDomain} address`
+                : `Create a HubSpot task for this ${kind} with the signal context`
           }
           className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
         >
@@ -200,6 +208,11 @@ export function HubSpotActions({
         {domainMismatch && (
           <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-400/90">
             email domain ≠ company
+          </span>
+        )}
+        {noCompanyEmail && (
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-400/90">
+            no company email
           </span>
         )}
 
