@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, RefreshCw, Activity, Sun, Moon, Menu } from "lucide-react";
+import { RefreshCw, Activity, Sun, Moon, Menu } from "lucide-react";
 import { REGIONS, type RegionId } from "@/lib/data";
 
 // US / India intel scope — switching reloads the feed for that region.
@@ -75,8 +75,6 @@ function ThemeToggle() {
 }
 
 export function Header({
-  search,
-  onSearch,
   onRefresh,
   refreshing,
   lastUpdated,
@@ -84,8 +82,6 @@ export function Header({
   onRegion,
   onMenu,
 }: {
-  search: string;
-  onSearch: (v: string) => void;
   onRefresh: () => void;
   refreshing: boolean;
   lastUpdated: string;
@@ -121,19 +117,8 @@ export function Header({
           </div>
         </div>
 
-        {/* Center search */}
-        <div className="mx-auto hidden w-full max-w-xl items-center gap-2 rounded-lg border border-ink-700 bg-ink-900/70 px-3 py-2 md:flex">
-          <Search className="h-4 w-4 shrink-0 text-ink-400" />
-          <input
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder="Filter the feed…"
-            className="w-full bg-transparent font-mono text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none"
-          />
-        </div>
-
         {/* Right controls */}
-        <div className="ml-auto flex items-center gap-3 md:ml-0">
+        <div className="ml-auto flex items-center gap-3">
           <div className="hidden items-center gap-1.5 font-mono text-[11px] text-ink-400 sm:flex">
             <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-neon-400" />
             live · {lastUpdated}

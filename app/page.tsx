@@ -114,7 +114,6 @@ export default function Page() {
   const [bands, setBands] = useState<SweBandId[]>([]);
   const [minStrength, setMinStrength] = useState(0);
   const [sort, setSort] = useState<FeedSort>("feed");
-  const [search, setSearch] = useState("");
   // HubSpot presence filter: all / not-in / in.
   const [hubspotFilter, setHubspotFilter] = useState<"all" | "not" | "in">("all");
   // Reviewed filter: all / not-reviewed / reviewed.
@@ -360,7 +359,6 @@ export default function Page() {
   }, [activeSignals]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
     return activeSignals.filter((s) => {
       if (s.strength < minStrength) return false;
       if (segments.length > 0 && !segments.includes(s.segment)) return false;
@@ -372,12 +370,6 @@ export default function Page() {
         // hiding them would nuke the feed. Only exclude KNOWN out-of-band sizes.
         if (band !== null && !bands.includes(band)) return false;
       }
-      if (
-        q &&
-        !s.account.toLowerCase().includes(q) &&
-        !s.title.toLowerCase().includes(q)
-      )
-        return false;
       if (hubspotFilter === "not" && isInHubspot(s)) return false;
       if (hubspotFilter === "in" && !isInHubspot(s)) return false;
       if (reviewedFilter !== "all") {
@@ -393,7 +385,6 @@ export default function Page() {
     segments,
     types,
     bands,
-    search,
     hubspotFilter,
     isInHubspot,
     reviewedFilter,
@@ -447,7 +438,7 @@ export default function Page() {
   // Changing filters/sort/region resets to page 1 so you never land past the end.
   useEffect(() => {
     setPage(1);
-  }, [segments, types, bands, minStrength, search, sort, region, hubspotFilter, reviewedFilter]);
+  }, [segments, types, bands, minStrength, sort, region, hubspotFilter, reviewedFilter]);
 
   // Metrics describe the current page (label is "signals on page").
   const metrics = useMemo(() => {
@@ -542,8 +533,6 @@ export default function Page() {
   return (
     <div className="min-h-screen overflow-x-hidden bg-ink-950">
       <Header
-        search={search}
-        onSearch={setSearch}
         onRefresh={refresh}
         refreshing={refreshing || pulling}
         lastUpdated={lastUpdated}
@@ -560,8 +549,6 @@ export default function Page() {
           }}
           mobileOpen={mobileNav}
           onMobileClose={() => setMobileNav(false)}
-          search={search}
-          onSearch={setSearch}
           pullControls={
             tab === "feed" ? (
               <PullControls
@@ -641,7 +628,6 @@ export default function Page() {
                   setTypes([]);
                   setBands([]);
                   setMinStrength(0);
-                  setSearch("");
                   setHubspotFilter("all");
                   setReviewedFilter("all");
                 }}

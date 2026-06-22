@@ -8,7 +8,6 @@ import {
   Check,
   SlidersHorizontal,
   ChevronDown,
-  Search as SearchIcon,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -110,8 +109,6 @@ export function Sidebar({
   pullControls,
   mobileOpen = false,
   onMobileClose,
-  search,
-  onSearch,
 }: {
   activeTab: TabId;
   onTab: (t: TabId) => void;
@@ -139,9 +136,6 @@ export function Sidebar({
   /** Mobile drawer: open state + close handler (desktop ignores these). */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
-  /** Feed text filter — shown inside the mobile drawer (desktop uses the header). */
-  search?: string;
-  onSearch?: (v: string) => void;
 }) {
   const [filtersOpen, setFiltersOpen] = useState(true);
   const favCount = Object.keys(useFavorites()).length;
@@ -182,19 +176,6 @@ export function Sidebar({
               <X className="h-4 w-4" />
             </button>
           </div>
-
-          {/* Mobile feed search (desktop uses the header search) */}
-          {onSearch && (
-            <div className="mb-3 flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 lg:hidden">
-              <SearchIcon className="h-4 w-4 shrink-0 text-ink-400" />
-              <input
-                value={search ?? ""}
-                onChange={(e) => onSearch(e.target.value)}
-                placeholder="Filter the feed…"
-                className="w-full bg-transparent font-mono text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none"
-              />
-            </div>
-          )}
 
           {/* Primary nav */}
           <nav className="flex flex-col gap-1">
