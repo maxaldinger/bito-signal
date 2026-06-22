@@ -112,6 +112,20 @@ export function HubSpotActions({
   // The matched record id (if any) is reused when creating the task.
   const matchedId = check?.found ? check.records[0]?.id : undefined;
 
+  // Block pulling a contact whose email domain doesn't match its company —
+  // Apollo sometimes returns a personal/old email and HubSpot would link the
+  // contact to the wrong account.
+  const rootOf = (d: string) => {
+    const parts = d.toLowerCase().trim().replace(/^www\./, "").split(".").filter(Boolean);
+    return parts.length <= 2 ? parts.join(".") : parts.slice(-2).join(".");
+  };
+  const emailDomain = email ? email.split("@")[1] ?? "" : "";
+  const domainMismatch =
+    kind === "contact" &&
+    !!emailDomain &&
+    !!companyDomain &&
+    rootOf(emailDomain) !== rootOf(companyDomain);
+
   const runCheck = async () => {
     if (checking) return;
     setChecking(true);
@@ -171,12 +185,23 @@ export function HubSpotActions({
         <button
           type="button"
           onClick={() => setModalOpen(true)}
-          title={`Create a HubSpot task for this ${kind} with the signal context`}
+          disabled={domainMismatch}
+          title={
+            domainMismatch
+              ? `${email} isn't on the company domain — pushing would mis-associate this contact`
+              : `Create a HubSpot task for this ${kind} with the signal context`
+          }
           className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
         >
           <CalendarPlus className="h-3 w-3" />
           HubSpot task
         </button>
+
+        {domainMismatch && (
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-400/90">
+            email domain ≠ company
+          </span>
+        )}
 
         {check && (
           <span className="inline-flex min-w-0 max-w-full items-center gap-1 font-mono text-[11px]">

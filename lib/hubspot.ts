@@ -109,6 +109,15 @@ function isTimeout(e: unknown): boolean {
   return e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
 }
 
+// Registrable-ish root of a domain ("us.experian.com" -> "experian.com"), so a
+// subdomain email still matches its company. Good enough for our gate.
+function rootDomain(d?: string | null): string {
+  if (!d) return "";
+  const clean = d.toLowerCase().trim().replace(/^www\./, "");
+  const parts = clean.split(".").filter(Boolean);
+  return parts.length <= 2 ? clean : parts.slice(-2).join(".");
+}
+
 function statusError(status: number, what: string): string {
   if (status === 401) return `HubSpot 401 on ${what} — HUBSPOT_TOKEN is invalid or expired`;
   if (status === 403)
@@ -386,6 +395,20 @@ export async function hubspotCreateTask(input: {
     taskAssociations.push({ id: co.id, typeId: TASK_TO_COMPANY });
     primary = { ...(co.record as HsRecord), kind: "company", created: Boolean(co.created) };
   } else {
+    // Guard: never pull a contact whose email domain doesn't match the company
+    // it's being attached to. Apollo sometimes returns a personal/old email, and
+    // pushing it makes HubSpot merge/associate the contact onto the WRONG company.
+    if (input.email && input.companyDomain) {
+      const emailDom = rootDomain(input.email.split("@")[1]);
+      const compDom = rootDomain(input.companyDomain);
+      if (emailDom && compDom && emailDom !== compDom) {
+        return fail(
+          true,
+          `Not pushed: ${input.email} isn't on ${compDom}. The contact's email domain must match the company, or HubSpot would link it to the wrong account.`,
+        );
+      }
+    }
+
     // 1. Parent company (so the contact + task hang off it). Best-effort: a
     // failed lookup/create here (e.g. a 429 or a duplicate-company 400) must NOT
     // kill the contact task — we just skip the company association.
