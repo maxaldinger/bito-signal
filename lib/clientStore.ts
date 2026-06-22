@@ -128,6 +128,18 @@ export function unmarkProspected(kind: "company" | "contact", key: string): void
   prospected.set({ ...cur, [field]: next });
 }
 
+/** Wipe every prospected mark (companies + contacts). Used to clear marks left
+ * behind by the old buggy "check" that stamped records it merely found. */
+export function clearAllProspected(): void {
+  prospected.set({ companies: {}, contacts: {} });
+}
+
+/** Total number of prospected marks currently stored, across companies + contacts. */
+export function useProspectedCount(): number {
+  const s = prospected.useStore();
+  return Object.keys(s.companies).length + Object.keys(s.contacts).length;
+}
+
 export function useIsProspected(kind: "company" | "contact", key: string): boolean {
   const s = prospected.useStore();
   if (!key) return false;

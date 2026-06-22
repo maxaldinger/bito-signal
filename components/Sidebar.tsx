@@ -9,11 +9,12 @@ import {
   SlidersHorizontal,
   ChevronDown,
   X,
+  RotateCcw,
   type LucideIcon,
 } from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
 import type { SegmentId, SignalTypeId } from "@/lib/types";
-import { useFavorites } from "@/lib/clientStore";
+import { useFavorites, useProspectedCount, clearAllProspected } from "@/lib/clientStore";
 import { SegmentIcon } from "./SegmentIcon";
 
 export type TabId = "feed" | "favorites" | "assist";
@@ -67,6 +68,38 @@ function FilterHeading({
         )}
       </span>
     </div>
+  );
+}
+
+// Maintenance: wipe all orange "prospected · sent to HubSpot" marks. Needed
+// because an earlier bug stamped records the app merely *found* in HubSpot, not
+// ones it actually pushed — so the stored marks can't be trusted and a clean
+// reset (re-earned on every real push) is the only sure fix. Two-click confirm.
+function ResetProspected() {
+  const count = useProspectedCount();
+  const [armed, setArmed] = useState(false);
+  if (count === 0) return null;
+  return (
+    <button
+      onClick={() => {
+        if (armed) {
+          clearAllProspected();
+          setArmed(false);
+        } else {
+          setArmed(true);
+        }
+      }}
+      onBlur={() => setArmed(false)}
+      title="Clear every orange 'sent to HubSpot' mark stored in this browser. Real pushes re-mark themselves."
+      className={`mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 font-mono text-[10px] uppercase tracking-wider transition-colors ${
+        armed
+          ? "border-red-500/50 bg-red-500/10 text-red-300"
+          : "border-ink-700 text-ink-500 hover:border-orange-500/40 hover:text-orange-300"
+      }`}
+    >
+      <RotateCcw className="h-3 w-3" />
+      {armed ? `Tap again to wipe ${count}` : `Reset prospected marks (${count})`}
+    </button>
   );
 }
 
@@ -440,6 +473,8 @@ export function Sidebar({
 
           </div>
         )}
+
+        <ResetProspected />
 
         <p className="mt-auto pt-6 text-center font-mono text-[10px] text-ink-500">
           built for bito.ai
