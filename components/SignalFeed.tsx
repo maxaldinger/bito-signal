@@ -180,7 +180,18 @@ export function SignalFeed({
   // below just drives the `sort` state. `signals` arrives already ordered.
   const sorted = signals;
 
-  const submit = (c: string) => c.trim() && onGetIntel(c.trim());
+  // Accept a company name OR an email — for an email, research the company at
+  // its domain (drop generic mailbox providers so "jane@gmail.com" doesn't
+  // research Gmail).
+  const submit = (c: string) => {
+    const v = c.trim();
+    if (!v) return;
+    const emailMatch = v.match(/^[^@\s]+@([^@\s]+\.[^@\s]+)$/);
+    const generic = /^(gmail|outlook|hotmail|yahoo|icloud|proton|protonmail|aol|live|msn)\./i;
+    const target =
+      emailMatch && !generic.test(emailMatch[1]) ? emailMatch[1] : v;
+    onGetIntel(target);
+  };
 
   // Toggle semantics: clicking an open company again closes its brief.
   const toggleCompany = (account: string) =>
@@ -239,7 +250,7 @@ export function SignalFeed({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submit(query)}
-              placeholder="Run a live intel brief on any company…"
+              placeholder="Run a live intel brief on any company or email…"
               className="w-full bg-transparent font-mono text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none"
             />
           </div>

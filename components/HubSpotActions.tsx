@@ -129,14 +129,11 @@ export function HubSpotActions({
       }
       setCheck(data);
       // Share the live company result so the feed can sort by HubSpot presence.
+      // NOTE: a check finding the record in HubSpot drives the green "In HubSpot"
+      // line + presence sort — NOT the orange "Prospected" badge, which is
+      // reserved for records THIS app created a task for. (Records can exist in
+      // HubSpot from other reps/imports; those aren't "prospected by me".)
       if (kind === "company" && data.ok) setHubspotPresence(name, data.found);
-      // If the live check finds it in HubSpot, badge it prospected (orange) too —
-      // so the state reflects HubSpot truth even if a task-create earlier failed
-      // (e.g. a 429) or the record was added outside this tool.
-      if (data.ok && data.found) {
-        markProspected(kind, kind === "contact" ? apolloId || name : name);
-        if (kind === "contact" && companyName) markProspected("company", companyName);
-      }
     } catch (e) {
       setCheck({ ok: false, found: false, records: [], error: e instanceof Error ? e.message : String(e) });
     } finally {

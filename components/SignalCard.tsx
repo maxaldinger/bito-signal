@@ -17,6 +17,7 @@ import {
   Ban,
   Star,
   Eye,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
@@ -36,6 +37,7 @@ import {
   toggleFavorite,
   useIsReviewed,
   toggleReviewed,
+  unmarkProspected,
   getCompanyBlurb,
   setCompanyBlurb,
 } from "@/lib/clientStore";
@@ -278,16 +280,20 @@ export function SignalCard({
       }`}
     >
       {prospected && (
-        <div
-          title="Already prospected — a HubSpot task exists for this company or one of its contacts"
-          className="mb-3 flex items-center gap-2 rounded-md border border-orange-500/40 bg-orange-500/15 px-3 py-2"
-        >
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-orange-500/40 bg-orange-500/15 px-3 py-2">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
             <Check className="h-4 w-4" strokeWidth={3.5} />
           </span>
-          <span className="font-mono text-xs font-semibold uppercase tracking-wide text-orange-200">
+          <span className="min-w-0 font-mono text-xs font-semibold uppercase tracking-wide text-orange-200">
             Prospected · sent to HubSpot{prospectedAt ? ` · ${fmtDate(prospectedAt)}` : ""}
           </span>
+          <button
+            onClick={() => unmarkProspected("company", signal.account)}
+            title="Not prospected — clear this marker"
+            className="ml-auto shrink-0 rounded p-0.5 text-orange-300/70 transition-colors hover:bg-orange-500/15 hover:text-orange-200"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 

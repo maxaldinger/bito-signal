@@ -117,6 +117,17 @@ export function markProspected(kind: "company" | "contact", key: string): void {
   prospected.set({ ...cur, [field]: { ...cur[field], [k]: Date.now() } });
 }
 
+export function unmarkProspected(kind: "company" | "contact", key: string): void {
+  if (!key) return;
+  const cur = prospected.get();
+  const field = kind === "company" ? "companies" : "contacts";
+  const k = matchingKey(cur[field], kind, key);
+  if (!k) return;
+  const next = { ...cur[field] };
+  delete next[k];
+  prospected.set({ ...cur, [field]: next });
+}
+
 export function useIsProspected(kind: "company" | "contact", key: string): boolean {
   const s = prospected.useStore();
   if (!key) return false;
