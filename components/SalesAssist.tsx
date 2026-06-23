@@ -952,6 +952,8 @@ const usd = (n: number) =>
     ? n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
     : "—";
 
+const roiLabel = "mb-1.5 block text-[13px] font-medium leading-snug text-ink-200";
+
 function RoiSlider({
   label,
   value,
@@ -960,6 +962,7 @@ function RoiSlider({
   max,
   step = 1,
   suffix,
+  presets,
 }: {
   label: string;
   value: number;
@@ -968,12 +971,13 @@ function RoiSlider({
   max: number;
   step?: number;
   suffix?: string;
+  presets?: { label: string; value: number }[];
 }) {
   return (
-    <label className="block">
-      <div className="mb-1 flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400">{label}</span>
-        <span className="font-mono text-sm font-bold text-neon-300">
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between gap-3">
+        <span className="text-[13px] font-medium leading-snug text-ink-200">{label}</span>
+        <span className="shrink-0 font-mono text-sm font-bold text-neon-300">
           {value}
           {suffix}
         </span>
@@ -987,7 +991,25 @@ function RoiSlider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full accent-neon-500"
       />
-    </label>
+      {presets && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {presets.map((p) => (
+            <button
+              key={p.label}
+              onClick={() => onChange(p.value)}
+              className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                value === p.value
+                  ? "border-neon-600/50 bg-neon-500/10 text-neon-300"
+                  : "border-ink-700 text-ink-400 hover:text-ink-200"
+              }`}
+            >
+              {p.label} · {p.value}
+              {suffix}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1001,8 +1023,8 @@ function RoiMoney({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400">{label}</span>
+    <label className="block">
+      <span className={roiLabel}>{label}</span>
       <div className="flex items-center rounded-lg border border-ink-700 bg-ink-950 px-2.5 focus-within:border-neon-600/50">
         <span className="font-mono text-sm text-ink-500">$</span>
         <input
@@ -1017,6 +1039,30 @@ function RoiMoney({
   );
 }
 
+// Plain integer field (no $) — for counts like headcount.
+function RoiNumber({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className={roiLabel}>{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={value || ""}
+        onChange={(e) => onChange(Math.max(0, Math.round(Number(e.target.value))))}
+        className="w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 font-mono text-sm text-ink-100 focus:border-neon-600/50 focus:outline-none"
+      />
+    </label>
+  );
+}
+
 function RoiTool() {
   const [engineers, setEngineers] = useState(9);
   const [costPerEng, setCostPerEng] = useState(170000);
@@ -1025,6 +1071,7 @@ function RoiTool() {
   const [aiSpend, setAiSpend] = useState(40000);
   const [aiReductionPct, setAiReductionPct] = useState(20);
   const [bitoCost, setBitoCost] = useState(0);
+  const [period, setPeriod] = useState<"month" | "year">("year");
   const [copied, setCopied] = useState(false);
 
   const hourly = costPerEng / WORK_HOURS;
@@ -1036,10 +1083,18 @@ function RoiTool() {
   const roiX = bitoCost > 0 ? total / bitoCost : null;
   const paybackMonths = bitoCost > 0 && total > 0 ? (bitoCost / total) * 12 : null;
 
+  // Per-period view: annual is the base; monthly divides money by 12. ROI
+  // multiple and payback are period-independent.
+  const div = period === "month" ? 12 : 1;
+  const word = period === "month" ? "monthly" : "annual";
+  const hrsPer = period === "month"
+    ? `≈ ${Math.round(reclaimedHrsPerEng / 12).toLocaleString()} hrs/eng/mo`
+    : `≈ ${Math.round(reclaimedHrsPerEng).toLocaleString()} hrs/eng/yr`;
+
   const summary =
-    `Bito AI Architect — estimated annual value for a ${engineers}-engineer team: ${usd(total)} ` +
-    `(${usd(timeValue)} reclaimed engineering time + ${usd(aiSavings)} AI-tooling savings)` +
-    (roiX ? `, a ${roiX.toFixed(1)}× return on ${usd(bitoCost)} with payback in ${Math.round(paybackMonths!)} month${Math.round(paybackMonths!) === 1 ? "" : "s"}.` : ".");
+    `Bito AI Architect — estimated ${word} value for a ${engineers}-engineer team: ${usd(total / div)} ` +
+    `(${usd(timeValue / div)} reclaimed engineering time + ${usd(aiSavings / div)} AI-tooling savings)` +
+    (roiX ? `, a ${roiX.toFixed(1)}× return on ${usd(bitoCost)}/yr with payback in ${Math.round(paybackMonths!)} month${Math.round(paybackMonths!) === 1 ? "" : "s"}.` : ".");
 
   const copy = async () => {
     try {
@@ -1055,39 +1110,87 @@ function RoiTool() {
     <div>
       <ToolHeader
         title="ROI Calculator"
-        desc="A live model of annual value — reclaimed engineering time plus AI-tooling savings. Adjust the inputs and the numbers update as you talk."
+        desc="A live model of value — reclaimed engineering time plus AI-tooling savings. Adjust the inputs and the numbers update as you talk."
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Inputs */}
         <div className="space-y-5 rounded-2xl border border-ink-700 bg-ink-900 p-5">
           <div className="grid grid-cols-2 gap-4">
-            <RoiMoney label="engineers in scope" value={engineers} onChange={(v) => setEngineers(Math.max(0, Math.round(v)))} />
-            <RoiMoney label="fully-loaded cost / eng / yr" value={costPerEng} onChange={setCostPerEng} />
+            <RoiNumber label="Engineers in scope" value={engineers} onChange={setEngineers} />
+            <RoiMoney label="Fully-loaded cost / engineer / yr" value={costPerEng} onChange={setCostPerEng} />
           </div>
-          <RoiSlider label="hrs/week per eng lost to context-hunting & AI rework" value={hoursLostWk} onChange={setHoursLostWk} min={0} max={20} suffix="h" />
-          <RoiSlider label="productivity reclaimed with grounded context" value={reclaimPct} onChange={setReclaimPct} min={0} max={50} suffix="%" />
+          <RoiSlider
+            label="Hours/week per engineer lost to context-hunting & rework"
+            value={hoursLostWk}
+            onChange={setHoursLostWk}
+            min={0}
+            max={20}
+            suffix="h"
+          />
+          <RoiSlider
+            label="Share of that wasted time grounded context recovers"
+            value={reclaimPct}
+            onChange={setReclaimPct}
+            min={0}
+            max={50}
+            suffix="%"
+            presets={[
+              { label: "Conservative", value: 15 },
+              { label: "Likely", value: 25 },
+              { label: "Aggressive", value: 40 },
+            ]}
+          />
           <div className="border-t border-ink-800 pt-4">
-            <RoiMoney label="current AI coding-tool spend / yr" value={aiSpend} onChange={setAiSpend} />
+            <RoiMoney label="Current AI coding-tool spend / yr" value={aiSpend} onChange={setAiSpend} />
             <div className="mt-4">
-              <RoiSlider label="AI spend cut (fewer wasted tokens & iterations)" value={aiReductionPct} onChange={setAiReductionPct} min={0} max={50} suffix="%" />
+              <RoiSlider
+                label="AI spend cut from fewer wasted tokens & iterations"
+                value={aiReductionPct}
+                onChange={setAiReductionPct}
+                min={0}
+                max={50}
+                suffix="%"
+                presets={[
+                  { label: "Conservative", value: 10 },
+                  { label: "Likely", value: 20 },
+                  { label: "Aggressive", value: 35 },
+                ]}
+              />
             </div>
           </div>
           <div className="border-t border-ink-800 pt-4">
-            <RoiMoney label="bito annual cost (optional → ROI multiple)" value={bitoCost} onChange={setBitoCost} />
+            <RoiMoney label="Bito annual cost (optional → ROI multiple)" value={bitoCost} onChange={setBitoCost} />
           </div>
         </div>
 
         {/* Outputs */}
         <div className="space-y-4">
+          {/* Monthly / Yearly toggle */}
+          <div className="flex justify-end">
+            <div className="inline-flex rounded-lg border border-ink-700 bg-ink-900 p-0.5">
+              {(["month", "year"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                    period === p ? "bg-neon-500/15 text-neon-300" : "text-ink-400 hover:text-ink-200"
+                  }`}
+                >
+                  {p === "month" ? "Monthly" : "Yearly"}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-neon-600/40 bg-neon-500/10 p-6 shadow-glow-sm">
             <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-neon-400">
-              estimated annual value
+              estimated {word} value
             </p>
-            <p className="mt-1 font-mono text-4xl font-extrabold tracking-tight text-neon-200">{usd(total)}</p>
+            <p className="mt-1 font-mono text-4xl font-extrabold tracking-tight text-neon-200">{usd(total / div)}</p>
             {net !== null && (
               <p className="mt-1 text-sm text-ink-300">
-                {usd(net)} net of Bito ·{" "}
+                {usd(net / div)} net of Bito ·{" "}
                 <span className="font-semibold text-neon-300">{roiX!.toFixed(1)}× ROI</span> · payback{" "}
                 {Math.round(paybackMonths!)} mo
               </p>
@@ -1099,16 +1202,14 @@ function RoiTool() {
               <p className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-400">
                 <Clock className="h-3.5 w-3.5 text-neon-400" /> time reclaimed
               </p>
-              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(timeValue)}</p>
-              <p className="mt-0.5 text-[11px] text-ink-500">
-                ≈ {Math.round(reclaimedHrsPerEng).toLocaleString()} hrs/eng/yr
-              </p>
+              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(timeValue / div)}</p>
+              <p className="mt-0.5 text-[11px] text-ink-500">{hrsPer}</p>
             </div>
             <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
               <p className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-400">
                 <TrendingUp className="h-3.5 w-3.5 text-neon-400" /> AI savings
               </p>
-              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(aiSavings)}</p>
+              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(aiSavings / div)}</p>
               <p className="mt-0.5 text-[11px] text-ink-500">on {usd(aiSpend)}/yr spend</p>
             </div>
           </div>
@@ -1124,8 +1225,8 @@ function RoiTool() {
           </div>
 
           <p className="px-1 text-[11px] leading-relaxed text-ink-500">
-            Estimate only, from your inputs — {WORK_WEEKS} productive weeks/yr, hourly cost = fully-loaded ÷ {WORK_HOURS}h.
-            Use the trial to replace these assumptions with measured numbers.
+            Estimate only, from your inputs (figures shown {word}) — {WORK_WEEKS} productive weeks/yr,
+            hourly cost = fully-loaded ÷ {WORK_HOURS}h. Use the trial to replace these assumptions with measured numbers.
           </p>
         </div>
       </div>
