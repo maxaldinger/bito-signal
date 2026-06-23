@@ -215,6 +215,11 @@ function buildPocHtml(p: PocPlan): string {
   ul.plain { margin: 0; padding-left: 15px; }
   ul.plain li { font-size: 9.2pt; color: var(--ink-2); margin-bottom: 3px; }
 
+  /* Sign-off */
+  .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 42px; }
+  .sig .who { font-size: 9pt; font-weight: 700; color: var(--ink); }
+  .sig .line { margin-top: 34px; border-top: 1px solid #9aa3b2; padding-top: 5px; font-size: 7.5pt; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+
   .foot { margin-top: 22px; padding-top: 11px; border-top: 1px solid var(--line); font-size: 8pt; color: var(--ink-3); display: flex; justify-content: space-between; }
 
   @page { size: Letter; margin: 0.5in; }
@@ -298,6 +303,14 @@ function buildPocHtml(p: PocPlan): string {
       <div class="block" style="margin-top:14px">
         <h3>Next steps</h3>
         <ul class="plain">${list(p.nextSteps)}</ul>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head"><span class="bar"></span><h2>Sign-off</h2><span class="note">to start the trial window</span></div>
+      <div class="sign">
+        <div class="sig"><div class="who">For ${company}</div><div class="line">Name, title &amp; date</div></div>
+        <div class="sig"><div class="who">For Bito</div><div class="line">Name, title &amp; date</div></div>
       </div>
     </section>
 
