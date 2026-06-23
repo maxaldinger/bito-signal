@@ -14,8 +14,13 @@ import {
   Users,
   Lightbulb,
   FileSpreadsheet,
+  FileDown,
+  Gauge,
+  Target,
+  Clock,
 } from "lucide-react";
 import type { LiveCitation } from "@/lib/types";
+import { openPocPdf, type PocPlan } from "@/lib/pocPdf";
 
 // ---------------------------------------------------------------------------
 // Modes — chat modes stream a conversation; tool modes render structured UIs.
@@ -27,6 +32,7 @@ const MODES: { id: string; label: string; dot: string }[] = [
   { id: "threading", label: "Threading", dot: "#8b5cf6" },
   { id: "proposal", label: "Proposal", dot: "#ec4899" },
   { id: "deck", label: "Deck", dot: "#a855f7" },
+  { id: "poc", label: "POC Plan", dot: "#10b981" },
 ];
 const CHAT_MODES = new Set(["ask"]);
 
@@ -1050,6 +1056,286 @@ function DeckTool({ ctx }: { ctx: Ctx }) {
 }
 
 // ---------------------------------------------------------------------------
+// POC Plan tool — generates a sharp 2-week trial plan and exports a branded PDF
+// ---------------------------------------------------------------------------
+const FIT_STYLE: Record<string, string> = {
+  strong: "bg-neon-500/15 text-neon-300 border-neon-600/40",
+  adequate: "bg-amber-500/15 text-amber-300 border-amber-500/40",
+  "under-scoped": "bg-red-500/15 text-red-300 border-red-500/40",
+};
+const fitKey = (f: string) =>
+  (f || "").toLowerCase().includes("strong")
+    ? "strong"
+    : (f || "").toLowerCase().includes("under")
+      ? "under-scoped"
+      : "adequate";
+
+function PocField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  wide,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  wide?: boolean;
+}) {
+  return (
+    <label className={`flex flex-col gap-1 ${wide ? "sm:col-span-2" : ""}`}>
+      <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+        {label}
+      </span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`${inputCls} w-full`}
+      />
+    </label>
+  );
+}
+
+function PocTool({ ctx }: { ctx: Ctx }) {
+  const [account, setAccount] = useState("");
+  const [repos, setRepos] = useState("");
+  const [loc, setLoc] = useState("");
+  const [team, setTeam] = useState("");
+  const [agents, setAgents] = useState("");
+  const [tools, setTools] = useState("");
+  const [pain, setPain] = useState("");
+  const [extra, setExtra] = useState("");
+  const [plan, setPlan] = useState<PocPlan | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const composedNotes = () =>
+    [
+      repos || loc
+        ? `Codebase scale: ${[repos && `${repos} repos`, loc && `${loc} lines of code`].filter(Boolean).join(", ")}`
+        : "",
+      team ? `Engineers in scope for the trial: ${team}` : "",
+      agents ? `Coding agents in use: ${agents}` : "",
+      tools ? `Planning / collaboration tools: ${tools}` : "",
+      pain ? `Where the team slows down today / primary pain:\n${pain}` : "",
+      extra ? `Additional context:\n${extra}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+  const canRun = account.trim() && (pain.trim() || repos.trim() || loc.trim());
+
+  const run = async () => {
+    if (!canRun || loading) return;
+    setLoading(true);
+    setError("");
+    const data = await postAssist({
+      mode: "poc",
+      account: account.trim(),
+      notes: composedNotes(),
+      tone: ctx.tone,
+      persona: ctx.persona,
+    }).catch(() => ({ error: "Network error." }));
+    setLoading(false);
+    if (data.data?.successLooksLike) {
+      setPlan({ company: account.trim(), ...data.data } as PocPlan);
+      if (data.truncated)
+        setError("Heads up: the plan may have been cut off by the token limit — regenerate if a section looks short.");
+    } else setError(data.error || "Could not generate the plan.");
+  };
+
+  const download = () => {
+    if (!plan) return;
+    const ok = openPocPdf(plan);
+    if (!ok) setError("Your browser blocked the export tab — allow pop-ups for this site, then click Download PDF again.");
+  };
+
+  return (
+    <div>
+      <ToolHeader
+        title="POC Plan Generator"
+        desc="Turn a prospect's scale and stack into a sharp, opinionated 2-week trial plan — complexity threshold, the metrics that quantify it, the moments to capture, and the ROI anchor — then export a branded PDF."
+      />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <PocField label="company" value={account} onChange={setAccount} placeholder="e.g. PubMatic" wide />
+        <PocField label="repos in scope" value={repos} onChange={setRepos} placeholder="e.g. 60" />
+        <PocField label="total lines of code" value={loc} onChange={setLoc} placeholder="e.g. 2M" />
+        <PocField label="engineers in scope" value={team} onChange={setTeam} placeholder="e.g. 8–10" />
+        <PocField label="coding agents" value={agents} onChange={setAgents} placeholder="Cursor, Claude Code, Copilot…" />
+        <PocField label="planning tools" value={tools} onChange={setTools} placeholder="Jira, Linear, Slack…" wide />
+      </div>
+      <textarea
+        value={pain}
+        onChange={(e) => setPain(e.target.value)}
+        rows={3}
+        placeholder="Where does the team slow down today? (spec → implementation, onboarding to unfamiliar repos, agents shipping context-blind code…)"
+        className={`${notesArea} mt-3`}
+      />
+      <textarea
+        value={extra}
+        onChange={(e) => setExtra(e.target.value)}
+        rows={2}
+        placeholder="Any extra context — known ROI numbers, security gates, champion's priorities… (optional)"
+        className={`${notesArea} mt-3`}
+      />
+      {error && <div className="mt-3"><Notice text={error} /></div>}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <GenerateButton onClick={run} loading={loading} disabled={!canRun} label={plan ? "Regenerate Plan" : "Generate POC Plan"} />
+        {plan && (
+          <button
+            onClick={download}
+            className="inline-flex items-center gap-2 rounded-lg border border-neon-600/50 bg-neon-500/15 px-5 py-2.5 text-sm font-semibold text-neon-300 shadow-glow-sm transition-all hover:bg-neon-500/25"
+          >
+            <FileDown className="h-4 w-4" /> Download PDF
+          </button>
+        )}
+      </div>
+
+      {plan && <PocPreview plan={plan} />}
+    </div>
+  );
+}
+
+function PocSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h4 className="mb-3 flex items-center gap-2 font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-ink-200">
+        <span className="h-3.5 w-1 rounded-full bg-neon-500" /> {title}
+      </h4>
+      {children}
+    </div>
+  );
+}
+
+function PocPreview({ plan }: { plan: PocPlan }) {
+  const fk = fitKey(plan.complexityThreshold?.fit || "");
+  return (
+    <div className="mt-6 space-y-6 rounded-2xl border border-ink-700 bg-ink-900 p-6">
+      <div className="border-b border-ink-700 pb-4">
+        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-neon-400">
+          AI Architect · Proof-of-Concept Plan
+        </p>
+        <h3 className="mt-1 text-xl font-bold text-ink-50">{plan.headline}</h3>
+        <p className="text-sm text-ink-400">Prepared for {plan.company}</p>
+      </div>
+
+      <PocSection title="What success looks like">
+        <div className="space-y-2">
+          {plan.successLooksLike?.map((s, i) => (
+            <div key={i} className="flex gap-3 rounded-xl border border-ink-700 bg-ink-950 p-3">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-neon-500/15 font-mono text-xs font-bold text-neon-300">
+                {i + 1}
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-ink-100">{s.outcome}</p>
+                <p className="text-xs leading-relaxed text-ink-400">{s.proof}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </PocSection>
+
+      <PocSection title="Complexity threshold">
+        <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
+          <div className="mb-3 flex gap-8">
+            <div>
+              <div className="font-mono text-2xl font-extrabold text-neon-300">
+                {plan.complexityThreshold?.minRepos || "—"}
+              </div>
+              <div className="font-mono text-[10px] uppercase tracking-wide text-ink-500">repos (min)</div>
+            </div>
+            <div>
+              <div className="font-mono text-2xl font-extrabold text-neon-300">
+                {plan.complexityThreshold?.minLoc || "—"}
+              </div>
+              <div className="font-mono text-[10px] uppercase tracking-wide text-ink-500">LOC (min)</div>
+            </div>
+          </div>
+          <p className="text-sm leading-relaxed text-ink-300">{plan.complexityThreshold?.rationale}</p>
+          <div className="mt-3 flex items-center gap-2 border-t border-ink-700 pt-3">
+            <span className={`rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase ${FIT_STYLE[fk]}`}>
+              {fk.replace("-", " ")}
+            </span>
+            <p className="text-xs text-ink-400">{plan.complexityThreshold?.fitNote}</p>
+          </div>
+        </div>
+      </PocSection>
+
+      <PocSection title="What we'll measure">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {plan.metrics?.map((m, i) => (
+            <div
+              key={i}
+              className={`relative rounded-xl border p-4 ${m.unlock ? "border-neon-600/50 bg-neon-500/5" : "border-ink-700 bg-ink-950"}`}
+            >
+              {m.unlock && (
+                <span className="absolute -top-2 right-3 rounded-full bg-neon-500 px-2 py-0.5 font-mono text-[9px] font-bold uppercase text-ink-950">
+                  the unlock
+                </span>
+              )}
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-ink-100">
+                <Gauge className="h-3.5 w-3.5 text-neon-400" /> {m.name}
+              </p>
+              <p className="mt-1.5 text-xs text-ink-400">
+                <span className="font-mono text-[9px] font-bold uppercase text-ink-500">Measured</span> {m.how}
+              </p>
+              <p className="mt-1 text-xs text-ink-400">
+                <span className="font-mono text-[9px] font-bold uppercase text-ink-500">Why</span> {m.why}
+              </p>
+            </div>
+          ))}
+        </div>
+      </PocSection>
+
+      <PocSection title="Moments, not vibes">
+        <p className="mb-3 rounded-lg border border-ink-700 bg-ink-950 p-3 text-sm text-ink-300">
+          {plan.moments?.definition}
+        </p>
+        <ul className="space-y-1.5">
+          {plan.moments?.examples?.map((e, i) => (
+            <li key={i} className="flex gap-2 text-sm text-ink-300">
+              <Target className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neon-400" /> {e}
+            </li>
+          ))}
+        </ul>
+      </PocSection>
+
+      <PocSection title="Timeline & checkpoints">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {plan.timeline?.map((t, i) => (
+            <div key={i} className="rounded-xl border border-ink-700 bg-ink-950 p-4">
+              <h5 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-neon-300">
+                <Clock className="h-3.5 w-3.5" /> {t.phase}
+              </h5>
+              <ul className="mb-3 ml-4 list-disc space-y-1 text-xs text-ink-400">
+                {t.activities?.map((a, j) => <li key={j}>{a}</li>)}
+              </ul>
+              <div className="rounded-lg bg-neon-500/10 p-2.5 text-xs font-medium text-ink-200">
+                <span className="block font-mono text-[9px] font-bold uppercase tracking-wide text-neon-400">
+                  checkpoint
+                </span>
+                {t.checkpoint}
+              </div>
+            </div>
+          ))}
+        </div>
+      </PocSection>
+
+      <PocSection title="The ROI anchor">
+        <div className="rounded-xl bg-ink-950 p-5">
+          <p className="text-lg font-bold leading-snug text-ink-50">{plan.roi?.anchor}</p>
+          {plan.roi?.framing && <p className="mt-2 text-sm text-ink-300">{plan.roi.framing}</p>}
+          <p className="mt-3 border-t border-ink-700 pt-3 text-sm text-ink-400">{plan.roi?.yourVersion}</p>
+        </div>
+      </PocSection>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Controls (mode pills + tone/persona) + main
 // ---------------------------------------------------------------------------
 function Controls({
@@ -1149,6 +1435,8 @@ export function SalesAssist() {
           <ProposalTool key="proposal" ctx={ctx} />
         ) : mode === "deck" ? (
           <DeckTool key="deck" ctx={ctx} />
+        ) : mode === "poc" ? (
+          <PocTool key="poc" ctx={ctx} />
         ) : (
           <MeddpiccTool key="meddpicc" ctx={ctx} />
         )}

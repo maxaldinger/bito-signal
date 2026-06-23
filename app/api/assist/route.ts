@@ -19,6 +19,9 @@ interface ModeCfg {
   instruction: string;
   schema?: string;
   maxSearches: number;
+  // Heavy JSON modes (e.g. the POC plan) need Sonnet + more tokens for quality;
+  // the light extract modes stay on the fast model.
+  heavy?: boolean;
 }
 
 const MODES: Record<string, ModeCfg> = {
@@ -62,6 +65,22 @@ const MODES: Record<string, ModeCfg> = {
       "Generate slide-by-slide presentation content for a Bito sales deck tailored to the context. 7-10 slides covering hook, their pain, Bito's solution, proof, ROI, and next steps.",
     schema: `{"slides":[{"title":"slide title","bullets":["bullet","bullet"],"notes":"one-line speaker note"}]}`,
     maxSearches: 1,
+  },
+  poc: {
+    type: "json",
+    heavy: true,
+    instruction:
+      "Generate a sharp, opinionated 2-week Proof-of-Concept (trial) PLAN for AI Architect, tailored to the prospect described in the notes. " +
+      "This is NOT a generic trial overview and NOT a description of the tool — it is a principled plan designed so the trial produces a result a VP of Engineering can FEEL. Follow these rules exactly:\n" +
+      "1) SUCCESS LOOKS LIKE (not 'what you'll evaluate'): lead with OUTCOMES — what becomes true for their team — never a description of features. Each item is an outcome statement + how the 2-week window proves it. 3 items.\n" +
+      "2) COMPLEXITY THRESHOLD: AI Architect's advantage compounds with codebase complexity — a few hundred K LOC across a dozen repos will NOT feel the same as millions of lines across a hundred repos. State a concrete recommended floor (minRepos and minLoc) for the trial to be meaningful. Make it principled, not salesy. Then assess THEIR stated scope (from the notes) against that floor and set fit = strong | adequate | under-scoped with one honest sentence. If they gave no scale, recommend the floor and note the scope must be confirmed.\n" +
+      "3) METRICS — this can't be vibes. Use these four, quantified, each with how it's measured in the trial and why it lands: (a) Time-to-first-PR / time-to-merge on indexed vs non-indexed repos; (b) Token consumption delta vs a vanilla ungrounded LLM; (c) Iteration-count reduction to a correct result; (d) Developer-reported confidence score on agent suggestions — mark THIS one unlock=true (quantifying trust is the real unlock).\n" +
+      "4) MOMENTS: define a 'moment' as a specific, concrete instance where grounded context caught something an ungrounded agent would have hallucinated or gotten wrong (wrong API contract, stale schema, a pattern from another repo). Give 3-4 plausible example moments tailored to their stated stack/tools/agents.\n" +
+      "5) TIMELINE: Week 1 checkpoint must be concrete — 'Identify one real example from your codebase where grounded context changed the output' — NOT 'review usage and engagement'. Week 2 checkpoint = review the quantified deltas and the captured moments, then decide.\n" +
+      "6) ROI: anchor on the PubMatic result — implementation estimates of 7-10 days collapsed to roughly 5 hours with grounded context. Make that the emotional anchor, then explicitly invite the customer to fill in their OWN version of that number during the trial.\n" +
+      "Keep every field specific to the prospect in the notes. Never invent prospect facts not implied by the notes; for people/roles use placeholders if unknown.",
+    schema: `{"company":"prospect company name","headline":"outcome-framed trial title, <=10 words","successLooksLike":[{"outcome":"what becomes TRUE for their team (an outcome, never a tool description)","proof":"how the 2-week trial demonstrates it"}],"complexityThreshold":{"minRepos":0,"minLoc":"e.g. '1.5M+ lines of code'","rationale":"why the advantage compounds with codebase complexity","fit":"strong|adequate|under-scoped","fitNote":"one honest sentence assessing their stated scope vs the floor"},"metrics":[{"name":"metric name","how":"how it is measured during the trial","why":"why a VP of Eng feels it","unlock":false}],"moments":{"definition":"what a 'moment' is in this trial","examples":["tailored example moment"]},"timeline":[{"phase":"Week 1","activities":["activity"],"checkpoint":"concrete checkpoint"}],"roi":{"anchor":"the PubMatic 7-10 days -> ~5 hours anchor, phrased for this prospect","yourVersion":"invitation for them to capture their own equivalent number","framing":"one line on how to think about the value"},"roles":{"customer":["role: placeholder"],"bito":["Primary POC: Rohan Thakur","Onboarding lead: Rahul Kumar"]},"checklist":["pre-trial item (include repo list meeting the floor, Jira/Linear, Slack, MCP + SSO/OAuth, developer emails, confirmed POC + decision lead, start date)"],"nextSteps":["next step"]}`,
+    maxSearches: 2,
   },
   meddpicc: {
     type: "json",
@@ -171,10 +190,11 @@ ${cfg.schema}`;
       history,
       // Structured tool modes (LOU, MEDDPICC, threading, proposal, deck) extract
       // and draft from the rep's notes — Haiku handles them at lower cost. The
-      // free-form research/email chat ("ask") stays on the default Sonnet model.
-      model: cfg.type === "json" ? FAST_MODEL : undefined,
+      // free-form research/email chat ("ask") and heavy modes (POC plan) stay on
+      // the default Sonnet model for quality.
+      model: cfg.type === "json" && !cfg.heavy ? FAST_MODEL : undefined,
       maxSearches: cfg.maxSearches,
-      maxTokens: cfg.type === "json" ? 4000 : 2500,
+      maxTokens: cfg.heavy ? 6000 : cfg.type === "json" ? 4000 : 2500,
       temperature: cfg.type === "json" ? 0.3 : 0.5,
     });
 
