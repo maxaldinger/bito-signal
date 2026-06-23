@@ -949,13 +949,14 @@ function ListCard({ icon, title, items }: { icon: React.ReactNode; title: string
 const WORK_HOURS = 2080; // 40h × 52w, for hourly cost
 const MONTH_HOURS = WORK_HOURS / 12; // ~173 productive hrs/month per FTE
 
-// Bito's published headline metrics (bito-aiarchitect-map.vercel.app).
+// Bito's published headline metrics (bito.ai — SWE-Bench Pro + case studies).
 const BITO_BENCHMARKS: { label: string; value: string }[] = [
-  { label: "Build speed", value: "5–9×" },
-  { label: "Token cost / task", value: "−47%" },
-  { label: "Onboarding time", value: "−50%" },
-  { label: "Incidents prevented", value: "79%" },
-  { label: "Fewer regressions", value: "−34%" },
+  { label: "task success (SWE-Bench Pro)", value: "51.9%→70.1%" },
+  { label: "token cost / task", value: "−47%" },
+  { label: "reasoning steps / task", value: "−60%" },
+  { label: "tool calls / task", value: "−49%" },
+  { label: "code-review hours / wk", value: "−30-35%" },
+  { label: "architect's week, one session", value: "60-70%" },
 ];
 
 const usd = (n: number) =>

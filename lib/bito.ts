@@ -19,6 +19,13 @@ The value (Bito frames impact across three lines)
 - AI / token cost: less wasted generation and rework — a force-multiplier on existing AI-tooling spend (Copilot, Cursor, Cody), not a replacement.
 - Onboarding: new engineers (and AI agents) get the architecture handed to them instead of spelunking for it.
 
+Proof points (PUBLISHED, from bito.ai / SWE-Bench Pro — cite as real, never inflate)
+- Coding (SWE-Bench Pro): codebase context lifted coding-agent task success from 51.9% to 70.1% (~+35%), and cut token cost per task ~47%, reasoning steps ~60%, and tool calls ~49%. AI Architect tops SWE-Bench Pro.
+- Design & scoping: collapses ~60-70% of an architect's week into a single session; "days to hours" to decide what to build.
+- Code review: teams report saving ~30-35% of human hours spent on code review each week; many reviews drop from ~an hour to 10-20 minutes.
+- PubMatic (in production): across 500+ repos / 450 engineers over an 8-week controlled evaluation, technical design per large epic went from a 2-week estimate to 3 days; indexed repos grew merge volume +48% (control +4%) and shipped 2x the work with no rise in reverts or incidents.
+- Enterprise: no code stored or used to train models; deploy on-prem or in Bito cloud; SOC 2 Type II, end-to-end encrypted.
+
 Who Bito AI Architect sells to (ICP)
 - Software-heavy companies with large, complex, multi-repo codebases (polyrepo/monorepo, aging or fast-growing).
 - 50-500 engineers is the sweet spot; large orgs with sprawling code qualify too.
