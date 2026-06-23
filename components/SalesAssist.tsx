@@ -18,6 +18,7 @@ import {
   Gauge,
   Target,
   Clock,
+  TrendingUp,
 } from "lucide-react";
 import type { LiveCitation } from "@/lib/types";
 import { openPocPdf, type PocPlan } from "@/lib/pocPdf";
@@ -30,9 +31,8 @@ const MODES: { id: string; label: string; dot: string }[] = [
   { id: "lou", label: "LOU", dot: "#06b6d4" },
   { id: "meddpicc", label: "MEDDPICC", dot: "#f59e0b" },
   { id: "threading", label: "Threading", dot: "#8b5cf6" },
-  { id: "proposal", label: "Proposal", dot: "#ec4899" },
-  { id: "deck", label: "Deck", dot: "#a855f7" },
   { id: "poc", label: "POC Plan", dot: "#10b981" },
+  { id: "roi", label: "ROI Calculator", dot: "#22d3ee" },
 ];
 const CHAT_MODES = new Set(["ask"]);
 
@@ -939,118 +939,196 @@ function ListCard({ icon, title, items }: { icon: React.ReactNode; title: string
 }
 
 // ---------------------------------------------------------------------------
-// Proposal tool
+// ROI Calculator — live, client-side. No AI call; recomputes as you type.
+// Model: reclaimed engineering time (grounded context cuts rework / time-to-PR)
+// + AI-tooling savings (fewer wasted tokens & iterations), against an optional
+// Bito cost for ROI multiple and payback.
 // ---------------------------------------------------------------------------
-function ProposalTool({ ctx }: { ctx: Ctx }) {
-  const [notes, setNotes] = useState("");
-  const [products, setProducts] = useState("");
-  const [result, setResult] = useState<{ title: string; sections: { heading: string; content: string }[] } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const run = async () => {
-    if (!notes.trim()) return;
-    setLoading(true);
-    setError("");
-    const data = await postAssist({ mode: "proposal", notes, extra: products, tone: ctx.tone, persona: ctx.persona }).catch(() => ({ error: "Network error." }));
-    setLoading(false);
-    if (data.data?.sections) setResult(data.data);
-    else setError(data.error || "Could not generate.");
-  };
+const WORK_WEEKS = 46; // productive weeks/year after PTO, holidays, ramp
+const WORK_HOURS = 2080; // 40h × 52w, for hourly cost
+
+const usd = (n: number) =>
+  isFinite(n)
+    ? n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
+    : "—";
+
+function RoiSlider({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  suffix,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+}) {
   return (
-    <div>
-      <ToolHeader
-        title="Proposal Builder"
-        desc="Turn discovery notes into a structured proposal outline you can polish and send."
-      />
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        rows={5}
-        placeholder="Paste meeting notes, key requirements, pain points discussed..."
-        className={notesArea}
-      />
-      <textarea
-        value={products}
-        onChange={(e) => setProducts(e.target.value)}
-        rows={3}
-        placeholder="List Bito modules or solutions to recommend, one per line..."
-        className={`${notesArea} mt-3`}
-      />
-      {error && <div className="mt-3"><Notice text={error} /></div>}
-      <div className="mt-3">
-        <GenerateButton onClick={run} loading={loading} disabled={!notes.trim()} label="Generate Proposal" />
+    <label className="block">
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400">{label}</span>
+        <span className="font-mono text-sm font-bold text-neon-300">
+          {value}
+          {suffix}
+        </span>
       </div>
-      {result && (
-        <div className="mt-6 rounded-xl border border-ink-700 bg-ink-900 p-6">
-          <h3 className="mb-4 text-xl font-bold text-ink-50">{result.title}</h3>
-          <div className="space-y-5">
-            {result.sections.map((s, i) => (
-              <div key={i}>
-                <h4 className="mb-1 font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-neon-400">
-                  {s.heading}
-                </h4>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-300">{s.content}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-neon-500"
+      />
+    </label>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Deck tool
-// ---------------------------------------------------------------------------
-function DeckTool({ ctx }: { ctx: Ctx }) {
-  const [notes, setNotes] = useState("");
-  const [result, setResult] = useState<{ slides: { title: string; bullets: string[]; notes?: string }[] } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const run = async () => {
-    if (!notes.trim()) return;
-    setLoading(true);
-    setError("");
-    const data = await postAssist({ mode: "deck", notes, tone: ctx.tone, persona: ctx.persona }).catch(() => ({ error: "Network error." }));
-    setLoading(false);
-    if (data.data?.slides) setResult(data.data);
-    else setError(data.error || "Could not generate.");
+function RoiMoney({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400">{label}</span>
+      <div className="flex items-center rounded-lg border border-ink-700 bg-ink-950 px-2.5 focus-within:border-neon-600/50">
+        <span className="font-mono text-sm text-ink-500">$</span>
+        <input
+          type="number"
+          min={0}
+          value={value || ""}
+          onChange={(e) => onChange(Math.max(0, Number(e.target.value)))}
+          className="w-full bg-transparent px-1.5 py-2 font-mono text-sm text-ink-100 focus:outline-none"
+        />
+      </div>
+    </label>
+  );
+}
+
+function RoiTool() {
+  const [engineers, setEngineers] = useState(9);
+  const [costPerEng, setCostPerEng] = useState(170000);
+  const [hoursLostWk, setHoursLostWk] = useState(8);
+  const [reclaimPct, setReclaimPct] = useState(25);
+  const [aiSpend, setAiSpend] = useState(40000);
+  const [aiReductionPct, setAiReductionPct] = useState(20);
+  const [bitoCost, setBitoCost] = useState(0);
+  const [copied, setCopied] = useState(false);
+
+  const hourly = costPerEng / WORK_HOURS;
+  const reclaimedHrsPerEng = hoursLostWk * WORK_WEEKS * (reclaimPct / 100);
+  const timeValue = engineers * reclaimedHrsPerEng * hourly;
+  const aiSavings = aiSpend * (aiReductionPct / 100);
+  const total = timeValue + aiSavings;
+  const net = bitoCost > 0 ? total - bitoCost : null;
+  const roiX = bitoCost > 0 ? total / bitoCost : null;
+  const paybackMonths = bitoCost > 0 && total > 0 ? (bitoCost / total) * 12 : null;
+
+  const summary =
+    `Bito AI Architect — estimated annual value for a ${engineers}-engineer team: ${usd(total)} ` +
+    `(${usd(timeValue)} reclaimed engineering time + ${usd(aiSavings)} AI-tooling savings)` +
+    (roiX ? `, a ${roiX.toFixed(1)}× return on ${usd(bitoCost)} with payback in ${Math.round(paybackMonths!)} month${Math.round(paybackMonths!) === 1 ? "" : "s"}.` : ".");
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(summary);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
   };
+
   return (
     <div>
       <ToolHeader
-        title="Deck Builder"
-        desc="Generate structured presentation slide content that you can copy into your deck tool."
+        title="ROI Calculator"
+        desc="A live model of annual value — reclaimed engineering time plus AI-tooling savings. Adjust the inputs and the numbers update as you talk."
       />
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        rows={6}
-        placeholder="Add any context: company details, pain points discussed, key stakeholders, industry..."
-        className={notesArea}
-      />
-      {error && <div className="mt-3"><Notice text={error} /></div>}
-      <div className="mt-3">
-        <GenerateButton onClick={run} loading={loading} disabled={!notes.trim()} label="Generate Deck" />
-      </div>
-      {result && (
-        <div className="mt-6 space-y-3">
-          {result.slides.map((s, i) => (
-            <div key={i} className="rounded-xl border border-ink-700 bg-ink-900 p-5">
-              <div className="mb-2 flex items-center gap-3">
-                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-neon-500/15 font-mono text-xs font-bold text-neon-300">
-                  {i + 1}
-                </span>
-                <h4 className="text-sm font-bold text-ink-100">{s.title}</h4>
-              </div>
-              <ul className="ml-10 list-disc space-y-1 text-sm text-ink-300">
-                {s.bullets?.map((b, j) => <li key={j}>{b}</li>)}
-              </ul>
-              {s.notes && <p className="ml-10 mt-2 text-xs italic text-ink-500">Speaker note: {s.notes}</p>}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Inputs */}
+        <div className="space-y-5 rounded-2xl border border-ink-700 bg-ink-900 p-5">
+          <div className="grid grid-cols-2 gap-4">
+            <RoiMoney label="engineers in scope" value={engineers} onChange={(v) => setEngineers(Math.max(0, Math.round(v)))} />
+            <RoiMoney label="fully-loaded cost / eng / yr" value={costPerEng} onChange={setCostPerEng} />
+          </div>
+          <RoiSlider label="hrs/week per eng lost to context-hunting & AI rework" value={hoursLostWk} onChange={setHoursLostWk} min={0} max={20} suffix="h" />
+          <RoiSlider label="productivity reclaimed with grounded context" value={reclaimPct} onChange={setReclaimPct} min={0} max={50} suffix="%" />
+          <div className="border-t border-ink-800 pt-4">
+            <RoiMoney label="current AI coding-tool spend / yr" value={aiSpend} onChange={setAiSpend} />
+            <div className="mt-4">
+              <RoiSlider label="AI spend cut (fewer wasted tokens & iterations)" value={aiReductionPct} onChange={setAiReductionPct} min={0} max={50} suffix="%" />
             </div>
-          ))}
+          </div>
+          <div className="border-t border-ink-800 pt-4">
+            <RoiMoney label="bito annual cost (optional → ROI multiple)" value={bitoCost} onChange={setBitoCost} />
+          </div>
         </div>
-      )}
+
+        {/* Outputs */}
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-neon-600/40 bg-neon-500/10 p-6 shadow-glow-sm">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-neon-400">
+              estimated annual value
+            </p>
+            <p className="mt-1 font-mono text-4xl font-extrabold tracking-tight text-neon-200">{usd(total)}</p>
+            {net !== null && (
+              <p className="mt-1 text-sm text-ink-300">
+                {usd(net)} net of Bito ·{" "}
+                <span className="font-semibold text-neon-300">{roiX!.toFixed(1)}× ROI</span> · payback{" "}
+                {Math.round(paybackMonths!)} mo
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
+              <p className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-400">
+                <Clock className="h-3.5 w-3.5 text-neon-400" /> time reclaimed
+              </p>
+              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(timeValue)}</p>
+              <p className="mt-0.5 text-[11px] text-ink-500">
+                ≈ {Math.round(reclaimedHrsPerEng).toLocaleString()} hrs/eng/yr
+              </p>
+            </div>
+            <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
+              <p className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-400">
+                <TrendingUp className="h-3.5 w-3.5 text-neon-400" /> AI savings
+              </p>
+              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(aiSavings)}</p>
+              <p className="mt-0.5 text-[11px] text-ink-500">on {usd(aiSpend)}/yr spend</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
+            <p className="text-sm leading-relaxed text-ink-300">{summary}</p>
+            <button
+              onClick={copy}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-medium text-ink-300 hover:bg-ink-800"
+            >
+              <Copy className="h-4 w-4" /> {copied ? "Copied!" : "Copy summary"}
+            </button>
+          </div>
+
+          <p className="px-1 text-[11px] leading-relaxed text-ink-500">
+            Estimate only, from your inputs — {WORK_WEEKS} productive weeks/yr, hourly cost = fully-loaded ÷ {WORK_HOURS}h.
+            Use the trial to replace these assumptions with measured numbers.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1396,12 +1474,10 @@ export function SalesAssist() {
           <LouTool key="lou" ctx={ctx} />
         ) : mode === "threading" ? (
           <ThreadingTool key="threading" ctx={ctx} />
-        ) : mode === "proposal" ? (
-          <ProposalTool key="proposal" ctx={ctx} />
-        ) : mode === "deck" ? (
-          <DeckTool key="deck" ctx={ctx} />
         ) : mode === "poc" ? (
           <PocTool key="poc" ctx={ctx} />
+        ) : mode === "roi" ? (
+          <RoiTool key="roi" />
         ) : (
           <MeddpiccTool key="meddpicc" ctx={ctx} />
         )}

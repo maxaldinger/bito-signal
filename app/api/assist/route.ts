@@ -5,9 +5,10 @@ import { BITO_CONTEXT } from "@/lib/bito";
 // Sales Assist — two kinds of modes:
 //  - chat modes (ask / email / objections / research): free-form answers,
 //    grounded with web_search where it helps;
-//  - tool modes (lou / fit / threading / proposal / deck / meddpicc):
-//    structured JSON extracted from the rep's notes, rendered as interactive
-//    tools in the UI (LOU table + Excel export, MEDDPICC scorecard, …).
+//  - tool modes (lou / threading / poc / meddpicc): structured JSON extracted
+//    from the rep's notes, rendered as interactive tools in the UI (LOU table +
+//    Excel export, MEDDPICC scorecard, POC plan + PDF, …). The ROI calculator
+//    is fully client-side and does not hit this route.
 export const maxDuration = 180;
 
 const LOU_CATEGORIES =
@@ -50,20 +51,6 @@ const MODES: Record<string, ModeCfg> = {
     instruction:
       "Analyze the buying committee from the stakeholders provided. Classify each by role and disposition, give a one-line engagement strategy tuned to selling Bito (review pain → staff engineers; budget → VPE/CTO; security gate → security lead), then identify coverage gaps and next actions to multi-thread the deal.",
     schema: `{"summary":"1-2 sentence committee read","stakeholders":[{"name":"","title":"","role":"Champion|Economic Buyer|Decision Maker|Influencer|Blocker|Unknown","disposition":"Supporter|Neutral|Detractor|Unknown","strategy":"one-line engagement plan"}],"gaps":["coverage gap"],"nextActions":["concrete next action"]}`,
-    maxSearches: 1,
-  },
-  proposal: {
-    type: "json",
-    instruction:
-      "Build a structured proposal outline from the notes and the recommended products. Include an executive summary, the prospect's situation, recommended Bito solution mapped to their needs, value/ROI framing (faster delivery from grounded AI context, reduced AI-tooling waste/token cost, faster onboarding, fewer escaped bugs and architecture/standards violations), implementation phases, and next steps. Do not invent specific prices.",
-    schema: `{"title":"proposal title","sections":[{"heading":"section heading","content":"section body (plain text, may use - bullets)"}]}`,
-    maxSearches: 1,
-  },
-  deck: {
-    type: "json",
-    instruction:
-      "Generate slide-by-slide presentation content for a Bito sales deck tailored to the context. 7-10 slides covering hook, their pain, Bito's solution, proof, ROI, and next steps.",
-    schema: `{"slides":[{"title":"slide title","bullets":["bullet","bullet"],"notes":"one-line speaker note"}]}`,
     maxSearches: 1,
   },
   poc: {
@@ -192,8 +179,8 @@ ${cfg.schema}`;
       system,
       user,
       history,
-      // Structured tool modes (LOU, MEDDPICC, threading, proposal, deck) extract
-      // and draft from the rep's notes — Haiku handles them at lower cost. The
+      // Structured tool modes (LOU, MEDDPICC, threading) extract and draft from
+      // the rep's notes — Haiku handles them at lower cost. The
       // free-form research/email chat ("ask") and heavy modes (POC plan) stay on
       // the default Sonnet model for quality.
       model: cfg.type === "json" && !cfg.heavy ? FAST_MODEL : undefined,
