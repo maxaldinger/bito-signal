@@ -1117,30 +1117,30 @@ function PocTool({ ctx }: { ctx: Ctx }) {
       />
 
       <div className="mt-3 rounded-xl border border-ink-700 bg-ink-900/60 p-4">
-        <p className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink-300">
-          <Lightbulb className="h-3.5 w-3.5 text-neon-400" /> For the sharpest plan, make sure the notes cover
+        <p className="mb-3 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink-300">
+          <Lightbulb className="h-3.5 w-3.5 text-neon-400" /> Questions worth answering in the notes
         </p>
-        <ul className="grid gap-x-5 gap-y-1.5 text-sm text-ink-400 sm:grid-cols-2">
+        <ul className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
           {[
-            ["Company & who's in the room", "name + champion, decision-maker, security gate"],
-            ["Codebase scale", "rough repo count and total lines of code"],
-            ["Team in scope", "how many engineers the trial covers"],
-            ["Stack & agents", "languages, plus Cursor / Claude Code / Copilot, etc."],
-            ["Planning tools", "Jira / Linear / Confluence / Slack"],
-            ["Where they slow down", "the real pain — spec→PR, onboarding, AI rework"],
-            ["A 'moment' or two", "a time an agent was confidently wrong"],
-            ["Any numbers", "current estimates, AI spend, an ROI they'd want to beat"],
-          ].map(([label, hint]) => (
-            <li key={label} className="flex gap-2">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-neon-500/70" />
-              <span>
-                <span className="font-medium text-ink-200">{label}</span>
-                <span className="text-ink-500"> — {hint}</span>
+            ["Who's in the room", "“Who's the champion, who signs the PO, and who can veto on security?”"],
+            ["Codebase scale", "“Ballpark — how many repos, and how many lines of code total?”"],
+            ["Team in scope", "“How many engineers would actually be in the trial?”"],
+            ["Stack & agents", "“What languages dominate, and which AI coding tools are you on today?”"],
+            ["Planning tools", "“Where do designs and tickets live — Jira, Linear, Confluence, Slack?”"],
+            ["Slowest path", "“Walk me through your slowest path from spec to merged PR.”"],
+            ["A 'moment'", "“When has an AI agent confidently shipped something just plain wrong?”"],
+            ["A number to beat", "“What's a recent estimate you'd love to cut in half?”"],
+          ].map(([label, q]) => (
+            <li key={label} className="flex gap-2.5">
+              <span className="mt-1 font-mono text-[11px] font-bold text-neon-500/80">Q</span>
+              <span className="leading-snug">
+                <span className="block text-[13px] font-semibold text-ink-200">{label}</span>
+                <span className="text-[13px] italic text-ink-400">{q}</span>
               </span>
             </li>
           ))}
         </ul>
-        <p className="mt-3 border-t border-ink-700 pt-2.5 text-xs text-ink-500">
+        <p className="mt-3.5 border-t border-ink-700 pt-2.5 text-xs text-ink-500">
           Missing a few is fine — it&apos;ll infer or use placeholders. The complexity threshold and ROI
           anchor land hardest when scale and a real number are in the notes.
         </p>
