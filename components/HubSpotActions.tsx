@@ -40,6 +40,7 @@ interface TaskResp {
   taskId?: string;
   taskUrl?: string;
   noteId?: string;
+  noteError?: string;
   linkedTo?: HsRecord & { kind: HsKind; created: boolean };
 }
 
@@ -402,6 +403,11 @@ function TaskModal({
                 >
                   Open task in HubSpot <ArrowUpRight className="h-3 w-3" />
                 </a>
+              )}
+              {result.noteError && (
+                <p className="text-xs text-amber-400/90">
+                  Note not logged ({result.noteError}) — the task still landed.
+                </p>
               )}
             </div>
           ) : (

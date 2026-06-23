@@ -5,8 +5,9 @@
 //   crm.objects.companies.read, crm.objects.companies.write,
 //   crm.objects.contacts.read,  crm.objects.contacts.write,
 //   crm.objects.tasks.read,     crm.objects.tasks.write
-// A timeline Note is also logged on each push; if the Private App lacks notes
-// write scope the note is skipped silently and the task still lands.
+// A timeline Note is also logged on each push. Notes have no dedicated scope —
+// they're covered by the CRM object write scopes above — so no extra scope is
+// needed. If a note ever fails it's reported via noteError; the task still lands.
 //
 // Project rule (shared with the enrichment layer): never fabricate data — every
 // function returns either real HubSpot fields or an honest error.
@@ -56,6 +57,8 @@ export interface HsTaskResult {
   taskUrl?: string;
   /** Set when a timeline Note with the same body was also logged. */
   noteId?: string;
+  /** Why the note couldn't be logged (the task still succeeded), if it failed. */
+  noteError?: string;
   /** Which CRM record the task was linked to, and whether we had to create it. */
   linkedTo?: HsRecord & { kind: HsKind; created: boolean };
 }
@@ -519,7 +522,7 @@ export async function hubspotCreateTask(input: {
   // is the action item; the note makes the intel visible in the activity feed
   // and on the record's Notes tab. Best-effort: a note failure (e.g. missing
   // crm.objects.notes.write scope) must not undo the task that already landed.
-  const noteId = await createNote(
+  const note = await createNote(
     plainToHtml(input.body ?? ""),
     taskAssociations.map((a) => ({
       id: a.id,
@@ -533,19 +536,21 @@ export async function hubspotCreateTask(input: {
     ok: true,
     taskId,
     taskUrl: taskId ? recordUrl(pid, OBJ_TASK, taskId) : undefined,
-    noteId,
+    noteId: note.id,
+    noteError: note.error,
     linkedTo: primary,
   };
 }
 
 /** Create a timeline Note with `bodyHtml`, associated to the given records.
- * Best-effort — returns the new note id, or undefined if it couldn't be created. */
+ * Best-effort — returns the new note id, or an error string if it couldn't be
+ * created (the caller has already created the task, so this never throws). */
 async function createNote(
   bodyHtml: string,
   associations: { id: string; typeId: number }[],
   key: string,
-): Promise<string | undefined> {
-  if (!bodyHtml.trim() || associations.length === 0) return undefined;
+): Promise<{ id?: string; error?: string }> {
+  if (!bodyHtml.trim() || associations.length === 0) return {};
   const ownerId = process.env.HUBSPOT_OWNER_ID?.trim();
   const payload = {
     properties: {
@@ -560,9 +565,9 @@ async function createNote(
   };
   try {
     const { status, body } = await hsFetch("/crm/v3/objects/notes", { method: "POST", body: payload }, key);
-    if (status !== 201 && status !== 200) return undefined;
-    return (body as { id?: string } | undefined)?.id;
-  } catch {
-    return undefined;
+    if (status !== 201 && status !== 200) return { error: statusError(status, "create note") };
+    return { id: (body as { id?: string } | undefined)?.id };
+  } catch (e) {
+    return { error: isTimeout(e) ? "note create timed out after 15s" : "note create failed" };
   }
 }
