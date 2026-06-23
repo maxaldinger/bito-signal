@@ -940,12 +940,23 @@ function ListCard({ icon, title, items }: { icon: React.ReactNode; title: string
 
 // ---------------------------------------------------------------------------
 // ROI Calculator — live, client-side. No AI call; recomputes as you type.
-// Model: reclaimed engineering time (grounded context cuts rework / time-to-PR)
-// + AI-tooling savings (fewer wasted tokens & iterations), against an optional
-// Bito cost for ROI multiple and payback.
+// Mirrors Bito AI Architect's published "THE MATH" model (bito-aiarchitect-map):
+// technical-planning hours reclaimed each month (epics × hrs + stories × hrs),
+// valued at a fully-loaded senior-engineer rate with a quality uplift, plus
+// token-cost savings — against an optional Bito cost for ROI multiple/payback.
+// Defaults and the benchmark strip use Bito's real published figures.
 // ---------------------------------------------------------------------------
-const WORK_WEEKS = 46; // productive weeks/year after PTO, holidays, ramp
 const WORK_HOURS = 2080; // 40h × 52w, for hourly cost
+const MONTH_HOURS = WORK_HOURS / 12; // ~173 productive hrs/month per FTE
+
+// Bito's published headline metrics (bito-aiarchitect-map.vercel.app).
+const BITO_BENCHMARKS: { label: string; value: string }[] = [
+  { label: "Build speed", value: "5–9×" },
+  { label: "Token cost / task", value: "−47%" },
+  { label: "Onboarding time", value: "−50%" },
+  { label: "Incidents prevented", value: "79%" },
+  { label: "Fewer regressions", value: "−34%" },
+];
 
 const usd = (n: number) =>
   isFinite(n)
@@ -1064,37 +1075,40 @@ function RoiNumber({
 }
 
 function RoiTool() {
-  const [engineers, setEngineers] = useState(9);
-  const [costPerEng, setCostPerEng] = useState(170000);
-  const [hoursLostWk, setHoursLostWk] = useState(8);
-  const [reclaimPct, setReclaimPct] = useState(25);
+  const [engineers, setEngineers] = useState(200);
+  const [costPerEng, setCostPerEng] = useState(250000);
+  const [epicsPerMonth, setEpicsPerMonth] = useState(30);
+  const [storiesPerMonth, setStoriesPerMonth] = useState(270);
+  const [hrsPerEpic, setHrsPerEpic] = useState(15);
+  const [hrsPerStory, setHrsPerStory] = useState(2);
+  const [qualityUpliftPct, setQualityUpliftPct] = useState(20);
   const [aiSpend, setAiSpend] = useState(40000);
-  const [aiReductionPct, setAiReductionPct] = useState(20);
+  const [tokenCutPct, setTokenCutPct] = useState(47);
   const [bitoCost, setBitoCost] = useState(0);
   const [period, setPeriod] = useState<"month" | "year">("year");
   const [copied, setCopied] = useState(false);
 
+  // Bito's "THE MATH": planning hours reclaimed/month, valued at fully-loaded
+  // senior-engineer rate, plus a quality uplift, plus token-cost savings.
   const hourly = costPerEng / WORK_HOURS;
-  const reclaimedHrsPerEng = hoursLostWk * WORK_WEEKS * (reclaimPct / 100);
-  const timeValue = engineers * reclaimedHrsPerEng * hourly;
-  const aiSavings = aiSpend * (aiReductionPct / 100);
-  const total = timeValue + aiSavings;
+  const planningHrsPerMonth = epicsPerMonth * hrsPerEpic + storiesPerMonth * hrsPerStory;
+  const fteEquivalent = planningHrsPerMonth / MONTH_HOURS;
+  const planningValue = planningHrsPerMonth * 12 * hourly * (1 + qualityUpliftPct / 100);
+  const tokenSavings = aiSpend * (tokenCutPct / 100);
+  const total = planningValue + tokenSavings;
   const net = bitoCost > 0 ? total - bitoCost : null;
   const roiX = bitoCost > 0 ? total / bitoCost : null;
   const paybackMonths = bitoCost > 0 && total > 0 ? (bitoCost / total) * 12 : null;
 
-  // Per-period view: annual is the base; monthly divides money by 12. ROI
-  // multiple and payback are period-independent.
+  // Annual is the base; monthly divides money by 12. ROI/payback are period-independent.
   const div = period === "month" ? 12 : 1;
   const word = period === "month" ? "monthly" : "annual";
-  const hrsPer = period === "month"
-    ? `≈ ${Math.round(reclaimedHrsPerEng / 12).toLocaleString()} hrs/eng/mo`
-    : `≈ ${Math.round(reclaimedHrsPerEng).toLocaleString()} hrs/eng/yr`;
 
   const summary =
-    `Bito AI Architect — estimated ${word} value for a ${engineers}-engineer team: ${usd(total / div)} ` +
-    `(${usd(timeValue / div)} reclaimed engineering time + ${usd(aiSavings / div)} AI-tooling savings)` +
-    (roiX ? `, a ${roiX.toFixed(1)}× return on ${usd(bitoCost)}/yr with payback in ${Math.round(paybackMonths!)} month${Math.round(paybackMonths!) === 1 ? "" : "s"}.` : ".");
+    `Bito AI Architect — estimated ${word} impact for a ${engineers}-engineer team: ${usd(total / div)} ` +
+    `(${usd(planningValue / div)} technical-planning time reclaimed across ${Math.round(planningHrsPerMonth).toLocaleString()} hrs/mo` +
+    `${tokenSavings > 0 ? ` + ${usd(tokenSavings / div)} token-cost savings` : ""})` +
+    (roiX ? `, ~${roiX.toFixed(1)}× ROI on ${usd(bitoCost)}/yr with payback in ${Math.round(paybackMonths!)} month${Math.round(paybackMonths!) === 1 ? "" : "s"}.` : ".");
 
   const copy = async () => {
     try {
@@ -1106,11 +1120,18 @@ function RoiTool() {
     }
   };
 
+  const Stat = ({ value, label }: { value: string; label: string }) => (
+    <div>
+      <p className="font-mono text-2xl font-extrabold leading-none text-neon-300">{value}</p>
+      <p className="mt-1 text-[11px] leading-tight text-ink-500">{label}</p>
+    </div>
+  );
+
   return (
     <div>
       <ToolHeader
         title="ROI Calculator"
-        desc="A live model of value — reclaimed engineering time plus AI-tooling savings. Adjust the inputs and the numbers update as you talk."
+        desc="Bito's technical-planning impact model, live. Numbers and defaults are anchored to Bito's published figures — adjust to the prospect and it recomputes as you talk."
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -1118,43 +1139,36 @@ function RoiTool() {
         <div className="space-y-5 rounded-2xl border border-ink-700 bg-ink-900 p-5">
           <div className="grid grid-cols-2 gap-4">
             <RoiNumber label="Engineers in scope" value={engineers} onChange={setEngineers} />
-            <RoiMoney label="Fully-loaded cost / engineer / yr" value={costPerEng} onChange={setCostPerEng} />
+            <RoiMoney label="Fully-loaded senior-eng cost / yr" value={costPerEng} onChange={setCostPerEng} />
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <RoiNumber label="Epics analyzed / month" value={epicsPerMonth} onChange={setEpicsPerMonth} />
+            <RoiNumber label="Stories analyzed / month" value={storiesPerMonth} onChange={setStoriesPerMonth} />
+          </div>
+          <RoiSlider label="Planning hours per epic (manual today)" value={hrsPerEpic} onChange={setHrsPerEpic} min={1} max={40} suffix="h" />
+          <RoiSlider label="Planning hours per story (manual today)" value={hrsPerStory} onChange={setHrsPerStory} min={0} max={8} step={0.5} suffix="h" />
           <RoiSlider
-            label="Hours/week per engineer lost to context-hunting & rework"
-            value={hoursLostWk}
-            onChange={setHoursLostWk}
+            label="Quality uplift on shipped work"
+            value={qualityUpliftPct}
+            onChange={setQualityUpliftPct}
             min={0}
-            max={20}
-            suffix="h"
-          />
-          <RoiSlider
-            label="Share of that wasted time grounded context recovers"
-            value={reclaimPct}
-            onChange={setReclaimPct}
-            min={0}
-            max={50}
+            max={40}
             suffix="%"
-            presets={[
-              { label: "Conservative", value: 15 },
-              { label: "Likely", value: 25 },
-              { label: "Aggressive", value: 40 },
-            ]}
+            presets={[{ label: "Bito cites", value: 20 }]}
           />
           <div className="border-t border-ink-800 pt-4">
             <RoiMoney label="Current AI coding-tool spend / yr" value={aiSpend} onChange={setAiSpend} />
             <div className="mt-4">
               <RoiSlider
-                label="AI spend cut from fewer wasted tokens & iterations"
-                value={aiReductionPct}
-                onChange={setAiReductionPct}
+                label="Token-cost cut with grounded context"
+                value={tokenCutPct}
+                onChange={setTokenCutPct}
                 min={0}
-                max={50}
+                max={70}
                 suffix="%"
                 presets={[
-                  { label: "Conservative", value: 10 },
-                  { label: "Likely", value: 20 },
-                  { label: "Aggressive", value: 35 },
+                  { label: "Typical", value: 47 },
+                  { label: "Heaviest", value: 68 },
                 ]}
               />
             </div>
@@ -1185,7 +1199,7 @@ function RoiTool() {
 
           <div className="rounded-2xl border border-neon-600/40 bg-neon-500/10 p-6 shadow-glow-sm">
             <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-neon-400">
-              estimated {word} value
+              estimated {word} impact
             </p>
             <p className="mt-1 font-mono text-4xl font-extrabold tracking-tight text-neon-200">{usd(total / div)}</p>
             {net !== null && (
@@ -1197,20 +1211,27 @@ function RoiTool() {
             )}
           </div>
 
+          {/* Planning-impact stat row (mirrors Bito's "THE MATH") */}
+          <div className="grid grid-cols-3 gap-3 rounded-xl border border-ink-700 bg-ink-900 p-4">
+            <Stat value={(epicsPerMonth + storiesPerMonth).toLocaleString()} label="epics & stories analyzed / mo" />
+            <Stat value={`~${Math.round(planningHrsPerMonth).toLocaleString()}`} label="human hours / month" />
+            <Stat value={`~${fteEquivalent.toFixed(1)}`} label="full-time senior engineers" />
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
               <p className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-400">
-                <Clock className="h-3.5 w-3.5 text-neon-400" /> time reclaimed
+                <Clock className="h-3.5 w-3.5 text-neon-400" /> planning impact
               </p>
-              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(timeValue / div)}</p>
-              <p className="mt-0.5 text-[11px] text-ink-500">{hrsPer}</p>
+              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(planningValue / div)}</p>
+              <p className="mt-0.5 text-[11px] text-ink-500">incl. {qualityUpliftPct}% quality uplift</p>
             </div>
             <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
               <p className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-400">
-                <TrendingUp className="h-3.5 w-3.5 text-neon-400" /> AI savings
+                <TrendingUp className="h-3.5 w-3.5 text-neon-400" /> token savings
               </p>
-              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(aiSavings / div)}</p>
-              <p className="mt-0.5 text-[11px] text-ink-500">on {usd(aiSpend)}/yr spend</p>
+              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(tokenSavings / div)}</p>
+              <p className="mt-0.5 text-[11px] text-ink-500">{tokenCutPct}% of {usd(aiSpend)}/yr</p>
             </div>
           </div>
 
@@ -1223,12 +1244,44 @@ function RoiTool() {
               <Copy className="h-4 w-4" /> {copied ? "Copied!" : "Copy summary"}
             </button>
           </div>
-
-          <p className="px-1 text-[11px] leading-relaxed text-ink-500">
-            Estimate only, from your inputs (figures shown {word}) — {WORK_WEEKS} productive weeks/yr,
-            hourly cost = fully-loaded ÷ {WORK_HOURS}h. Use the trial to replace these assumptions with measured numbers.
-          </p>
         </div>
+      </div>
+
+      {/* Bito's published proof — the real numbers behind the model */}
+      <div className="mt-6 rounded-2xl border border-ink-700 bg-ink-900/60 p-5">
+        <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400">
+          Bito&apos;s published benchmarks
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {BITO_BENCHMARKS.map((b) => (
+            <div key={b.label} className="rounded-lg border border-ink-700 bg-ink-950 px-3 py-1.5">
+              <span className="font-mono text-sm font-bold text-neon-300">{b.value}</span>{" "}
+              <span className="text-xs text-ink-400">{b.label}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-wide text-neon-400">PubMatic · in production</p>
+            <p className="mt-1.5 text-sm leading-relaxed text-ink-300">
+              500+ repos, 450 engineers, 8-week eval. Technical design per large epic{" "}
+              <span className="font-semibold text-ink-100">2 weeks → 3 days</span>; indexed repos grew merges{" "}
+              <span className="font-semibold text-ink-100">+48%</span> (control +4%); <span className="font-semibold text-ink-100">2×</span> work shipped, no rise in reverts.
+            </p>
+          </div>
+          <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
+            <p className="font-mono text-[10px] font-semibold uppercase tracking-wide text-neon-400">Compress days into minutes</p>
+            <ul className="mt-1.5 space-y-1 text-sm text-ink-300">
+              <li className="flex justify-between gap-2"><span>PRD validation</span><span className="text-ink-500">2–3 days → 20 min</span></li>
+              <li className="flex justify-between gap-2"><span>Data-flow analysis</span><span className="text-ink-500">4–6 hrs → 15 min</span></li>
+              <li className="flex justify-between gap-2"><span>API impact assessment</span><span className="text-ink-500">1–2 days → 10 min</span></li>
+            </ul>
+          </div>
+        </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-ink-500">
+          Estimate from your inputs (figures shown {word}); hourly cost = fully-loaded ÷ {WORK_HOURS}h. Model and
+          figures mirror Bito&apos;s published math (200-eng team, $250K fully-loaded senior eng, ~1,000 hrs/mo, ~6× ROI).
+        </p>
       </div>
     </div>
   );
