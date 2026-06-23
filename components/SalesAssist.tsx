@@ -1070,77 +1070,26 @@ const fitKey = (f: string) =>
       ? "under-scoped"
       : "adequate";
 
-function PocField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  wide,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  wide?: boolean;
-}) {
-  return (
-    <label className={`flex flex-col gap-1 ${wide ? "sm:col-span-2" : ""}`}>
-      <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
-        {label}
-      </span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`${inputCls} w-full`}
-      />
-    </label>
-  );
-}
-
 function PocTool({ ctx }: { ctx: Ctx }) {
-  const [account, setAccount] = useState("");
-  const [repos, setRepos] = useState("");
-  const [loc, setLoc] = useState("");
-  const [team, setTeam] = useState("");
-  const [agents, setAgents] = useState("");
-  const [tools, setTools] = useState("");
-  const [pain, setPain] = useState("");
-  const [extra, setExtra] = useState("");
+  const [notes, setNotes] = useState("");
   const [plan, setPlan] = useState<PocPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const composedNotes = () =>
-    [
-      repos || loc
-        ? `Codebase scale: ${[repos && `${repos} repos`, loc && `${loc} lines of code`].filter(Boolean).join(", ")}`
-        : "",
-      team ? `Engineers in scope for the trial: ${team}` : "",
-      agents ? `Coding agents in use: ${agents}` : "",
-      tools ? `Planning / collaboration tools: ${tools}` : "",
-      pain ? `Where the team slows down today / primary pain:\n${pain}` : "",
-      extra ? `Additional context:\n${extra}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-  const canRun = account.trim() && (pain.trim() || repos.trim() || loc.trim());
-
   const run = async () => {
-    if (!canRun || loading) return;
+    if (!notes.trim() || loading) return;
     setLoading(true);
     setError("");
     const data = await postAssist({
       mode: "poc",
-      account: account.trim(),
-      notes: composedNotes(),
+      notes: notes.trim(),
       tone: ctx.tone,
       persona: ctx.persona,
     }).catch(() => ({ error: "Network error." }));
     setLoading(false);
     if (data.data?.successLooksLike) {
-      setPlan({ company: account.trim(), ...data.data } as PocPlan);
+      const company = String(data.data.company || "").trim() || "Your prospect";
+      setPlan({ ...data.data, company } as PocPlan);
       if (data.truncated)
         setError("Heads up: the plan may have been cut off by the token limit — regenerate if a section looks short.");
     } else setError(data.error || "Could not generate the plan.");
@@ -1156,34 +1105,19 @@ function PocTool({ ctx }: { ctx: Ctx }) {
     <div>
       <ToolHeader
         title="POC Plan Generator"
-        desc="Turn a prospect's scale and stack into a sharp, opinionated 2-week trial plan — complexity threshold, the metrics that quantify it, the moments to capture, and the ROI anchor — then export a branded PDF."
+        desc="Dump the full meeting notes or transcript — company, codebase scale, stack, and pain. It extracts what matters and writes a sharp 2-week trial plan (complexity threshold, the metrics that quantify it, the moments to capture, the ROI anchor), then exports a branded PDF."
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <PocField label="company" value={account} onChange={setAccount} placeholder="e.g. PubMatic" wide />
-        <PocField label="repos in scope" value={repos} onChange={setRepos} placeholder="e.g. 60" />
-        <PocField label="total lines of code" value={loc} onChange={setLoc} placeholder="e.g. 2M" />
-        <PocField label="engineers in scope" value={team} onChange={setTeam} placeholder="e.g. 8–10" />
-        <PocField label="coding agents" value={agents} onChange={setAgents} placeholder="Cursor, Claude Code, Copilot…" />
-        <PocField label="planning tools" value={tools} onChange={setTools} placeholder="Jira, Linear, Slack…" wide />
-      </div>
       <textarea
-        value={pain}
-        onChange={(e) => setPain(e.target.value)}
-        rows={3}
-        placeholder="Where does the team slow down today? (spec → implementation, onboarding to unfamiliar repos, agents shipping context-blind code…)"
-        className={`${notesArea} mt-3`}
-      />
-      <textarea
-        value={extra}
-        onChange={(e) => setExtra(e.target.value)}
-        rows={2}
-        placeholder="Any extra context — known ROI numbers, security gates, champion's priorities… (optional)"
-        className={`${notesArea} mt-3`}
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={12}
+        placeholder="Paste the entire meeting notes or call transcript here — who they are, how big and tangled the codebase is, which agents and planning tools they use, where they slow down, who the champion and decision-maker are, any security gates or numbers mentioned. The more raw context, the sharper the plan."
+        className={notesArea}
       />
       {error && <div className="mt-3"><Notice text={error} /></div>}
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <GenerateButton onClick={run} loading={loading} disabled={!canRun} label={plan ? "Regenerate Plan" : "Generate POC Plan"} />
+        <GenerateButton onClick={run} loading={loading} disabled={!notes.trim()} label={plan ? "Regenerate Plan" : "Generate POC Plan"} />
         {plan && (
           <button
             onClick={download}
