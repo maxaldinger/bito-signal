@@ -165,12 +165,12 @@ function buildPocHtml(p: PocPlan): string {
   .card-body { margin: 0; color: var(--ink-2); font-size: 9.3pt; }
 
   /* Complexity threshold */
-  .threshold { display: flex; gap: 20px; align-items: stretch; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; break-inside: avoid; }
-  .threshold .nums { flex: 0 0 auto; display: flex; gap: 18px; padding: 15px 18px; background: var(--tint); }
-  .threshold .num b { display: block; font-size: 18pt; font-weight: 800; color: var(--brand); line-height: 1; }
-  .threshold .num span { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
-  .threshold .body { padding: 13px 16px 13px 0; flex: 1; }
-  .threshold p { margin: 0 0 9px; color: var(--ink-2); font-size: 9.3pt; }
+  .threshold { border: 1px solid var(--line); border-left: 3px solid var(--brand-bright); border-radius: 11px; padding: 15px 18px; break-inside: avoid; }
+  .threshold .stats { display: flex; align-items: center; gap: 26px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .threshold .stat b { display: block; font-size: 19pt; font-weight: 800; color: var(--brand); line-height: 1; white-space: nowrap; }
+  .threshold .stat span { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+  .threshold .vline { width: 1px; align-self: stretch; background: var(--line); }
+  .threshold .rationale { margin: 0 0 11px; color: var(--ink-2); font-size: 9.4pt; }
   .fit-row { display: flex; align-items: center; gap: 9px; }
   .fit-badge { font-size: 7.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
   .fit-strong { background: #dcfce7; color: var(--green); }
@@ -246,16 +246,15 @@ function buildPocHtml(p: PocPlan): string {
     <section>
       <div class="sec-head"><span class="bar"></span><h2>Scope &amp; the complexity threshold</h2></div>
       <div class="threshold">
-        <div class="nums">
-          <div class="num"><b>${esc(p.complexityThreshold?.minRepos || "—")}</b><span>repos min</span></div>
-          <div class="num"><b>${esc(p.complexityThreshold?.minLoc || "—")}</b><span>LOC min</span></div>
+        <div class="stats">
+          <div class="stat"><b>${esc(p.complexityThreshold?.minRepos || "—")}</b><span>repos (min)</span></div>
+          <span class="vline"></span>
+          <div class="stat"><b>${esc(p.complexityThreshold?.minLoc || "—")}</b><span>lines of code (min)</span></div>
         </div>
-        <div class="body">
-          <p>${esc(p.complexityThreshold?.rationale)}</p>
-          <div class="fit-row">
-            <span class="fit-badge ${fit.cls}">${fit.label}</span>
-            <p class="fit-note">${esc(p.complexityThreshold?.fitNote)}</p>
-          </div>
+        <p class="rationale">${esc(p.complexityThreshold?.rationale)}</p>
+        <div class="fit-row">
+          <span class="fit-badge ${fit.cls}">${fit.label}</span>
+          <p class="fit-note">${esc(p.complexityThreshold?.fitNote)}</p>
         </div>
       </div>
     </section>
