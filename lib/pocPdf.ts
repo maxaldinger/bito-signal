@@ -203,12 +203,11 @@ function buildPocHtml(p: PocPlan): string {
   .checkpoint { background: var(--tint); border-radius: 8px; padding: 9px 11px; font-size: 8.9pt; color: var(--ink); font-weight: 600; }
   .cp-label { display: block; font-size: 7pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; color: var(--brand); margin-bottom: 2px; }
 
-  /* ROI */
-  .roi { border-radius: 12px; padding: 20px 22px; background: linear-gradient(135deg, #0d1b2a, #122a45); color: #e2e8f0; break-inside: avoid; }
-  .roi .anchor { font-size: 14.5pt; font-weight: 800; line-height: 1.28; letter-spacing: -0.01em; color: #fff; margin: 0 0 10px; }
-  .roi .anchor .hl { color: #4cc2ff; }
-  .roi .framing { font-size: 9.3pt; color: #b9c6d6; margin: 0 0 2px; }
-  .roi .your { font-size: 9.3pt; color: #8fa3ba; margin: 10px 0 0; padding-top: 10px; border-top: 1px solid #21364f; }
+  /* Reference benchmark */
+  .roi { border: 1px solid var(--line); border-left: 3px solid var(--brand-bright); border-radius: 11px; padding: 14px 16px; background: var(--tint); break-inside: avoid; }
+  .roi .anchor { font-size: 10pt; font-weight: 600; line-height: 1.42; color: var(--ink); margin: 0 0 7px; }
+  .roi .framing { font-size: 9pt; color: var(--ink-2); margin: 0 0 2px; }
+  .roi .your { font-size: 9pt; color: var(--ink-2); margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--line); }
 
   /* Two-up lists */
   .twoup { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -276,7 +275,7 @@ function buildPocHtml(p: PocPlan): string {
     </section>
 
     <section>
-      <div class="sec-head"><span class="bar"></span><h2>The ROI anchor</h2></div>
+      <div class="sec-head"><span class="bar"></span><h2>Reference benchmark</h2></div>
       <div class="roi">
         <p class="anchor">${esc(p.roi?.anchor)}</p>
         ${p.roi?.framing ? `<p class="framing">${esc(p.roi.framing)}</p>` : ""}

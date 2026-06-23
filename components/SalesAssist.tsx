@@ -1289,10 +1289,10 @@ function PocPreview({ plan }: { plan: PocPlan }) {
         </div>
       </PocSection>
 
-      <PocSection title="The ROI anchor">
-        <div className="rounded-xl bg-ink-950 p-5">
-          <p className="text-lg font-bold leading-snug text-ink-50">{plan.roi?.anchor}</p>
-          {plan.roi?.framing && <p className="mt-2 text-sm text-ink-300">{plan.roi.framing}</p>}
+      <PocSection title="Reference benchmark">
+        <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
+          <p className="text-sm font-medium leading-relaxed text-ink-100">{plan.roi?.anchor}</p>
+          {plan.roi?.framing && <p className="mt-2 text-sm text-ink-400">{plan.roi.framing}</p>}
           <p className="mt-3 border-t border-ink-700 pt-3 text-sm text-ink-400">{plan.roi?.yourVersion}</p>
         </div>
       </PocSection>
