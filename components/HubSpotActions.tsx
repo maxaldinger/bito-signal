@@ -39,6 +39,7 @@ interface TaskResp {
   error?: string;
   taskId?: string;
   taskUrl?: string;
+  noteId?: string;
   linkedTo?: HsRecord & { kind: HsKind; created: boolean };
 }
 
@@ -385,7 +386,7 @@ function TaskModal({
           {result?.ok ? (
             <div className="space-y-3">
               <p className="flex items-center gap-2 text-sm text-neon-300">
-                <CircleCheck className="h-4 w-4 shrink-0" /> Task created
+                <CircleCheck className="h-4 w-4 shrink-0" /> {result.noteId ? "Task + note created" : "Task created"}
                 {result.linkedTo?.created
                   ? ` — new ${result.linkedTo.kind} added to HubSpot`
                   : result.linkedTo

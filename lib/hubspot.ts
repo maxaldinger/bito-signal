@@ -5,6 +5,8 @@
 //   crm.objects.companies.read, crm.objects.companies.write,
 //   crm.objects.contacts.read,  crm.objects.contacts.write,
 //   crm.objects.tasks.read,     crm.objects.tasks.write
+// A timeline Note is also logged on each push; if the Private App lacks notes
+// write scope the note is skipped silently and the task still lands.
 //
 // Project rule (shared with the enrichment layer): never fabricate data — every
 // function returns either real HubSpot fields or an honest error.
@@ -22,6 +24,9 @@ const OBJ_TASK = "0-27";
 // HubSpot default association type ids (task → object).
 const TASK_TO_CONTACT = 204;
 const TASK_TO_COMPANY = 192;
+// …and (note → object), so the same context also logs as a timeline Note.
+const NOTE_TO_CONTACT = 202;
+const NOTE_TO_COMPANY = 190;
 
 export type HsKind = "company" | "contact";
 export type HsTaskType = "CALL" | "EMAIL" | "TODO";
@@ -49,6 +54,8 @@ export interface HsTaskResult {
   error?: string;
   taskId?: string;
   taskUrl?: string;
+  /** Set when a timeline Note with the same body was also logged. */
+  noteId?: string;
   /** Which CRM record the task was linked to, and whether we had to create it. */
   linkedTo?: HsRecord & { kind: HsKind; created: boolean };
 }
@@ -507,11 +514,55 @@ export async function hubspotCreateTask(input: {
 
   const taskId = (body as { id?: string } | undefined)?.id;
   const pid = await portalId(key);
+
+  // Also log the same context as a timeline Note on the same record(s). The task
+  // is the action item; the note makes the intel visible in the activity feed
+  // and on the record's Notes tab. Best-effort: a note failure (e.g. missing
+  // crm.objects.notes.write scope) must not undo the task that already landed.
+  const noteId = await createNote(
+    plainToHtml(input.body ?? ""),
+    taskAssociations.map((a) => ({
+      id: a.id,
+      typeId: a.typeId === TASK_TO_COMPANY ? NOTE_TO_COMPANY : NOTE_TO_CONTACT,
+    })),
+    key,
+  );
+
   return {
     configured: true,
     ok: true,
     taskId,
     taskUrl: taskId ? recordUrl(pid, OBJ_TASK, taskId) : undefined,
+    noteId,
     linkedTo: primary,
   };
+}
+
+/** Create a timeline Note with `bodyHtml`, associated to the given records.
+ * Best-effort — returns the new note id, or undefined if it couldn't be created. */
+async function createNote(
+  bodyHtml: string,
+  associations: { id: string; typeId: number }[],
+  key: string,
+): Promise<string | undefined> {
+  if (!bodyHtml.trim() || associations.length === 0) return undefined;
+  const ownerId = process.env.HUBSPOT_OWNER_ID?.trim();
+  const payload = {
+    properties: {
+      hs_note_body: bodyHtml,
+      hs_timestamp: Date.now(),
+      ...(ownerId ? { hubspot_owner_id: ownerId } : {}),
+    },
+    associations: associations.map((a) => ({
+      to: { id: a.id },
+      types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: a.typeId }],
+    })),
+  };
+  try {
+    const { status, body } = await hsFetch("/crm/v3/objects/notes", { method: "POST", body: payload }, key);
+    if (status !== 201 && status !== 200) return undefined;
+    return (body as { id?: string } | undefined)?.id;
+  } catch {
+    return undefined;
+  }
 }
