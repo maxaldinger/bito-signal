@@ -122,6 +122,8 @@ function isDecisionMaker(c: EnrichContact): boolean {
 interface ContactTaskContext {
   /** One-line company descriptor (segment, ICP, what they do). */
   companyLine: string;
+  /** The single most valuable signal as one glanceable sentence — "what I saw". */
+  callHook: string;
   /** What the signal was — the synthesized exec summary. */
   signal: string;
   /** Suggested outreach to fall back on when no per-person draft exists. */
@@ -449,6 +451,7 @@ function ApolloPersonCard({
             `${companyEmail ? `Email: ${companyEmail}\n` : ""}` +
             `${phoneRes?.ok && phoneRes.phone ? `Phone: ${phoneRes.phone}\n` : ""}` +
             `\nCOMPANY: ${ctx.companyLine}\n` +
+            `${ctx.callHook ? `\nWHAT I SAW: ${ctx.callHook}\n` : ""}` +
             `\nSIGNAL: ${ctx.signal}\n` +
             `\nSUGGESTED OUTREACH:\n${draft?.text || ctx.outreach || "—"}`
           }
@@ -702,6 +705,7 @@ export function CompanyIntel({
       `${intel.employeeBand ? `, ${intel.employeeBand} employees` : ""}` +
       `${intel.sweEstimate ? `, ~${fmtNum(intel.sweEstimate)} SWEs` : ""}` +
       `. ICP fit ${intel.icp.total}/99.${intel.oneLiner ? ` ${intel.oneLiner}` : ""}`,
+    callHook: intel.callHook,
     signal: intel.summary,
     outreach: stripEmDashes(intel.outreach.draftMessage || intel.outreach.hook || ""),
   };
@@ -810,6 +814,7 @@ export function CompanyIntel({
           `${intel.employeeBand ? `, ${intel.employeeBand} employees` : ""}` +
           `${intel.sweEstimate ? `, ~${fmtNum(intel.sweEstimate)} SWEs` : ""}.\n` +
           `${intel.oneLiner ? `${intel.oneLiner}\n` : ""}` +
+          `${intel.callHook ? `\nWHAT I SAW: ${intel.callHook}\n` : ""}` +
           `\nBito ICP fit: ${intel.icp.total}/99. ${intel.summary}` +
           `${intel.whyBito.length ? `\n\nWhy Bito: ${intel.whyBito.slice(0, 2).join("; ")}` : ""}`
         }
@@ -819,6 +824,14 @@ export function CompanyIntel({
           rationale used to duplicate this, so it's dropped; the score lives in
           the breakdown below). */}
       <Section title="executive summary" icon={Zap} iconColor="text-amber-400">
+        {intel.callHook && (
+          <div className="mb-4 rounded-lg border-l-2 border-neon-500 bg-neon-500/[0.07] px-3.5 py-2.5">
+            <p className="mb-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-neon-400">
+              what i saw
+            </p>
+            <p className="text-[15px] font-medium leading-snug text-ink-100">{intel.callHook}</p>
+          </div>
+        )}
         <p className="text-sm leading-relaxed text-ink-200">{intel.summary}</p>
         {intel.whyBito.length > 0 && (
           <ol className="mt-4 space-y-3 border-t border-ink-700 pt-4">

@@ -183,6 +183,7 @@ export interface CompanyIntel {
   generatedAt: string;
 
   summary: string;             // 2-3 sentence exec summary, evidence-backed
+  callHook: string;            // the single most valuable signal as one glanceable sentence ("what I saw")
 
   // Why Bito (segment-tailored, evidence-grounded)
   whyBito: string[];

@@ -89,6 +89,7 @@ Output ONLY one JSON object — no prose, no code fences:
     "rationale": "2-3 sentences explaining the score from evidence"
   },
   "summary": "2-4 sentence executive summary grounded in findings",
+  "callHook": "ONE glanceable sentence a rep can drop in a call — the single most valuable, specific signal you found (a number, event, or quote), not generic. e.g. 'Shipping 1,300+ PRs/day and accepting 20K lines of Copilot code daily — review is now the bottleneck.'",
   "whyBito": ["evidence-tied reason", "...", "..."],
   "stakeholders": [
     { "role": "VP Engineering", "name": "real name or omit", "type": "feels-pain|signs|champion|blocker|influencer", "rationale": "why they map to this type", "outreachHook": "one line tailored to them", "linkedinQuery": "search string" }
@@ -116,6 +117,7 @@ interface ModelIntel {
   sweEstimate?: number | null;
   icp?: Partial<ICPScore>;
   summary?: string;
+  callHook?: string;
   whyBito?: string[];
   stakeholders?: Partial<Stakeholder>[];
   painPoints?: CompanyIntel["painPoints"];
@@ -257,6 +259,7 @@ export async function GET(req: NextRequest) {
       },
       generatedAt: new Date().toISOString(),
       summary: String(parsed.summary || ""),
+      callHook: String(parsed.callHook || ""),
       whyBito: (parsed.whyBito ?? []).map(String).filter(Boolean).slice(0, 5),
       stakeholders: (parsed.stakeholders ?? [])
         .filter((s) => s?.role)
