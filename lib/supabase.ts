@@ -272,6 +272,65 @@ export async function upsertBrief(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cross-device user state (public.bito_state) — one row per client store
+// (the localStorage key). Single-user, no auth: a shared document set that
+// every device reads on load and writes on change. Never throws.
+// ---------------------------------------------------------------------------
+
+/** Fetch all stored state rows as a { store: value } map. */
+export async function fetchState(): Promise<{
+  configured: boolean;
+  ok: boolean;
+  state: Record<string, unknown>;
+}> {
+  const cfg = config();
+  if (!cfg) return { configured: false, ok: false, state: {} };
+  try {
+    const res = await fetch(`${cfg.url}/rest/v1/bito_state?select=store,value`, {
+      headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      cache: "no-store",
+    });
+    if (!res.ok) return { configured: true, ok: false, state: {} };
+    const rows = (await res.json()) as { store: string; value: unknown }[];
+    const state: Record<string, unknown> = {};
+    for (const r of rows) state[r.store] = r.value;
+    return { configured: true, ok: true, state };
+  } catch {
+    return { configured: true, ok: false, state: {} };
+  }
+}
+
+/** Upsert one store's value (merge on `store`). */
+export async function upsertState(
+  store: string,
+  value: unknown,
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = config();
+  if (!cfg) return { ok: false, error: "Supabase not configured" };
+  try {
+    const res = await fetch(`${cfg.url}/rest/v1/bito_state?on_conflict=store`, {
+      method: "POST",
+      headers: {
+        apikey: cfg.key,
+        Authorization: `Bearer ${cfg.key}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify([{ store, value, updated_at: new Date().toISOString() }]),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).slice(0, 200);
+      return { ok: false, error: `Supabase state upsert ${res.status}: ${detail}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `Supabase state upsert failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
 export interface SignalPage {
   configured: boolean;
   ok: boolean;

@@ -19,6 +19,7 @@ import {
   setSweepPage,
   companyInMap,
   companyValue,
+  initStateSync,
 } from "@/lib/clientStore";
 import {
   SEGMENTS,
@@ -251,6 +252,13 @@ export default function Page() {
     },
     [scanBuckets],
   );
+
+  // Cross-device sync: hydrate the per-browser stores (prospected, reviewed,
+  // favorites, scores, reveals, …) from Supabase and keep them in sync, so the
+  // same data shows whether you prospect from your phone or your desktop.
+  useEffect(() => {
+    initStateSync();
+  }, []);
 
   // Boot: restore the saved region, then load what's already cached —
   // scanning ONLY happens when the user explicitly clicks "Pull More

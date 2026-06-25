@@ -30,8 +30,105 @@ function normCompany(s: string): string {
     .trim();
 }
 
+// ---------------- Cross-device sync ----------------
+// Each makeStore registers here so the sync layer can hydrate it from Supabase
+// (via /api/state) on load and push changes back — so prospecting from a phone
+// and a desktop share the same state. Single-user, no auth.
+type SyncEntry = { applyServer: (raw: unknown) => void; current: () => unknown };
+const registry = new Map<string, SyncEntry>();
+const pushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Debounced upsert of one store's value to the server.
+function schedulePush(key: string) {
+  if (typeof window === "undefined") return;
+  const prev = pushTimers.get(key);
+  if (prev) clearTimeout(prev);
+  pushTimers.set(
+    key,
+    setTimeout(() => {
+      pushTimers.delete(key);
+      const entry = registry.get(key);
+      if (!entry) return;
+      void fetch("/api/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ store: key, value: entry.current() }),
+      }).catch(() => {});
+    }, 700),
+  );
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+// Union-merge, used ONCE on first sync so neither device loses pre-existing
+// local data. On a key conflict the server (latest) value wins.
+function deepMerge(local: unknown, server: unknown): unknown {
+  if (isPlainObject(local) && isPlainObject(server)) {
+    const out: Record<string, unknown> = { ...local };
+    for (const [k, v] of Object.entries(server)) {
+      out[k] = k in out ? deepMerge(out[k], v) : v;
+    }
+    return out;
+  }
+  return server ?? local;
+}
+
+let pulling = false;
+// Replace local stores with the server's values (server authoritative). Runs on
+// tab focus so a change made on another device shows up here (and deletions —
+// unmark / reset — propagate, which a union-merge can't do).
+async function pullState() {
+  if (typeof window === "undefined" || pulling) return;
+  pulling = true;
+  try {
+    const res = await fetch("/api/state", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = (await res.json()) as { state?: Record<string, unknown> };
+    if (!data?.state) return;
+    for (const [k, v] of Object.entries(data.state)) registry.get(k)?.applyServer(v);
+  } catch {
+    /* offline — keep local */
+  } finally {
+    pulling = false;
+  }
+}
+
+let synced = false;
+/** Start cross-device sync: union-merge with the server once (so nothing is
+ * lost on first run), push the merged result up, then re-pull on tab focus.
+ * Idempotent — safe to call from a mount effect. */
+export function initStateSync() {
+  if (synced || typeof window === "undefined") return;
+  synced = true;
+  void (async () => {
+    try {
+      const res = await fetch("/api/state", { cache: "no-store" });
+      const data = res.ok ? ((await res.json()) as { state?: Record<string, unknown> }) : null;
+      const server = data?.state ?? {};
+      for (const [key, entry] of registry) {
+        const serverVal = server[key];
+        if (serverVal === undefined) {
+          schedulePush(key); // nothing on the server yet → seed from this device
+        } else {
+          entry.applyServer(deepMerge(entry.current(), serverVal));
+          schedulePush(key); // push the union back up
+        }
+      }
+    } catch {
+      /* offline — stay local-only */
+    }
+  })();
+  const onFocus = () => {
+    if (!document.hidden) void pullState();
+  };
+  window.addEventListener("focus", onFocus);
+  document.addEventListener("visibilitychange", onFocus);
+}
+
 // Generic localStorage-backed store with a stable snapshot reference. An
 // optional `coerce` migrates whatever shape is on disk into the current one.
+// Every store also registers for cross-device sync (see above).
 function makeStore<T>(key: string, empty: T, coerce?: (raw: unknown) => T) {
   let cache: T | null = null;
   const listeners = new Set<() => void>();
@@ -47,7 +144,8 @@ function makeStore<T>(key: string, empty: T, coerce?: (raw: unknown) => T) {
     }
     return cache;
   }
-  function set(next: T) {
+  // Update local cache + localStorage + subscribers, WITHOUT echoing to the server.
+  function commit(next: T) {
     cache = next;
     try {
       localStorage.setItem(key, JSON.stringify(next));
@@ -55,6 +153,10 @@ function makeStore<T>(key: string, empty: T, coerce?: (raw: unknown) => T) {
       /* private mode / quota — in-memory only */
     }
     listeners.forEach((l) => l());
+  }
+  function set(next: T) {
+    commit(next);
+    schedulePush(key);
   }
   function subscribe(l: () => void) {
     listeners.add(l);
@@ -65,6 +167,12 @@ function makeStore<T>(key: string, empty: T, coerce?: (raw: unknown) => T) {
   function useStore(): T {
     return useSyncExternalStore(subscribe, get, () => empty);
   }
+  // Register for cross-device sync. applyServer writes server data in locally
+  // without scheduling a push back (no echo loop).
+  registry.set(key, {
+    applyServer: (raw) => commit(coerce ? coerce(raw) : ((raw as T) ?? empty)),
+    current: () => get(),
+  });
   return { get, set, useStore };
 }
 
