@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Send,
   Loader2,
@@ -19,6 +19,7 @@ import {
   Target,
   Clock,
   TrendingUp,
+  Pencil,
 } from "lucide-react";
 import type { LiveCitation } from "@/lib/types";
 import { openPocPdf, type PocPlan } from "@/lib/pocPdf";
@@ -1392,8 +1393,41 @@ function PocTool({ ctx }: { ctx: Ctx }) {
         )}
       </div>
 
-      {plan && <PocPreview plan={plan} />}
+      {plan && <PocPreview plan={plan} onChange={setPlan} />}
     </div>
+  );
+}
+
+// Inline-editable text that blends into the preview (looks like text until you
+// hover/focus) and grows to fit. Used to tweak a generated plan before export.
+function PocEdit({
+  value,
+  onChange,
+  className = "",
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      rows={1}
+      className={`w-full resize-none rounded-md border border-transparent bg-transparent px-1.5 py-0.5 transition-colors hover:border-ink-700 focus:border-neon-600/50 focus:bg-ink-950 focus:outline-none ${className}`}
+    />
   );
 }
 
@@ -1408,16 +1442,54 @@ function PocSection({ title, children }: { title: string; children: React.ReactN
   );
 }
 
-function PocPreview({ plan }: { plan: PocPlan }) {
+const FIT_CYCLE = ["strong", "adequate", "under-scoped"] as const;
+
+function PocPreview({ plan, onChange }: { plan: PocPlan; onChange: (p: PocPlan) => void }) {
   const fk = fitKey(plan.complexityThreshold?.fit || "");
+  const th = plan.complexityThreshold;
+
+  const patch = (partial: Partial<PocPlan>) => onChange({ ...plan, ...partial });
+  const setThNum = (v: string) => patch({ complexityThreshold: { ...th, minRepos: Number(v.replace(/[^0-9]/g, "")) || 0 } });
+  const setThStr = (k: "minLoc" | "rationale" | "fit" | "fitNote", v: string) =>
+    patch({ complexityThreshold: { ...th, [k]: v } });
+  const setRoi = (k: "anchor" | "framing" | "yourVersion", v: string) => patch({ roi: { ...plan.roi, [k]: v } });
+  const setSuccess = (i: number, k: "outcome" | "proof", v: string) =>
+    patch({ successLooksLike: plan.successLooksLike.map((s, idx) => (idx === i ? { ...s, [k]: v } : s)) });
+  const setMetric = (i: number, k: "name" | "how" | "why", v: string) =>
+    patch({ metrics: plan.metrics.map((m, idx) => (idx === i ? { ...m, [k]: v } : m)) });
+  const toggleUnlock = (i: number) =>
+    patch({ metrics: plan.metrics.map((m, idx) => (idx === i ? { ...m, unlock: !m.unlock } : m)) });
+  const setExample = (i: number, v: string) =>
+    patch({ moments: { ...plan.moments, examples: plan.moments.examples.map((e, idx) => (idx === i ? v : e)) } });
+  const setPhase = (i: number, k: "phase" | "checkpoint", v: string) =>
+    patch({ timeline: plan.timeline.map((t, idx) => (idx === i ? { ...t, [k]: v } : t)) });
+  const setActivity = (ti: number, ai: number, v: string) =>
+    patch({
+      timeline: plan.timeline.map((t, idx) =>
+        idx === ti ? { ...t, activities: t.activities.map((a, aj) => (aj === ai ? v : a)) } : t,
+      ),
+    });
+  const cycleFit = () => {
+    const idx = FIT_CYCLE.indexOf(fk as (typeof FIT_CYCLE)[number]);
+    setThStr("fit", FIT_CYCLE[(idx + 1) % FIT_CYCLE.length]);
+  };
+
   return (
     <div className="mt-6 space-y-6 rounded-2xl border border-ink-700 bg-ink-900 p-6">
       <div className="border-b border-ink-700 pb-4">
-        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-neon-400">
-          AI Architect · Proof-of-Concept Plan
-        </p>
-        <h3 className="mt-1 text-xl font-bold text-ink-50">{plan.headline}</h3>
-        <p className="text-sm text-ink-400">Prepared for {plan.company}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-neon-400">
+            AI Architect · Proof-of-Concept Plan
+          </p>
+          <span className="flex shrink-0 items-center gap-1 font-mono text-[10px] uppercase tracking-wide text-ink-500">
+            <Pencil className="h-3 w-3" /> click any text to edit
+          </span>
+        </div>
+        <PocEdit value={plan.headline} onChange={(v) => patch({ headline: v })} className="mt-1 text-xl font-bold text-ink-50" />
+        <div className="flex items-center px-1.5 text-sm text-ink-400">
+          Prepared for
+          <PocEdit value={plan.company} onChange={(v) => patch({ company: v })} className="text-sm font-medium text-ink-300" />
+        </div>
       </div>
 
       <PocSection title="What success looks like">
@@ -1427,9 +1499,9 @@ function PocPreview({ plan }: { plan: PocPlan }) {
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-neon-500/15 font-mono text-xs font-bold text-neon-300">
                 {i + 1}
               </span>
-              <div>
-                <p className="text-sm font-semibold text-ink-100">{s.outcome}</p>
-                <p className="text-xs leading-relaxed text-ink-400">{s.proof}</p>
+              <div className="flex-1">
+                <PocEdit value={s.outcome} onChange={(v) => setSuccess(i, "outcome", v)} className="text-sm font-semibold text-ink-100" />
+                <PocEdit value={s.proof} onChange={(v) => setSuccess(i, "proof", v)} className="text-xs leading-relaxed text-ink-400" />
               </div>
             </div>
           ))}
@@ -1439,25 +1511,25 @@ function PocPreview({ plan }: { plan: PocPlan }) {
       <PocSection title="Complexity threshold">
         <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
           <div className="mb-3 flex gap-8">
-            <div>
-              <div className="font-mono text-2xl font-extrabold text-neon-300">
-                {plan.complexityThreshold?.minRepos || "—"}
-              </div>
-              <div className="font-mono text-[10px] uppercase tracking-wide text-ink-500">repos (min)</div>
+            <div className="w-24">
+              <PocEdit value={String(th?.minRepos ?? "")} onChange={setThNum} className="font-mono text-2xl font-extrabold text-neon-300" />
+              <div className="px-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-500">repos (min)</div>
             </div>
-            <div>
-              <div className="font-mono text-2xl font-extrabold text-neon-300">
-                {plan.complexityThreshold?.minLoc || "—"}
-              </div>
-              <div className="font-mono text-[10px] uppercase tracking-wide text-ink-500">LOC (min)</div>
+            <div className="w-28">
+              <PocEdit value={th?.minLoc ?? ""} onChange={(v) => setThStr("minLoc", v)} className="font-mono text-2xl font-extrabold text-neon-300" />
+              <div className="px-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-500">LOC (min)</div>
             </div>
           </div>
-          <p className="text-sm leading-relaxed text-ink-300">{plan.complexityThreshold?.rationale}</p>
+          <PocEdit value={th?.rationale ?? ""} onChange={(v) => setThStr("rationale", v)} className="text-sm leading-relaxed text-ink-300" />
           <div className="mt-3 flex items-center gap-2 border-t border-ink-700 pt-3">
-            <span className={`rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase ${FIT_STYLE[fk]}`}>
+            <button
+              onClick={cycleFit}
+              title="Click to change fit"
+              className={`shrink-0 rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase ${FIT_STYLE[fk]}`}
+            >
               {fk.replace("-", " ")}
-            </span>
-            <p className="text-xs text-ink-400">{plan.complexityThreshold?.fitNote}</p>
+            </button>
+            <PocEdit value={th?.fitNote ?? ""} onChange={(v) => setThStr("fitNote", v)} className="text-xs text-ink-400" />
           </div>
         </div>
       </PocSection>
@@ -1469,33 +1541,45 @@ function PocPreview({ plan }: { plan: PocPlan }) {
               key={i}
               className={`relative rounded-xl border p-4 ${m.unlock ? "border-neon-600/50 bg-neon-500/5" : "border-ink-700 bg-ink-950"}`}
             >
-              {m.unlock && (
-                <span className="absolute -top-2 right-3 rounded-full bg-neon-500 px-2 py-0.5 font-mono text-[9px] font-bold uppercase text-ink-950">
-                  the unlock
-                </span>
-              )}
-              <p className="flex items-center gap-1.5 text-sm font-semibold text-ink-100">
-                <Gauge className="h-3.5 w-3.5 text-neon-400" /> {m.name}
-              </p>
-              <p className="mt-1.5 text-xs text-ink-400">
-                <span className="font-mono text-[9px] font-bold uppercase text-ink-500">Measured</span> {m.how}
-              </p>
-              <p className="mt-1 text-xs text-ink-400">
-                <span className="font-mono text-[9px] font-bold uppercase text-ink-500">Why</span> {m.why}
-              </p>
+              <button
+                onClick={() => toggleUnlock(i)}
+                title="Toggle 'the unlock'"
+                className={`absolute -top-2 right-3 rounded-full px-2 py-0.5 font-mono text-[9px] font-bold uppercase ${
+                  m.unlock ? "bg-neon-500 text-ink-950" : "border border-ink-700 bg-ink-900 text-ink-500"
+                }`}
+              >
+                {m.unlock ? "the unlock" : "mark unlock"}
+              </button>
+              <div className="flex items-start gap-1.5">
+                <Gauge className="mt-1.5 h-3.5 w-3.5 shrink-0 text-neon-400" />
+                <PocEdit value={m.name} onChange={(v) => setMetric(i, "name", v)} className="text-sm font-semibold text-ink-100" />
+              </div>
+              <div className="mt-1.5 flex items-start gap-1.5">
+                <span className="mt-1.5 shrink-0 font-mono text-[9px] font-bold uppercase text-ink-500">Measured</span>
+                <PocEdit value={m.how} onChange={(v) => setMetric(i, "how", v)} className="text-xs text-ink-400" />
+              </div>
+              <div className="mt-1 flex items-start gap-1.5">
+                <span className="mt-1.5 shrink-0 font-mono text-[9px] font-bold uppercase text-ink-500">Why</span>
+                <PocEdit value={m.why} onChange={(v) => setMetric(i, "why", v)} className="text-xs text-ink-400" />
+              </div>
             </div>
           ))}
         </div>
       </PocSection>
 
       <PocSection title="Moments, not vibes">
-        <p className="mb-3 rounded-lg border border-ink-700 bg-ink-950 p-3 text-sm text-ink-300">
-          {plan.moments?.definition}
-        </p>
+        <div className="mb-3 rounded-lg border border-ink-700 bg-ink-950 p-2">
+          <PocEdit
+            value={plan.moments?.definition ?? ""}
+            onChange={(v) => patch({ moments: { ...plan.moments, definition: v } })}
+            className="text-sm text-ink-300"
+          />
+        </div>
         <ul className="space-y-1.5">
           {plan.moments?.examples?.map((e, i) => (
-            <li key={i} className="flex gap-2 text-sm text-ink-300">
-              <Target className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neon-400" /> {e}
+            <li key={i} className="flex items-start gap-2 text-sm text-ink-300">
+              <Target className="mt-2 h-3.5 w-3.5 shrink-0 text-neon-400" />
+              <PocEdit value={e} onChange={(v) => setExample(i, v)} className="text-sm text-ink-300" />
             </li>
           ))}
         </ul>
@@ -1505,17 +1589,23 @@ function PocPreview({ plan }: { plan: PocPlan }) {
         <div className="grid gap-3 sm:grid-cols-2">
           {plan.timeline?.map((t, i) => (
             <div key={i} className="rounded-xl border border-ink-700 bg-ink-950 p-4">
-              <h5 className="mb-2 flex items-center gap-1.5 text-sm font-bold text-neon-300">
-                <Clock className="h-3.5 w-3.5" /> {t.phase}
-              </h5>
-              <ul className="mb-3 ml-4 list-disc space-y-1 text-xs text-ink-400">
-                {t.activities?.map((a, j) => <li key={j}>{a}</li>)}
+              <div className="mb-2 flex items-center gap-1.5 text-sm font-bold text-neon-300">
+                <Clock className="h-3.5 w-3.5 shrink-0" />
+                <PocEdit value={t.phase} onChange={(v) => setPhase(i, "phase", v)} className="text-sm font-bold text-neon-300" />
+              </div>
+              <ul className="mb-3 space-y-1">
+                {t.activities?.map((a, j) => (
+                  <li key={j} className="flex items-start gap-1.5 text-xs text-ink-400">
+                    <span className="mt-2 text-ink-600">•</span>
+                    <PocEdit value={a} onChange={(v) => setActivity(i, j, v)} className="text-xs text-ink-400" />
+                  </li>
+                ))}
               </ul>
-              <div className="rounded-lg bg-neon-500/10 p-2.5 text-xs font-medium text-ink-200">
-                <span className="block font-mono text-[9px] font-bold uppercase tracking-wide text-neon-400">
+              <div className="rounded-lg bg-neon-500/10 p-2">
+                <span className="block px-1.5 font-mono text-[9px] font-bold uppercase tracking-wide text-neon-400">
                   checkpoint
                 </span>
-                {t.checkpoint}
+                <PocEdit value={t.checkpoint} onChange={(v) => setPhase(i, "checkpoint", v)} className="text-xs font-medium text-ink-200" />
               </div>
             </div>
           ))}
@@ -1523,10 +1613,12 @@ function PocPreview({ plan }: { plan: PocPlan }) {
       </PocSection>
 
       <PocSection title="Reference benchmark">
-        <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
-          <p className="text-sm font-medium leading-relaxed text-ink-100">{plan.roi?.anchor}</p>
-          {plan.roi?.framing && <p className="mt-2 text-sm text-ink-400">{plan.roi.framing}</p>}
-          <p className="mt-3 border-t border-ink-700 pt-3 text-sm text-ink-400">{plan.roi?.yourVersion}</p>
+        <div className="rounded-xl border border-ink-700 bg-ink-950 p-2">
+          <PocEdit value={plan.roi?.anchor ?? ""} onChange={(v) => setRoi("anchor", v)} className="text-sm font-medium leading-relaxed text-ink-100" />
+          <PocEdit value={plan.roi?.framing ?? ""} onChange={(v) => setRoi("framing", v)} placeholder="(optional framing line)" className="mt-1 text-sm text-ink-400" />
+          <div className="mt-2 border-t border-ink-700 pt-2">
+            <PocEdit value={plan.roi?.yourVersion ?? ""} onChange={(v) => setRoi("yourVersion", v)} className="text-sm text-ink-400" />
+          </div>
         </div>
       </PocSection>
     </div>
