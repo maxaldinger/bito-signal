@@ -87,6 +87,16 @@ const ENG_TITLES = [
   "DevOps Engineer",
 ];
 
+// Decision-makers ("gates the deal") are found by Apollo SENIORITY, not literal
+// titles — enterprise leaders title themselves uniquely ("Chief Digital
+// Technology Officer", "EVP CTO Walmart International"), which a fixed title list
+// misses. Empirically the seniority facet lifts leader hits ~30x (Starbucks
+// 32 -> 1,005; Walmart 145 -> 5,555). Seniority alone also returns Finance/HR/
+// Legal VPs, so we keep only the engineering/technology leaders via TECH_LEADER_RE.
+const DM_SENIORITIES = ["c_suite", "vp", "head", "director"];
+const TECH_LEADER_RE =
+  /\b(c[ti]o|ctpo|cdo|engineer|engineering|technolog|technical|software|platform|infrastructur|devops|sre|reliab|architect|develop|data|machine\s*learning|ml|ai|cloud|digital|security)\b/i;
+
 function apiHeaders(key: string): Record<string, string> {
   return {
     "x-api-key": key,
@@ -584,23 +594,53 @@ export async function apolloPeopleByTitle(
 
   try {
     const perPage = 30;
-    const qs = new URLSearchParams({
-      page: String(Math.max(1, Math.min(100, page))),
-      per_page: String(perPage),
-    });
-    for (const t of ENG_TITLES) qs.append("person_titles[]", t);
-    if (orgId) qs.append("organization_ids[]", orgId);
-    else if (orgDomain) qs.append("q_organization_domains_list[]", orgDomain);
+    const pageNum = String(Math.max(1, Math.min(100, page)));
+    const orgFilter = (qs: URLSearchParams) => {
+      if (orgId) qs.append("organization_ids[]", orgId);
+      else if (orgDomain) qs.append("q_organization_domains_list[]", orgDomain);
+    };
 
-    const [{ status, body }, pinned] = await Promise.all([
-      apolloJson(`${BASE}/mixed_people/api_search?${qs}`, key, "POST"),
+    // Query 1 — ICs / "feels the pain", matched by literal engineering titles.
+    const titleQs = new URLSearchParams({ page: pageNum, per_page: String(perPage) });
+    for (const t of ENG_TITLES) titleQs.append("person_titles[]", t);
+    orgFilter(titleQs);
+
+    // Query 2 — decision-makers / "gates the deal", matched by SENIORITY (not
+    // title) so we catch leaders a fixed title list misses, then tech-filtered.
+    const dmQs = new URLSearchParams({ page: pageNum, per_page: String(perPage) });
+    for (const s of DM_SENIORITIES) dmQs.append("person_seniorities[]", s);
+    orgFilter(dmQs);
+
+    const [titleRes, dmRes, pinned] = await Promise.all([
+      apolloJson(`${BASE}/mixed_people/api_search?${titleQs}`, key, "POST"),
+      apolloJson(`${BASE}/mixed_people/api_search?${dmQs}`, key, "POST"),
       findPinned(),
     ]);
-    if (status !== 200) return fail(true, statusError(status, "people search"));
-    const b = body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
-    const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])];
-    const hasMore = raw.length >= perPage;
-    const people = raw.map(toContact).filter((c): c is EnrichContact => c !== undefined);
+    if (titleRes.status !== 200) return fail(true, statusError(titleRes.status, "people search"));
+
+    const peopleOf = (r: { body: unknown }): ApolloPerson[] => {
+      const b = r.body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
+      return [...(b?.people ?? []), ...(b?.contacts ?? [])];
+    };
+    const titleRaw = peopleOf(titleRes);
+    // Keep only engineering/technology leaders from the seniority sweep.
+    const dmRaw =
+      dmRes.status === 200
+        ? peopleOf(dmRes).filter((p) => TECH_LEADER_RE.test(str(p.title) ?? ""))
+        : [];
+
+    // Merge, leaders first (so the "gates the deal" column fills), dedup by id.
+    const seen = new Set<string>();
+    const merged: ApolloPerson[] = [];
+    for (const p of [...dmRaw, ...titleRaw]) {
+      const id = str(p.id) ?? normName(str(p.name) ?? `${p.first_name ?? ""} ${p.last_name ?? ""}`);
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      merged.push(p);
+    }
+
+    const hasMore = titleRaw.length >= perPage || dmRaw.length >= perPage;
+    const people = merged.map(toContact).filter((c): c is EnrichContact => c !== undefined);
     if (people.length === 0)
       return {
         configured: true,
