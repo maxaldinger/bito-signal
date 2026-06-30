@@ -169,13 +169,14 @@ export async function GET(req: NextRequest) {
     });
 
     const parsed = extractJSON<ModelIntel>(result.text);
-    const onboardingScored = Number.isFinite(Number(parsed?.onboarding?.score));
-    if (!parsed || !parsed.name || !icpComplete(parsed.icp) || !onboardingScored) {
+    // The lean brief no longer generates onboarding (it's an on-demand expand),
+    // so only require a name + a complete ICP block.
+    if (!parsed || !parsed.name || !icpComplete(parsed.icp)) {
       const cause = result.truncated
         ? `the response was cut off (stop_reason: ${result.stopReason})`
         : !parsed || !parsed.name
           ? "no parseable brief came back"
-          : "the brief came back without complete ICP / onboarding scores";
+          : "the brief came back without a complete ICP score";
       return NextResponse.json(
         {
           error: `Live research pass incomplete — ${cause}. Try again; this is usually transient.`,
