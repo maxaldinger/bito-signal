@@ -170,14 +170,14 @@ export function DirectoryView({
             <Building2 className="h-5 w-5 text-neon-400" /> Signal 2000
           </h2>
           <p className="mt-1 text-sm text-ink-300">
-            A standing directory of large software-employing companies across every industry —
-            short brief ready, full intel on demand. {entries ? `${entries.length.toLocaleString()} companies.` : ""}
+            The ~1,000 largest US companies (Fortune 1000) across every sector — short brief
+            ready, full intel on demand. {entries ? `${entries.length.toLocaleString()} companies.` : ""}
           </p>
         </div>
         <button
           onClick={populate}
           disabled={populating}
-          title="Refresh the directory from Apollo (broad org sweep across all industries)"
+          title="Re-seed the directory from the Fortune 1000 (US) list"
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200 disabled:opacity-50"
         >
           {populating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -223,7 +223,7 @@ export function DirectoryView({
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
           <p className="text-sm text-ink-300">The directory is empty.</p>
           <p className="mt-1 text-xs text-ink-500">
-            Build it now — a broad Apollo sweep across tech and traditional industries (~2,000 companies, about a minute).
+            Build it now — seeds the ~1,000 largest US companies (Fortune 1000) across every sector.
           </p>
           <button
             onClick={populate}
