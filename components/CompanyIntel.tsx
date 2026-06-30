@@ -353,6 +353,9 @@ function ApolloPersonCard({
   // the reveal returned (or its cache) and fall back to whatever search gave us.
   const displayCountry = revealedCountry || person.country;
   const liQuery = `${company} ${revealedName || person.title || ""}`.trim();
+  const linkedinHref =
+    person.linkedinUrl ||
+    `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(liQuery)}`;
   const emailRes = result.email;
   const phoneRes = result.phone;
   const contactProspected = useIsProspected("contact", person.apolloId || displayName);
@@ -467,8 +470,8 @@ function ApolloPersonCard({
               )}
             </p>
           ) : emailChecked ? (
-            <p className="flex items-center gap-1.5 text-amber-400/90">
-              <Mail className="h-3 w-3" /> No company email surfaced
+            <p className="flex items-center gap-1.5 text-ink-500">
+              <Mail className="h-3 w-3" /> No email — push logs a LinkedIn connect
             </p>
           ) : null}
           {phoneRes?.ok && phoneRes.phone && (
@@ -495,16 +498,17 @@ function ApolloPersonCard({
           compact
           autoCheck
           autoCheckDelayMs={autoCheckDelayMs}
-          defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}`}
+          defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}${companyEmail ? "" : " - LinkedIn connect"}`}
           defaultBody={
             `WHO: ${displayName}${person.title ? ` — ${person.title}` : ""}` +
             `${person.seniority ? ` (${person.seniority.replace(/_/g, " ")})` : ""} at ${company}\n` +
-            `${companyEmail ? `Email: ${companyEmail}\n` : ""}` +
+            `${companyEmail ? `Email: ${companyEmail}\n` : `LinkedIn: ${linkedinHref}\n`}` +
             `${phoneRes?.ok && phoneRes.phone ? `Phone: ${phoneRes.phone}\n` : ""}` +
             `\nCOMPANY: ${ctx.companyLine}\n` +
             `${ctx.callHook ? `\nWHAT I SAW: ${ctx.callHook}\n` : ""}` +
             `\nSIGNAL: ${ctx.signal}\n` +
-            `\nSUGGESTED OUTREACH:\n${draft?.text || ctx.outreach || "—"}`
+            `\nSUGGESTED OUTREACH:\n${draft?.text || ctx.outreach || "—"}` +
+            `${companyEmail ? "" : `\n\nACTION: No email found — connect with ${displayName.split(" ")[0]} on LinkedIn (${linkedinHref}) and open with the angle above.`}`
           }
         />
       </div>

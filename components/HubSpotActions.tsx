@@ -127,12 +127,12 @@ export function HubSpotActions({
     !!emailDomain &&
     !!companyDomain &&
     rootOf(emailDomain) !== rootOf(companyDomain);
-  // A contact with no company-domain email is not pushable — pushing it would
-  // either create a contactless task or let HubSpot mis-associate it. The card
-  // only passes a company-domain email, so an empty `email` here means Apollo
-  // surfaced nothing usable.
-  const noCompanyEmail = kind === "contact" && !!companyDomain && !email;
-  const blockContact = domainMismatch || noCompanyEmail;
+  // No company email surfaced — still pushable, but as a LinkedIn-connect task
+  // (create the contact by name, log a to-do to connect on LinkedIn). Only an
+  // OFF-DOMAIN email is blocked (it would mis-associate the contact). The card
+  // passes only a company-domain email, so an empty `email` here means none.
+  const noCompanyEmail = kind === "contact" && !email;
+  const blockContact = domainMismatch; // off-domain only; missing email is allowed
 
   const runCheck = async () => {
     if (checking) return;
@@ -198,13 +198,13 @@ export function HubSpotActions({
             domainMismatch
               ? `${email} isn't on the company domain — pushing would mis-associate this contact`
               : noCompanyEmail
-                ? `No company email surfaced — won't push a contact without a ${companyDomain} address`
+                ? `No email found — creates the contact and logs a LinkedIn-connect task`
                 : `Create a HubSpot task for this ${kind} with the signal context`
           }
           className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
         >
           <CalendarPlus className="h-3 w-3" />
-          HubSpot task
+          {noCompanyEmail ? "LinkedIn task" : "HubSpot task"}
         </button>
 
         {domainMismatch && (
@@ -212,9 +212,9 @@ export function HubSpotActions({
             email domain ≠ company
           </span>
         )}
-        {noCompanyEmail && (
-          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-400/90">
-            no company email
+        {noCompanyEmail && !domainMismatch && (
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-500">
+            no email — LinkedIn connect
           </span>
         )}
 
@@ -303,7 +303,8 @@ function TaskModal({
     const last = getLastDueDate();
     return last && last >= minDue ? last : minDue;
   });
-  const [taskType, setTaskType] = useState<HsTaskType>("CALL");
+  // No email → it's a LinkedIn-connect to-do, not a call.
+  const [taskType, setTaskType] = useState<HsTaskType>(kind === "contact" && !email ? "TODO" : "CALL");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<TaskResp | null>(null);
 

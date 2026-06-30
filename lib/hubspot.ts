@@ -405,19 +405,13 @@ export async function hubspotCreateTask(input: {
     taskAssociations.push({ id: co.id, typeId: TASK_TO_COMPANY });
     primary = { ...(co.record as HsRecord), kind: "company", created: Boolean(co.created) };
   } else {
-    // Guard: only push a contact that has a COMPANY-domain email. Apollo often
-    // returns a personal/old email (or none at all); pushing those either creates
-    // a contactless task or makes HubSpot merge/associate the contact onto the
-    // WRONG company. No usable company email -> don't push.
-    if (input.companyDomain) {
+    // Guard: never push a contact with a WRONG-company email (off-domain) — that
+    // mis-associates the contact in HubSpot. A MISSING email is fine: we create
+    // the contact by name and log a LinkedIn-connect task (see the task route /
+    // the client, which frames it accordingly).
+    if (input.companyDomain && input.email) {
       const compDom = rootDomain(input.companyDomain);
-      const emailDom = rootDomain(input.email?.split("@")[1]);
-      if (compDom && !input.email) {
-        return fail(
-          true,
-          `Not pushed: no company email surfaced for this contact — only contacts with a ${compDom} address are pushed, to keep HubSpot associations clean.`,
-        );
-      }
+      const emailDom = rootDomain(input.email.split("@")[1]);
       if (compDom && emailDom && emailDom !== compDom) {
         return fail(
           true,

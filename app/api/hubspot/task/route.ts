@@ -66,6 +66,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Only use a COMPANY-domain email. A personal/off-domain one (Apollo often
+  // returns these) would mis-associate the contact, so drop it — the push then
+  // proceeds as a LinkedIn-connect task with no email rather than being blocked.
+  if (body.kind === "contact" && email && body.companyDomain) {
+    const root = (d?: string) => {
+      if (!d) return "";
+      const p = d.toLowerCase().trim().replace(/^www\./, "").split(".").filter(Boolean);
+      return p.length <= 2 ? p.join(".") : p.slice(-2).join(".");
+    };
+    if (root(email.split("@")[1]) !== root(body.companyDomain)) email = undefined;
+  }
+
   const result = await hubspotCreateTask({
     kind: body.kind as HsKind,
     objectId: body.objectId,
