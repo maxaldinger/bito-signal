@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import { upsertDirectory } from "@/lib/supabase";
-import { FORTUNE_US_DIRECTORY } from "@/lib/fortune1000";
+import { DIRECTORY_SEED } from "@/lib/directorySeed";
 
-// Populate the Signal 2000 directory from the Fortune 1000 (US) seed — the
-// ~1,000 largest US companies across every sector (retail, energy, financials,
-// auto, healthcare, industrials — broad, not just tech), each with a domain,
-// sector brief, and modeled engineering headcount. Fast (no Apollo, no LLM):
-// just a chunked upsert. The full intel brief is generated on demand per company.
+// Populate the Signal 2000 directory from the static seed — the ~2,000 largest
+// US companies (Fortune 1000 by revenue + the largest by market cap), broad
+// across every sector. Fast (no Apollo, no LLM): just a chunked upsert. The
+// short brief and full intel are fetched on demand per company.
 //
 //   POST (or GET) /api/directory/populate
 export const maxDuration = 60;
 
 async function seed() {
-  const entries = FORTUNE_US_DIRECTORY;
+  const entries = DIRECTORY_SEED;
   let upserted = 0;
   const errors: string[] = [];
   for (let i = 0; i < entries.length; i += 500) {

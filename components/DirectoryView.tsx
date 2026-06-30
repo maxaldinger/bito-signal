@@ -26,10 +26,11 @@ const SORTS: { id: DirSort; label: string }[] = [
   { id: "az", label: "Company A → Z" },
 ];
 
-// A directory row renders through the SAME SignalCard as the feed. We give it a
-// real `description` (the pre-populated short brief) so the card never triggers
-// its lazy per-card blurb fetch, and an empty `title` (the company name shows on
-// the account button) so there's no duplicate headline.
+// A directory row renders through the SAME SignalCard as the feed. We leave the
+// `description` empty (and `title` empty) so the card lazily fetches the real
+// "what they do" company blurb on view — the exact same mechanism, endpoint, and
+// cross-device cache the signal feed already uses. The company name shows on the
+// account button, so there's no duplicate headline.
 function toSignal(e: DirectoryEntry): Signal {
   return {
     id: `dir-${e.companyKey}`,
@@ -38,10 +39,10 @@ function toSignal(e: DirectoryEntry): Signal {
     type: "icp",
     strength: e.strength,
     title: "",
-    description: e.shortBrief,
+    description: "",
     tags: e.employeeBand ? [e.employeeBand] : [],
     source: e.source,
-    url: e.linkedinUrl || e.websiteUrl,
+    url: e.websiteUrl || e.linkedinUrl,
     date: todayISO(),
     sweEstimate: e.sweEstimate,
   };
@@ -170,14 +171,14 @@ export function DirectoryView({
             <Building2 className="h-5 w-5 text-neon-400" /> Signal 2000
           </h2>
           <p className="mt-1 text-sm text-ink-300">
-            The ~1,000 largest US companies (Fortune 1000) across every sector — short brief
-            ready, full intel on demand. {entries ? `${entries.length.toLocaleString()} companies.` : ""}
+            The ~2,000 largest US companies across every sector — short brief on view,
+            full intel on demand. {entries ? `${entries.length.toLocaleString()} companies.` : ""}
           </p>
         </div>
         <button
           onClick={populate}
           disabled={populating}
-          title="Re-seed the directory from the Fortune 1000 (US) list"
+          title="Re-seed the directory from the largest-US-companies list"
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200 disabled:opacity-50"
         >
           {populating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
@@ -223,7 +224,7 @@ export function DirectoryView({
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
           <p className="text-sm text-ink-300">The directory is empty.</p>
           <p className="mt-1 text-xs text-ink-500">
-            Build it now — seeds the ~1,000 largest US companies (Fortune 1000) across every sector.
+            Build it now — seeds the ~2,000 largest US companies across every sector.
           </p>
           <button
             onClick={populate}
