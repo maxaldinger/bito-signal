@@ -10,6 +10,7 @@ import {
   ChevronDown,
   X,
   RotateCcw,
+  Building2,
   type LucideIcon,
 } from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
@@ -17,10 +18,11 @@ import type { SegmentId, SignalTypeId } from "@/lib/types";
 import { useFavorites, useProspectedCount, clearAllProspected } from "@/lib/clientStore";
 import { SegmentIcon } from "./SegmentIcon";
 
-export type TabId = "feed" | "favorites" | "assist";
+export type TabId = "feed" | "directory" | "favorites" | "assist";
 
 const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "feed", label: "Signal Feed", icon: Radio },
+  { id: "directory", label: "Signal 2000", icon: Building2 },
   { id: "favorites", label: "Signal favorites", icon: Star },
   { id: "assist", label: "Sales Assist", icon: Sparkles },
 ];

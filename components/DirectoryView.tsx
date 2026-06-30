@@ -1,0 +1,291 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  Search,
+  Building2,
+  Loader2,
+  DownloadCloud,
+  ArrowDownUp,
+  ChevronLeft,
+  ChevronRight,
+  AlertTriangle,
+  RefreshCw,
+} from "lucide-react";
+import type { DirectoryEntry, Signal, BriefState } from "@/lib/types";
+import { SignalCard } from "./SignalCard";
+import { IntelExpander } from "./IntelExpander";
+
+const PAGE_SIZE = 25;
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+type DirSort = "fit" | "size" | "az";
+const SORTS: { id: DirSort; label: string }[] = [
+  { id: "fit", label: "ICP fit (high → low)" },
+  { id: "size", label: "Eng team size (high → low)" },
+  { id: "az", label: "Company A → Z" },
+];
+
+// A directory row renders through the SAME SignalCard as the feed. We give it a
+// real `description` (the pre-populated short brief) so the card never triggers
+// its lazy per-card blurb fetch, and an empty `title` (the company name shows on
+// the account button) so there's no duplicate headline.
+function toSignal(e: DirectoryEntry): Signal {
+  return {
+    id: `dir-${e.companyKey}`,
+    account: e.company,
+    segment: e.segment,
+    type: "icp",
+    strength: e.strength,
+    title: "",
+    description: e.shortBrief,
+    tags: e.employeeBand ? [e.employeeBand] : [],
+    source: e.source,
+    url: e.linkedinUrl || e.websiteUrl,
+    date: todayISO(),
+    sweEstimate: e.sweEstimate,
+  };
+}
+
+export function DirectoryView({
+  briefs,
+  onSelectCompany,
+  onGetIntel,
+  onCloseIntel,
+  onRefreshIntel,
+}: {
+  briefs: Record<string, BriefState>;
+  onSelectCompany: (c: string) => void;
+  onGetIntel: (c: string) => void;
+  onCloseIntel: (company: string) => void;
+  onRefreshIntel: (company: string) => void;
+}) {
+  const [entries, setEntries] = useState<DirectoryEntry[] | null>(null);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<DirSort>("fit");
+  const [page, setPage] = useState(1);
+  const [populating, setPopulating] = useState(false);
+
+  const load = async () => {
+    setError("");
+    try {
+      const res = await fetch("/api/directory", { cache: "no-store" });
+      const data = (await res.json()) as { ok: boolean; error?: string; entries: DirectoryEntry[] };
+      if (data.ok) setEntries(data.entries);
+      else {
+        setEntries([]);
+        setError(data.error || "Could not load the directory.");
+      }
+    } catch {
+      setEntries([]);
+      setError("Network error loading the directory.");
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const populate = async () => {
+    if (populating) return;
+    setPopulating(true);
+    setError("");
+    try {
+      const res = await fetch("/api/directory/populate?pages=8", { method: "POST" });
+      const data = (await res.json()) as { ok: boolean; upserted?: number; errors?: string[] };
+      if (!data.ok && !(data.upserted && data.upserted > 0)) {
+        setError(data.errors?.[0] || "Populate failed — check the Apollo key / Supabase config.");
+      }
+      await load();
+    } catch {
+      setError("Populate request failed.");
+    } finally {
+      setPopulating(false);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    if (!entries) return [];
+    const q = query.trim().toLowerCase();
+    const list = q ? entries.filter((e) => e.company.toLowerCase().includes(q)) : entries;
+    const sorted = [...list];
+    if (sort === "fit") sorted.sort((a, b) => b.strength - a.strength);
+    else if (sort === "size") sorted.sort((a, b) => (b.sweEstimate ?? 0) - (a.sweEstimate ?? 0));
+    else sorted.sort((a, b) => a.company.localeCompare(b.company));
+    return sorted;
+  }, [entries, query, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const renderBrief = (company: string) => {
+    const b = briefs[company];
+    if (!b) return null;
+    return (
+      <IntelExpander
+        key={company}
+        company={company}
+        intel={b.intel}
+        loading={b.loading}
+        error={b.error}
+        onClose={() => onCloseIntel(company)}
+        onRetry={() => onGetIntel(company)}
+        onRefresh={() => onRefreshIntel(company)}
+      />
+    );
+  };
+  const toggleCompany = (account: string) =>
+    briefs[account] ? onCloseIntel(account) : onSelectCompany(account);
+
+  const Pager = () =>
+    totalPages <= 1 ? null : (
+      <div className="flex items-center gap-2 font-mono text-[11px] text-ink-400">
+        <button
+          onClick={() => setPage(safePage - 1)}
+          disabled={safePage <= 1}
+          className="inline-flex items-center gap-0.5 rounded border border-ink-700 px-2 py-1 text-ink-300 transition-colors hover:bg-ink-800 disabled:opacity-40"
+        >
+          <ChevronLeft className="h-3 w-3" /> Prev
+        </button>
+        <span>
+          pg <span className="font-semibold text-ink-100">{safePage}</span> / {totalPages}
+        </span>
+        <button
+          onClick={() => setPage(safePage + 1)}
+          disabled={safePage >= totalPages}
+          className="inline-flex items-center gap-0.5 rounded border border-ink-700 px-2 py-1 text-ink-300 transition-colors hover:bg-ink-800 disabled:opacity-40"
+        >
+          Next <ChevronRight className="h-3 w-3" />
+        </button>
+      </div>
+    );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-xl font-bold text-ink-50">
+            <Building2 className="h-5 w-5 text-neon-400" /> Signal 2000
+          </h2>
+          <p className="mt-1 text-sm text-ink-300">
+            A standing directory of large software-employing companies across every industry —
+            short brief ready, full intel on demand. {entries ? `${entries.length.toLocaleString()} companies.` : ""}
+          </p>
+        </div>
+        <button
+          onClick={populate}
+          disabled={populating}
+          title="Refresh the directory from Apollo (broad org sweep across all industries)"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200 disabled:opacity-50"
+        >
+          {populating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {populating ? "Building…" : "Refresh list"}
+        </button>
+      </div>
+
+      {/* Search */}
+      <div className="rounded-lg border border-ink-700 bg-ink-900 p-4">
+        <div className="flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-950 px-3.5 py-2.5">
+          <Search className="h-4 w-4 shrink-0 text-ink-400" />
+          <input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Filter the directory by company name…"
+            className="w-full bg-transparent font-mono text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none"
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <p className="min-w-0 flex-1 break-words text-xs leading-relaxed text-amber-200/90">{error}</p>
+        </div>
+      )}
+
+      {/* Loading */}
+      {entries === null ? (
+        <div className="space-y-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-ink-700 bg-ink-900 p-5">
+              <div className="skeleton mb-2 h-6 w-40 rounded" />
+              <div className="skeleton mb-2 h-4 w-3/4 rounded" />
+              <div className="skeleton h-4 w-1/2 rounded" />
+            </div>
+          ))}
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
+          <p className="text-sm text-ink-300">The directory is empty.</p>
+          <p className="mt-1 text-xs text-ink-500">
+            Build it now — a broad Apollo sweep across tech and traditional industries (~2,000 companies, about a minute).
+          </p>
+          <button
+            onClick={populate}
+            disabled={populating}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg border border-neon-600/50 bg-neon-500/15 px-5 py-2.5 text-sm font-semibold text-neon-300 shadow-glow-sm transition-all hover:bg-neon-500/25 disabled:opacity-50"
+          >
+            {populating ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
+            {populating ? "Building directory…" : "Build directory"}
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Pager />
+            <div className="flex min-w-0 items-center gap-2 sm:ml-auto">
+              <label className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-400">
+                <ArrowDownUp className="h-3.5 w-3.5" /> sort
+              </label>
+              <select
+                value={sort}
+                onChange={(e) => {
+                  setSort(e.target.value as DirSort);
+                  setPage(1);
+                }}
+                className="min-w-0 rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none"
+              >
+                {SORTS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {pageItems.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-10 text-center text-sm text-ink-400">
+              No companies match “{query}”.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {pageItems.map((e, i) => {
+                const s = toSignal(e);
+                return (
+                  <SignalCard
+                    key={s.id}
+                    signal={s}
+                    index={i}
+                    onSelect={toggleCompany}
+                    expanded={Boolean(briefs[s.account])}
+                    brief={renderBrief(s.account)}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex justify-center">
+            <Pager />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

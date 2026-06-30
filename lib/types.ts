@@ -71,6 +71,26 @@ export interface Signal {
   codebaseHint?: string;    // e.g. "monorepo, ~7M LoC across 40+ services"
 }
 
+// --------- Signal 2000 directory ---------
+// A standing, pre-populated list of ~2000 real companies (broad — not just
+// tech) the rep can prospect from immediately. The SHORT brief is filled at
+// populate time from Apollo (free short_description + modeled SWE); the FULL
+// intel brief is generated on demand, reusing the signal-feed deep-dive flow.
+export interface DirectoryEntry {
+  companyKey: string;       // normalized dedup key
+  company: string;
+  domain?: string;
+  segment: SegmentId;
+  sweEstimate?: number;     // modeled engineer headcount (rough, shown with "~")
+  shortBrief: string;       // pre-populated "what they do" (Apollo short_description)
+  employeeBand?: string;    // e.g. "5,000+ employees"
+  estimatedEmployees?: number;
+  websiteUrl?: string;
+  linkedinUrl?: string;
+  strength: number;         // 0-99 ICP-fit estimate (for sorting)
+  source: string;
+}
+
 // --------- ICP scoring ---------
 //
 // Surfaced both as a structured object (used in the brief) and as the

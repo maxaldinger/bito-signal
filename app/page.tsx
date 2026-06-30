@@ -5,6 +5,7 @@ import { Header } from "@/components/Header";
 import { Sidebar, type TabId } from "@/components/Sidebar";
 import { SignalFeed, type FeedSort } from "@/components/SignalFeed";
 import { FavoritesView } from "@/components/FavoritesView";
+import { DirectoryView } from "@/components/DirectoryView";
 import { SalesAssist } from "@/components/SalesAssist";
 import { PullControls } from "@/components/PullControls";
 import {
@@ -648,6 +649,14 @@ export default function Page() {
                 onRefreshIntel={(c) => getIntel(c, true)}
                 />
               </>
+            ) : tab === "directory" ? (
+              <DirectoryView
+                onSelectCompany={getIntel}
+                onGetIntel={getIntel}
+                briefs={briefs}
+                onCloseIntel={closeBrief}
+                onRefreshIntel={(c) => getIntel(c, true)}
+              />
             ) : tab === "favorites" ? (
               <FavoritesView
                 signals={signals}

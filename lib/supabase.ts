@@ -7,7 +7,7 @@
 // Unconfigured deployments degrade gracefully: callers get configured:false
 // and the feed falls back to ephemeral (scan-only) mode.
 
-import type { CompanyIntel, Signal, SegmentId, SignalTypeId } from "./types";
+import type { CompanyIntel, DirectoryEntry, Signal, SegmentId, SignalTypeId } from "./types";
 import type { RegionId } from "./data";
 
 const TIMEOUT_MS = 10_000;
@@ -328,6 +328,141 @@ export async function upsertState(
     return { ok: true };
   } catch (e) {
     return { ok: false, error: `Supabase state upsert failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Signal 2000 directory (public.bito_directory) — one row per company, the
+// standing prospecting universe. Short brief pre-populated; full brief on demand.
+// ---------------------------------------------------------------------------
+
+interface DirectoryRow {
+  company_key: string;
+  company: string;
+  domain: string | null;
+  segment: string | null;
+  swe_estimate: number | null;
+  short_brief: string | null;
+  employee_band: string | null;
+  estimated_employees: number | null;
+  website_url: string | null;
+  linkedin_url: string | null;
+  strength: number | null;
+  source: string | null;
+}
+
+function rowToDirectory(r: DirectoryRow): DirectoryEntry {
+  return {
+    companyKey: r.company_key,
+    company: r.company,
+    domain: r.domain ?? undefined,
+    segment: (r.segment as SegmentId) || "enterprise",
+    sweEstimate: r.swe_estimate ?? undefined,
+    shortBrief: r.short_brief ?? "",
+    employeeBand: r.employee_band ?? undefined,
+    estimatedEmployees: r.estimated_employees ?? undefined,
+    websiteUrl: r.website_url ?? undefined,
+    linkedinUrl: r.linkedin_url ?? undefined,
+    strength: r.strength ?? 0,
+    source: r.source ?? "directory",
+  };
+}
+
+/** Upsert directory rows, merging on company_key. Never throws. */
+export async function upsertDirectory(
+  entries: DirectoryEntry[],
+): Promise<{ ok: boolean; error?: string }> {
+  const cfg = config();
+  if (!cfg) return { ok: false, error: "Supabase not configured" };
+  if (entries.length === 0) return { ok: true };
+  const rows = entries.map((e) => ({
+    company_key: e.companyKey,
+    company: e.company,
+    domain: e.domain ?? null,
+    segment: e.segment,
+    swe_estimate: e.sweEstimate ?? null,
+    short_brief: e.shortBrief || null,
+    employee_band: e.employeeBand ?? null,
+    estimated_employees: e.estimatedEmployees ?? null,
+    website_url: e.websiteUrl ?? null,
+    linkedin_url: e.linkedinUrl ?? null,
+    strength: e.strength,
+    source: e.source,
+    last_seen_at: new Date().toISOString(),
+  }));
+  try {
+    const res = await fetch(`${cfg.url}/rest/v1/bito_directory?on_conflict=company_key`, {
+      method: "POST",
+      headers: {
+        apikey: cfg.key,
+        Authorization: `Bearer ${cfg.key}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(rows),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).slice(0, 200);
+      return { ok: false, error: `Supabase directory upsert ${res.status}: ${detail}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `Supabase directory upsert failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/** Fetch the whole directory (strongest-fit first), paged through PostgREST's
+ * ~1000-row cap up to `cap`. */
+export async function fetchDirectory(
+  cap = 2500,
+): Promise<{ configured: boolean; ok: boolean; error?: string; entries: DirectoryEntry[]; total: number }> {
+  const cfg = config();
+  if (!cfg) return { configured: false, ok: false, error: "Supabase not configured", entries: [], total: 0 };
+  const chunk = 1000;
+  const all: DirectoryEntry[] = [];
+  let total = 0;
+  try {
+    for (let offset = 0; offset < cap; offset += chunk) {
+      const res = await fetch(
+        `${cfg.url}/rest/v1/bito_directory?select=*&order=strength.desc,company.asc&limit=${chunk}&offset=${offset}`,
+        {
+          headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}`, Prefer: "count=exact" },
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+          cache: "no-store",
+        },
+      );
+      if (!res.ok) {
+        const detail = (await res.text().catch(() => "")).slice(0, 200);
+        return { configured: true, ok: false, error: `Supabase directory read ${res.status}: ${detail}`, entries: [], total: 0 };
+      }
+      const rows = (await res.json()) as DirectoryRow[];
+      const range = res.headers.get("content-range") ?? "";
+      total = Number(range.split("/")[1]) || total || all.length + rows.length;
+      all.push(...rows.map(rowToDirectory));
+      if (rows.length < chunk) break;
+    }
+    return { configured: true, ok: true, entries: all, total };
+  } catch (e) {
+    return { configured: true, ok: false, error: `Supabase directory read failed: ${e instanceof Error ? e.message : String(e)}`, entries: [], total: 0 };
+  }
+}
+
+/** Exact directory row count (for the empty-state / populate UI). */
+export async function countDirectory(): Promise<number> {
+  const cfg = config();
+  if (!cfg) return 0;
+  try {
+    const res = await fetch(`${cfg.url}/rest/v1/bito_directory?select=company_key&limit=1`, {
+      headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}`, Prefer: "count=exact" },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      cache: "no-store",
+    });
+    if (!res.ok) return 0;
+    const range = res.headers.get("content-range") ?? "";
+    return Number(range.split("/")[1]) || 0;
+  } catch {
+    return 0;
   }
 }
 
