@@ -15,16 +15,13 @@ import {
   Copy,
   Check,
   RefreshCw,
-  Boxes,
   Mail,
   Phone,
   Loader2,
+  Plus,
   type LucideIcon,
 } from "lucide-react";
 
-// Rendered verbatim whenever the Kubernetes bonus signal is detected.
-const K8S_NOTE =
-  "K8s shops typically run 10+ services across multiple repos — high probability of agent context failure without live knowledge graph. Strong Bito fit.";
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
@@ -64,6 +61,60 @@ const SEVERITY_STYLE: Record<string, string> = {
   MEDIUM: "bg-amber-500/15 text-amber-400",
   LOW: "bg-sky-500/15 text-sky-400",
 };
+
+// Pulls one heavy brief section on demand (keeps the default brief lean/cheap).
+function ExpandButton({
+  label,
+  section,
+  ctx,
+  onData,
+  subtle,
+}: {
+  label: string;
+  section: string;
+  ctx: { company: string; segment?: string; summary?: string };
+  onData: (data: Record<string, unknown>) => void;
+  subtle?: boolean;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const go = async () => {
+    if (loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/intel/expand", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...ctx, section }),
+      });
+      const d = await res.json();
+      if (d?.ok && d.data) onData(d.data);
+      else setError(d?.error || "Couldn't load that — try again.");
+    } catch {
+      setError("Network error — try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div>
+      <button
+        onClick={go}
+        disabled={loading}
+        className={`inline-flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-1.5 font-mono text-[11px] font-medium transition-colors disabled:opacity-60 ${
+          subtle
+            ? "border-ink-700 text-ink-400 hover:border-neon-600/40 hover:text-neon-300"
+            : "border-ink-600 text-ink-300 hover:border-neon-600/50 hover:text-neon-300"
+        }`}
+      >
+        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+        {loading ? "Pulling…" : label}
+      </button>
+      {error && <p className="mt-1.5 text-xs text-amber-400/90">{error}</p>}
+    </div>
+  );
+}
 
 const ICP_BARS: { key: keyof Pick<
   Intel["icp"],
@@ -692,6 +743,21 @@ export function CompanyIntel({
   const companyProspected = useIsProspected("company", intel.name);
   const companyProspectedAt = useProspectedAt("company", intel.name);
 
+  // On-demand sections: the brief now generates lean (summary / ICP / people /
+  // motion + outreach). These heavier sections are pulled only when expanded.
+  // Seed from the brief in case it already has them (older brief, or a prior
+  // expand that persisted to the cache).
+  const [whyBito, setWhyBito] = useState<string[]>(intel.whyBito ?? []);
+  const [painPoints, setPainPoints] = useState(intel.painPoints ?? []);
+  const [tokenCost, setTokenCost] = useState(
+    intel.tokenCost && intel.tokenCost.estimatedMonthlyUsd > 0 ? intel.tokenCost : null,
+  );
+  const [motionDetail, setMotionDetail] = useState({
+    reasoning: intel.motion.reasoning ?? "",
+    watchOuts: intel.motion.watchOuts ?? [],
+  });
+  const expandCtx = { company: intel.name, segment: intel.segment?.label, summary: intel.summary };
+
   // Cache this brief's authoritative ICP total so the signal cards can show it
   // instead of their rougher per-signal estimate.
   useEffect(() => {
@@ -833,18 +899,27 @@ export function CompanyIntel({
           </div>
         )}
         <p className="text-sm leading-relaxed text-ink-200">{intel.summary}</p>
-        {intel.whyBito.length > 0 && (
-          <ol className="mt-4 space-y-3 border-t border-ink-700 pt-4">
-            {intel.whyBito.map((reason, i) => (
-              <li key={i} className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neon-600/30 bg-neon-500/10 font-mono text-xs font-semibold text-neon-300">
-                  {i + 1}
-                </span>
-                <p className="text-sm leading-relaxed text-ink-300">{reason}</p>
-              </li>
-            ))}
-          </ol>
-        )}
+        <div className="mt-4 border-t border-ink-700 pt-4">
+          {whyBito.length > 0 ? (
+            <ol className="space-y-3">
+              {whyBito.map((reason, i) => (
+                <li key={i} className="flex gap-3">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-neon-600/30 bg-neon-500/10 font-mono text-xs font-semibold text-neon-300">
+                    {i + 1}
+                  </span>
+                  <p className="text-sm leading-relaxed text-ink-300">{reason}</p>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <ExpandButton
+              label="Why Bito — pull the fit reasons"
+              section="whyBito"
+              ctx={expandCtx}
+              onData={(d) => setWhyBito((d.whyBito as string[]) ?? [])}
+            />
+          )}
+        </div>
       </Section>
 
       {/* ICP score breakdown — the quantified score behind the summary. */}
@@ -869,27 +944,6 @@ export function CompanyIntel({
             );
           })}
         </div>
-        {intel.icp.kubernetes?.detected && (
-          <div className="mt-4 rounded-lg border border-sky-500/30 bg-sky-500/10 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="flex items-center gap-2 font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-sky-400">
-                <Boxes className="h-4 w-4" />
-                Kubernetes / Distributed Systems
-              </span>
-              <span className="rounded border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 font-mono text-xs font-bold text-sky-400">
-                +{intel.icp.kubernetes.bonus} ICP bonus
-              </span>
-            </div>
-            {intel.icp.kubernetes.evidence && (
-              <p className="mt-2 font-mono text-xs leading-relaxed text-ink-300">
-                evidence: {intel.icp.kubernetes.evidence}
-              </p>
-            )}
-            <p className="mt-2 border-t border-sky-500/20 pt-2 text-xs leading-relaxed text-ink-300">
-              {K8S_NOTE}
-            </p>
-          </div>
-        )}
       </Section>
 
       {/* Stakeholder map — real people, live from Apollo people search */}
@@ -916,7 +970,6 @@ export function CompanyIntel({
           <MotionBadge motion={intel.motion.primary} />
           <p className="text-sm text-ink-400">recommended GTM motion for this account</p>
         </div>
-        <p className="mt-3 text-sm leading-relaxed text-ink-300">{intel.motion.reasoning}</p>
         {intel.motion.firstMove && (
           <p className="mt-3 rounded-lg border border-ink-700 bg-ink-950/60 p-3 text-sm leading-relaxed text-ink-200">
             <span className="font-mono text-xs font-bold uppercase tracking-wider text-violet-400">
@@ -925,15 +978,36 @@ export function CompanyIntel({
             {intel.motion.firstMove}
           </p>
         )}
-        {intel.motion.watchOuts.length > 0 && (
-          <ul className="mt-3 space-y-1.5 text-xs text-ink-400">
-            {intel.motion.watchOuts.map((w, i) => (
-              <li key={i} className="flex gap-2">
-                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400/70" />
-                {w}
-              </li>
-            ))}
-          </ul>
+        {/* Deeper motion analysis — pulled on demand to keep the brief lean. */}
+        {motionDetail.reasoning ? (
+          <>
+            <p className="mt-3 text-sm leading-relaxed text-ink-300">{motionDetail.reasoning}</p>
+            {motionDetail.watchOuts.length > 0 && (
+              <ul className="mt-3 space-y-1.5 text-xs text-ink-400">
+                {motionDetail.watchOuts.map((w, i) => (
+                  <li key={i} className="flex gap-2">
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-400/70" />
+                    {w}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : (
+          <div className="mt-3">
+            <ExpandButton
+              label="Expand analysis — why this motion + watch-outs"
+              section="motionDetail"
+              ctx={expandCtx}
+              subtle
+              onData={(d) =>
+                setMotionDetail({
+                  reasoning: String(d.reasoning ?? ""),
+                  watchOuts: (d.watchOuts as string[]) ?? [],
+                })
+              }
+            />
+          </div>
         )}
 
         {/* Outreach angle */}
@@ -974,50 +1048,57 @@ export function CompanyIntel({
         </div>
       </Section>
 
-      {/* Token cost exposure */}
+      {/* Token cost exposure — pulled on demand */}
       <Section title="estimated token cost exposure" icon={Coins} iconColor="text-amber-400">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="rounded-lg border border-ink-700 bg-ink-950/60 p-4">
-            <p className="font-mono text-[10px] uppercase tracking-wider text-ink-400">est. monthly spend</p>
-            <p className="mt-1 font-mono text-2xl font-bold text-amber-400">
-              {intel.tokenCost.estimatedMonthlyUsd > 0
-                ? fmtUSD(intel.tokenCost.estimatedMonthlyUsd)
-                : "—"}
-            </p>
-          </div>
-          <div className="rounded-lg border border-ink-700 bg-ink-950/60 p-4">
-            <p className="font-mono text-[10px] uppercase tracking-wider text-ink-400">est. ai-tool seats</p>
-            <p className="mt-1 font-mono text-2xl font-bold text-ink-100">
-              {intel.tokenCost.estimatedSeats > 0
-                ? fmtNum(intel.tokenCost.estimatedSeats)
-                : "—"}
-            </p>
-          </div>
-          <div className="rounded-lg border border-ink-700 bg-ink-950/60 p-4">
-            <p className="font-mono text-[10px] uppercase tracking-wider text-ink-400">per seat / mo</p>
-            <p className="mt-1 font-mono text-2xl font-bold text-ink-100">
-              {intel.tokenCost.perSeatUsd > 0 ? fmtUSD(intel.tokenCost.perSeatUsd) : "—"}
-            </p>
-          </div>
-          <div className="rounded-lg border border-neon-600/30 bg-neon-500/5 p-4">
-            <p className="font-mono text-[10px] uppercase tracking-wider text-neon-400/80">bito offset potential</p>
-            <p className="mt-1 font-mono text-2xl font-bold text-neon-300">
-              {intel.tokenCost.bitoOffsetUsd ? fmtUSD(intel.tokenCost.bitoOffsetUsd) : "—"}
-            </p>
-          </div>
-        </div>
-        {intel.tokenCost.notes && (
-          <p className="mt-3 text-xs italic leading-relaxed text-ink-500">
-            Estimate, not fact — assumptions: {intel.tokenCost.notes}
-          </p>
+        {tokenCost ? (
+          <>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div className="rounded-lg border border-ink-700 bg-ink-950/60 p-4">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-ink-400">est. monthly spend</p>
+                <p className="mt-1 font-mono text-2xl font-bold text-amber-400">
+                  {tokenCost.estimatedMonthlyUsd > 0 ? fmtUSD(tokenCost.estimatedMonthlyUsd) : "—"}
+                </p>
+              </div>
+              <div className="rounded-lg border border-ink-700 bg-ink-950/60 p-4">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-ink-400">est. ai-tool seats</p>
+                <p className="mt-1 font-mono text-2xl font-bold text-ink-100">
+                  {tokenCost.estimatedSeats > 0 ? fmtNum(tokenCost.estimatedSeats) : "—"}
+                </p>
+              </div>
+              <div className="rounded-lg border border-ink-700 bg-ink-950/60 p-4">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-ink-400">per seat / mo</p>
+                <p className="mt-1 font-mono text-2xl font-bold text-ink-100">
+                  {tokenCost.perSeatUsd > 0 ? fmtUSD(tokenCost.perSeatUsd) : "—"}
+                </p>
+              </div>
+              <div className="rounded-lg border border-neon-600/30 bg-neon-500/5 p-4">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-neon-400/80">bito offset potential</p>
+                <p className="mt-1 font-mono text-2xl font-bold text-neon-300">
+                  {tokenCost.bitoOffsetUsd ? fmtUSD(tokenCost.bitoOffsetUsd) : "—"}
+                </p>
+              </div>
+            </div>
+            {tokenCost.notes && (
+              <p className="mt-3 text-xs italic leading-relaxed text-ink-500">
+                Estimate, not fact — assumptions: {tokenCost.notes}
+              </p>
+            )}
+          </>
+        ) : (
+          <ExpandButton
+            label="Estimate token-cost exposure"
+            section="tokenCost"
+            ctx={expandCtx}
+            onData={(d) => setTokenCost((d.tokenCost as typeof tokenCost) ?? null)}
+          />
         )}
       </Section>
 
-      {/* Pain points */}
-      {intel.painPoints.length > 0 && (
-        <Section title="likely pain points" icon={AlertTriangle} iconColor="text-amber-400">
+      {/* Pain points — pulled on demand */}
+      <Section title="likely pain points" icon={AlertTriangle} iconColor="text-amber-400">
+        {painPoints.length > 0 ? (
           <div className="space-y-4">
-            {intel.painPoints.map((p, i) => (
+            {painPoints.map((p, i) => (
               <div key={i} className="border-l-2 border-neon-600/40 pl-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold text-ink-100">{p.title}</h4>
@@ -1042,8 +1123,15 @@ export function CompanyIntel({
               </div>
             ))}
           </div>
-        </Section>
-      )}
+        ) : (
+          <ExpandButton
+            label="Pull likely pain points"
+            section="painPoints"
+            ctx={expandCtx}
+            onData={(d) => setPainPoints((d.painPoints as typeof painPoints) ?? [])}
+          />
+        )}
+      </Section>
 
     </div>
   );

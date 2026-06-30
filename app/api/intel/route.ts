@@ -44,7 +44,7 @@ const VALID_STAKEHOLDER_TYPES: Stakeholder["type"][] = [
 
 const SYSTEM = `${BITO_CONTEXT}
 
-You are Bito's senior GTM analyst. Given a target company, research it on the live web and produce a complete, evidence-grounded sales intel brief.
+You are Bito's senior GTM analyst. Given a target company, research it on the live web and produce a TIGHT, evidence-grounded sales intel brief — only the fields in the schema below, no extra sections.
 
 Research checklist (use web_search for each):
 1. What the company does, HQ, headcount band, engineering headcount estimate (LinkedIn pages, about pages, recent press).
@@ -53,15 +53,9 @@ Research checklist (use web_search for each):
 4. Named engineering leaders where public (CTO, VP Eng, Head of Platform/DevEx, staff engineers who write/talk publicly).
 5. Kubernetes / distributed-systems evidence: job postings mentioning "Kubernetes" or "K8s"; Platform Engineer / SRE / DevOps roles listing K8s as a requirement; GitHub repos containing Helm charts or k8s manifests; tech-blog content referencing Kubernetes or microservices architecture.
 
-Scoring: ICP sub-scores are each 0-20 (sweHeadcount, codebaseComplexity, multiRepo, scalingActivity, aiToolingSpend). The "kubernetes" block is a BONUS signal on top: when you find concrete K8s/distributed-systems evidence (checklist item 5), set detected=true, quote the specific evidence, and award a bonus of +4 (indirect, e.g. one blog mention) to +10 (direct, e.g. multiple K8s-required roles or Helm charts in public repos). K8s shops typically run 10+ services across multiple repos — a strong Bito fit signal. total = the five sub-scores + kubernetes bonus, capped at 99, and must be consistent. Score honestly — a 2,000-engineer giant or a 10-person startup scores LOW on sweHeadcount; set detected=false with bonus 0 when there is no real K8s evidence.
+Scoring: ICP sub-scores are each 0-20 (sweHeadcount, codebaseComplexity, multiRepo, scalingActivity, aiToolingSpend). The "kubernetes" block is a SILENT BONUS folded into the score (never surfaced to the user): when you find concrete K8s/distributed-systems evidence (checklist item 5), set detected=true, quote the specific evidence, and award a bonus of +4 (indirect, e.g. one blog mention) to +10 (direct, e.g. multiple K8s-required roles or Helm charts in public repos). total = the five sub-scores + kubernetes bonus, capped at 99, and must be consistent. Score honestly — a 2,000-engineer giant or a 10-person startup scores LOW on sweHeadcount; set detected=false with bonus 0 when there is no real K8s evidence.
 
-Token cost exposure: estimate what the company likely spends per month on AI dev tooling using REAL public anchors (e.g. Copilot Business ~$19/seat/mo, Copilot Enterprise ~$39/seat/mo, Cursor Business ~$40/seat/mo) times your evidenced engineering-seat estimate. State every assumption in "notes". These are estimates — never present them as fact.
-
-Onboarding friction score (0-99, higher = harder to onboard onto Bito): consider repo host (GitHub/GitLab/Bitbucket = low), monorepo size, custom CI, security review requirements (fintech/enterprise = higher), self-hosted needs.
-
-Motion: pick exactly one of PLG, Top-Down, Champion-Led, Land-and-Expand and justify from the evidence (e.g. bottoms-up dev culture => PLG; strict procurement => Top-Down).
-
-Stakeholder map: 4-7 entries. Each is typed: "feels-pain" (lives the cross-repo context, AI-code, and review pain), "signs" (owns budget/signature), "champion" (would internally sell), "blocker" (could veto — security, procurement), "influencer". Use real names ONLY when you found them in public sources; otherwise describe the role.
+Motion: pick exactly one of PLG, Top-Down, Champion-Led, Land-and-Expand from the evidence (bottoms-up dev culture => PLG; strict procurement => Top-Down). Give ONE concrete firstMove (the specific first action to take) and name the key contact (real full name) it targets if found in public sources.
 
 Outreach angle: one concrete angle tied to a specific live signal you found, with a 3-5 line draft message a rep could send today.
 
@@ -90,19 +84,7 @@ Output ONLY one JSON object — no prose, no code fences:
   },
   "summary": "2-4 sentence executive summary grounded in findings",
   "callHook": "ONE glanceable sentence a rep can drop in a call — the single most valuable, specific signal you found (a number, event, or quote), not generic. e.g. 'Shipping 1,300+ PRs/day and accepting 20K lines of Copilot code daily — review is now the bottleneck.'",
-  "whyBito": ["evidence-tied reason", "...", "..."],
-  "stakeholders": [
-    { "role": "VP Engineering", "name": "real name or omit", "type": "feels-pain|signs|champion|blocker|influencer", "rationale": "why they map to this type", "outreachHook": "one line tailored to them", "linkedinQuery": "search string" }
-  ],
-  "painPoints": [
-    { "title": "", "severity": "HIGH|MEDIUM|LOW", "category": "", "evidence": "specific fact/quote you found", "bitoSolution": "how Bito addresses it" }
-  ],
-  "competitors": [
-    { "name": "", "category": "", "weakness": "", "bitoAdvantage": "", "pitch": "one-liner the rep can say" }
-  ],
-  "motion": { "primary": "PLG|Top-Down|Champion-Led|Land-and-Expand", "reasoning": "", "firstMove": "concrete first action", "watchOuts": ["", ""], "keyContactName": "the specific person the first move targets (real full name) or null if generic", "keyContactTitle": "that person's title or null" },
-  "tokenCost": { "estimatedMonthlyUsd": number, "estimatedSeats": number, "perSeatUsd": number, "notes": "assumptions, anchors used", "bitoOffsetUsd": number or null },
-  "onboarding": { "score": 0-99, "level": "Low|Medium|High", "drivers": ["", ""], "mitigations": ["", ""] },
+  "motion": { "primary": "PLG|Top-Down|Champion-Led|Land-and-Expand", "firstMove": "concrete first action", "keyContactName": "the specific person the first move targets (real full name) or null if generic", "keyContactTitle": "that person's title or null" },
   "outreach": { "hook": "", "channel": "Email|LinkedIn|Engineering Community|Warm Intro", "proof": "the specific signal behind the hook", "draftMessage": "3-5 lines" },
   "citations": [ { "title": "", "source": "publisher", "url": "https://...", "date": "YYYY-MM-DD or omit", "kind": "hiring|oss|ma|funding|ai|news|other" } ]
 }`;
@@ -180,9 +162,9 @@ export async function GET(req: NextRequest) {
   try {
     const result = await callClaudeWithWebSearch({
       system: SYSTEM,
-      user: `Research "${company}" and produce the full Bito intel brief JSON. Today's date: ${new Date().toISOString().slice(0, 10)}.`,
-      maxSearches: 8,
-      maxTokens: 8000,
+      user: `Research "${company}" and produce the lean Bito intel brief JSON. Today's date: ${new Date().toISOString().slice(0, 10)}.`,
+      maxSearches: 6,
+      maxTokens: 4500,
       temperature: 0.3,
     });
 
