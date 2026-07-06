@@ -1304,6 +1304,20 @@ const fitKey = (f: string) =>
       ? "under-scoped"
       : "adequate";
 
+// Speech-to-text in meeting notes routinely mishears "Claude Code" (Anthropic's
+// coding agent) as "Cloud Code"; the model then carries it into the plan. Fix it
+// across every string field before rendering/exporting.
+function fixProductNames<T>(v: T): T {
+  if (typeof v === "string") return v.replace(/\bcloud code\b/gi, "Claude Code") as unknown as T;
+  if (Array.isArray(v)) return v.map(fixProductNames) as unknown as T;
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) out[k] = fixProductNames(x);
+    return out as T;
+  }
+  return v;
+}
+
 function PocTool({ ctx }: { ctx: Ctx }) {
   const [notes, setNotes] = useState("");
   const [plan, setPlan] = useState<PocPlan | null>(null);
@@ -1323,7 +1337,7 @@ function PocTool({ ctx }: { ctx: Ctx }) {
     setLoading(false);
     if (data.data?.successLooksLike) {
       const company = String(data.data.company || "").trim() || "Your prospect";
-      setPlan({ ...data.data, company } as PocPlan);
+      setPlan(fixProductNames({ ...data.data, company }) as PocPlan);
       if (data.truncated)
         setError("Heads up: the plan may have been cut off by the token limit — regenerate if a section looks short.");
     } else setError(data.error || "Could not generate the plan.");
@@ -1473,6 +1487,12 @@ function PocPreview({ plan, onChange }: { plan: PocPlan; onChange: (p: PocPlan) 
     const idx = FIT_CYCLE.indexOf(fk as (typeof FIT_CYCLE)[number]);
     setThStr("fit", FIT_CYCLE[(idx + 1) % FIT_CYCLE.length]);
   };
+  const setRole = (list: "customer" | "bito", i: number, v: string) =>
+    patch({ roles: { ...plan.roles, [list]: (plan.roles?.[list] ?? []).map((x, idx) => (idx === i ? v : x)) } });
+  const setChecklist = (i: number, v: string) =>
+    patch({ checklist: (plan.checklist ?? []).map((x, idx) => (idx === i ? v : x)) });
+  const setNextStep = (i: number, v: string) =>
+    patch({ nextSteps: (plan.nextSteps ?? []).map((x, idx) => (idx === i ? v : x)) });
 
   return (
     <div className="mt-6 space-y-6 rounded-2xl border border-ink-700 bg-ink-900 p-6">
@@ -1619,6 +1639,32 @@ function PocPreview({ plan, onChange }: { plan: PocPlan; onChange: (p: PocPlan) 
           <div className="mt-2 border-t border-ink-700 pt-2">
             <PocEdit value={plan.roi?.yourVersion ?? ""} onChange={(v) => setRoi("yourVersion", v)} className="text-sm text-ink-400" />
           </div>
+        </div>
+      </PocSection>
+
+      <PocSection title="Roles, checklist & next steps">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="rounded-xl border border-ink-700 bg-ink-950 p-3">
+            <p className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-500">roles &amp; ownership</p>
+            {(plan.roles?.customer ?? []).map((r, i) => (
+              <PocEdit key={`c${i}`} value={r} onChange={(v) => setRole("customer", i, v)} className="text-sm text-ink-300" />
+            ))}
+            {(plan.roles?.bito ?? []).map((r, i) => (
+              <PocEdit key={`b${i}`} value={r} onChange={(v) => setRole("bito", i, v)} className="text-sm text-ink-300" />
+            ))}
+          </div>
+          <div className="rounded-xl border border-ink-700 bg-ink-950 p-3">
+            <p className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-500">pre-trial checklist</p>
+            {(plan.checklist ?? []).map((c, i) => (
+              <PocEdit key={i} value={c} onChange={(v) => setChecklist(i, v)} className="text-sm text-ink-300" />
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 rounded-xl border border-ink-700 bg-ink-950 p-3">
+          <p className="mb-1.5 font-mono text-[10px] font-bold uppercase tracking-wide text-ink-500">next steps</p>
+          {(plan.nextSteps ?? []).map((n, i) => (
+            <PocEdit key={i} value={n} onChange={(v) => setNextStep(i, v)} className="text-sm text-ink-300" />
+          ))}
         </div>
       </PocSection>
     </div>
