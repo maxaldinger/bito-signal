@@ -1304,11 +1304,22 @@ const fitKey = (f: string) =>
       ? "under-scoped"
       : "adequate";
 
-// Speech-to-text in meeting notes routinely mishears "Claude Code" (Anthropic's
-// coding agent) as "Cloud Code"; the model then carries it into the plan. Fix it
-// across every string field before rendering/exporting.
+// Speech-to-text meeting notes routinely garble product names ("Cloud Code" for
+// Claude Code, "LightLM" for LiteLLM, "Vortex" for Vertex AI); the model can
+// carry them into the plan. Normalize across every string field before
+// rendering/exporting — a safety net behind the prompt's canonical-name rule.
+const NAME_FIXES: [RegExp, string][] = [
+  [/\bcloud code\b/gi, "Claude Code"],
+  [/\blite ?llm\b/gi, "LiteLLM"],
+  [/\blight ?lm\b/gi, "LiteLLM"],
+  [/\bvortex\b/gi, "Vertex AI"],
+];
 function fixProductNames<T>(v: T): T {
-  if (typeof v === "string") return v.replace(/\bcloud code\b/gi, "Claude Code") as unknown as T;
+  if (typeof v === "string") {
+    let s: string = v;
+    for (const [re, to] of NAME_FIXES) s = s.replace(re, to);
+    return s as unknown as T;
+  }
   if (Array.isArray(v)) return v.map(fixProductNames) as unknown as T;
   if (v && typeof v === "object") {
     const out: Record<string, unknown> = {};
