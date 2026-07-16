@@ -299,6 +299,31 @@ async function patchObject(
   }
 }
 
+// Pin an engagement to a record's timeline ONLY when the record has no pinned
+// activity yet — an existing pin is a deliberate choice we never overwrite.
+// Best-effort: if the current pin can't be read, skip rather than risk clobbering.
+async function pinIfUnpinned(
+  objType: "companies" | "contacts",
+  id: string,
+  engagementId: string,
+  key: string
+): Promise<void> {
+  try {
+    const { status, body } = await hsFetch(
+      `/crm/v3/objects/${objType}/${id}?properties=hs_pinned_engagement_id`,
+      { method: "GET" },
+      key
+    );
+    if (status !== 200) return;
+    const current = (body as { properties?: { hs_pinned_engagement_id?: string | null } } | undefined)
+      ?.properties?.hs_pinned_engagement_id;
+    if (current) return; // something is already pinned — leave it alone
+    await patchObject(objType, id, { hs_pinned_engagement_id: engagementId }, key);
+  } catch {
+    /* non-fatal — the task itself already landed */
+  }
+}
+
 async function associateDefault(
   fromType: string,
   fromId: string,
@@ -525,18 +550,14 @@ export async function hubspotCreateTask(input: {
     key,
   );
 
-  // Pin the task to the top of each linked record's timeline (best-effort).
-  // HubSpot allows ONE pinned activity per record, so the newest push wins —
-  // the record always leads with the freshest signal context.
+  // Pin the task to the top of each linked record's timeline (best-effort) —
+  // but ONLY if the record has nothing pinned yet. HubSpot allows one pinned
+  // activity per record, and an existing pin (manual or from a prior push) is
+  // someone's deliberate choice — never overwrite it.
   if (taskId) {
     await Promise.all(
       taskAssociations.map((a) =>
-        patchObject(
-          a.typeId === TASK_TO_COMPANY ? "companies" : "contacts",
-          a.id,
-          { hs_pinned_engagement_id: taskId },
-          key,
-        ),
+        pinIfUnpinned(a.typeId === TASK_TO_COMPANY ? "companies" : "contacts", a.id, taskId, key),
       ),
     );
   }
