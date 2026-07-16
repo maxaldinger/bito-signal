@@ -525,6 +525,22 @@ export async function hubspotCreateTask(input: {
     key,
   );
 
+  // Pin the task to the top of each linked record's timeline (best-effort).
+  // HubSpot allows ONE pinned activity per record, so the newest push wins —
+  // the record always leads with the freshest signal context.
+  if (taskId) {
+    await Promise.all(
+      taskAssociations.map((a) =>
+        patchObject(
+          a.typeId === TASK_TO_COMPANY ? "companies" : "contacts",
+          a.id,
+          { hs_pinned_engagement_id: taskId },
+          key,
+        ),
+      ),
+    );
+  }
+
   return {
     configured: true,
     ok: true,
