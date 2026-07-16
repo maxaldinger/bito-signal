@@ -471,7 +471,7 @@ function ApolloPersonCard({
             </p>
           ) : emailChecked ? (
             <p className="flex items-center gap-1.5 text-ink-500">
-              <Mail className="h-3 w-3" /> No email — push logs a LinkedIn connect
+              <Mail className="h-3 w-3" /> No company email surfaced
             </p>
           ) : null}
           {phoneRes?.ok && phoneRes.phone && (
@@ -498,7 +498,7 @@ function ApolloPersonCard({
           compact
           autoCheck
           autoCheckDelayMs={autoCheckDelayMs}
-          defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}${companyEmail ? "" : " - LinkedIn connect"}`}
+          defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}`}
           defaultBody={
             // LinkedIn-workflow note: COMPANY → WHAT I SAW → PROFILE → LINKEDIN
             // OUTREACH (3 numbered). No WHO (the task's contact record carries

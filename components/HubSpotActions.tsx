@@ -198,23 +198,18 @@ export function HubSpotActions({
             domainMismatch
               ? `${email} isn't on the company domain — pushing would mis-associate this contact`
               : noCompanyEmail
-                ? `No email found — creates the contact and logs a LinkedIn-connect task`
+                ? `No email found — the contact is created by name`
                 : `Create a HubSpot task for this ${kind} with the signal context`
           }
           className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
         >
           <CalendarPlus className="h-3 w-3" />
-          {noCompanyEmail ? "LinkedIn task" : "HubSpot task"}
+          HubSpot task
         </button>
 
         {domainMismatch && (
           <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-400/90">
             email domain ≠ company
-          </span>
-        )}
-        {noCompanyEmail && !domainMismatch && (
-          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-500">
-            no email — LinkedIn connect
           </span>
         )}
 
