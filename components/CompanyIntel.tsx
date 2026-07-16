@@ -175,9 +175,9 @@ interface ContactTaskContext {
   companyLine: string;
   /** The single most valuable signal as one glanceable sentence — "what I saw". */
   callHook: string;
-  /** What the signal was — the synthesized exec summary. */
-  signal: string;
-  /** Suggested outreach to fall back on when no per-person draft exists. */
+  /** The 3 LinkedIn-native messages (connect / DM / re-surface), when the brief has them. */
+  linkedin?: { connect: string; dm: string; resurface: string };
+  /** Legacy single outreach draft — fallback for briefs cached before linkedinOutreach. */
   outreach: string;
 }
 
@@ -500,15 +500,20 @@ function ApolloPersonCard({
           autoCheckDelayMs={autoCheckDelayMs}
           defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}${companyEmail ? "" : " - LinkedIn connect"}`}
           defaultBody={
-            `WHO: ${displayName}${person.title ? ` — ${person.title}` : ""}` +
-            `${person.seniority ? ` (${person.seniority.replace(/_/g, " ")})` : ""} at ${company}\n` +
-            `${companyEmail ? `Email: ${companyEmail}\n` : `LinkedIn: ${linkedinHref}\n`}` +
-            `${phoneRes?.ok && phoneRes.phone ? `Phone: ${phoneRes.phone}\n` : ""}` +
-            `\nCOMPANY: ${ctx.companyLine}\n` +
+            // LinkedIn-workflow note: COMPANY → WHAT I SAW → PROFILE → LINKEDIN
+            // OUTREACH (3 numbered). No WHO (the task's contact record carries
+            // it natively) and no SIGNAL (redundant with WHAT I SAW). No
+            // cadence-tracking text — Max schedules follow-ups himself.
+            `COMPANY: ${ctx.companyLine}\n` +
             `${ctx.callHook ? `\nWHAT I SAW: ${ctx.callHook}\n` : ""}` +
-            `\nSIGNAL: ${ctx.signal}\n` +
-            `\nSUGGESTED OUTREACH:\n${draft?.text || ctx.outreach || "—"}` +
-            `${companyEmail ? "" : `\n\nACTION: No email found — connect with ${displayName.split(" ")[0]} on LinkedIn (${linkedinHref}) and open with the angle above.`}`
+            `\nPROFILE: ${linkedinHref}\n` +
+            `\nLINKEDIN OUTREACH:\n` +
+            (ctx.linkedin
+              ? `1. ${stripEmDashes(ctx.linkedin.connect)}\n\n` +
+                `2. ${stripEmDashes(ctx.linkedin.dm)}\n\n` +
+                `3. ${stripEmDashes(ctx.linkedin.resurface)}`
+              : `${draft?.text || ctx.outreach || "—"}\n\n` +
+                `(Update the brief to generate the 3-message LinkedIn set.)`)
           }
         />
       </div>
@@ -776,7 +781,7 @@ export function CompanyIntel({
       `${intel.sweEstimate ? `, ~${fmtNum(intel.sweEstimate)} SWEs` : ""}` +
       `. ICP fit ${intel.icp.total}/99.${intel.oneLiner ? ` ${intel.oneLiner}` : ""}`,
     callHook: intel.callHook,
-    signal: intel.summary,
+    linkedin: intel.linkedinOutreach,
     outreach: stripEmDashes(intel.outreach.draftMessage || intel.outreach.hook || ""),
   };
 
