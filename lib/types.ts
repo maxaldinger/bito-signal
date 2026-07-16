@@ -209,7 +209,7 @@ export interface CompanyIntel {
    * after connect / light re-surface), generated in Max's voice with hard
    * character caps. Optional — briefs cached before this field lack it. */
   linkedinOutreach?: {
-    connect: string;           // ≤200 chars — earn the accept, no pitch/stats/links
+    connect: string;           // ≤300 chars — earn the accept, no pitch/stats/links
     dm: string;                // 400-600 chars — observation + mechanism + plain close
     resurface: string;         // 200-350 chars — soft re-surface, not a re-pitch
   };

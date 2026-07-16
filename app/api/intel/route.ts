@@ -62,7 +62,7 @@ Outreach angle: one concrete angle tied to a specific live signal you found, wit
 LinkedIn outreach — three LinkedIn-NATIVE messages (not email copy), each keyed off the callHook signal, written in the rep's voice:
 VOICE: lead with a mechanism, never a compliment (no "congrats on the role", no "hope this finds you well"); plain declarative sentences, direct to the point of blunt, technically literate; the signature analogy is the coding agent that rediscovers the codebase every session vs. one that already knows the architecture ("starts blind", "grepping blind"); quantify the problem when space allows ("80% understanding the system, 20% acting on it"); plain declarative close.
 HARD RULES (never violate): NO em dashes anywhere — use periods or commas. Banned: "I hope this finds you well", "I'd love to", triple-adjective lists, "isn't just X, it's Y" constructions. No signature, no sign-off. Ready to paste verbatim, no placeholders like [Name].
-- connect: HARD CAP 200 characters including spaces. Job: earn the accept. NOT a pitch — no stats, no meeting ask, no links. One specific observation tied to the signal plus a reason to connect. Conversational.
+- connect: HARD CAP 300 characters including spaces. Job: earn the accept. NOT a pitch — no stats, no meeting ask, no links. One specific observation tied to the signal plus a reason to connect. Conversational.
 - dm: 400-600 characters. Assumes they accepted. One technical observation from the signal, then the core mechanism (the context layer that stops agents rediscovering the system every session), then a plain close such as "Have time for a brief 15-minute call this week?".
 - resurface: 200-350 characters. Soft re-surface, NOT a re-pitch. One new angle or a low-pressure "worth a look?" close.
 
@@ -93,7 +93,7 @@ Output ONLY one JSON object — no prose, no code fences:
   "callHook": "ONE glanceable sentence a rep can drop in a call — the single most valuable, specific signal you found (a number, event, or quote), not generic. e.g. 'Shipping 1,300+ PRs/day and accepting 20K lines of Copilot code daily — review is now the bottleneck.'",
   "motion": { "primary": "PLG|Top-Down|Champion-Led|Land-and-Expand", "firstMove": "concrete first action", "keyContactName": "the specific person the first move targets (real full name) or null if generic", "keyContactTitle": "that person's title or null" },
   "outreach": { "hook": "", "channel": "Email|LinkedIn|Engineering Community|Warm Intro", "proof": "the specific signal behind the hook", "draftMessage": "3-5 lines" },
-  "linkedinOutreach": { "connect": "connect note, HARD CAP 200 chars", "dm": "DM after connect, 400-600 chars", "resurface": "light re-surface, 200-350 chars" },
+  "linkedinOutreach": { "connect": "connect note, HARD CAP 300 chars", "dm": "DM after connect, 400-600 chars", "resurface": "light re-surface, 200-350 chars" },
   "citations": [ { "title": "", "source": "publisher", "url": "https://...", "date": "YYYY-MM-DD or omit", "kind": "hiring|oss|ma|funding|ai|news|other" } ]
 }`;
 
@@ -254,7 +254,7 @@ export async function GET(req: NextRequest) {
       callHook: String(parsed.callHook || ""),
       linkedinOutreach: parsed.linkedinOutreach?.connect
         ? {
-            connect: enforceLinkedin(String(parsed.linkedinOutreach.connect), 200),
+            connect: enforceLinkedin(String(parsed.linkedinOutreach.connect), 300),
             dm: enforceLinkedin(String(parsed.linkedinOutreach.dm || ""), 600),
             resurface: enforceLinkedin(String(parsed.linkedinOutreach.resurface || ""), 350),
           }
