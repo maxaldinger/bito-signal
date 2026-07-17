@@ -175,8 +175,9 @@ interface ContactTaskContext {
   companyLine: string;
   /** The single most valuable signal as one glanceable sentence — "what I saw". */
   callHook: string;
-  /** The 3 LinkedIn-native messages (connect / DM / re-surface), when the brief has them. */
-  linkedin?: { connect: string; dm: string; resurface: string };
+  /** The 4-touch LinkedIn set (connect + 3 DMs), when the brief has it.
+   * dm/resurface are legacy fields from briefs generated pre-restructure. */
+  linkedin?: { connect: string; dm1?: string; dm2?: string; dm3?: string; dm?: string; resurface?: string };
   /** Signal-specific 1-2 sentence lead-in for above the templated email body. */
   emailOpener?: string;
   /** Legacy single outreach draft — fallback for briefs cached before linkedinOutreach. */
@@ -503,24 +504,35 @@ function ApolloPersonCard({
           defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}`}
           defaultBody={
             // LinkedIn-workflow note: COMPANY → WHAT I SAW → EMAIL OPENER →
-            // PROFILE → LINKEDIN OUTREACH (3 numbered). No WHO (the task's
+            // PROFILE → LINKEDIN OUTREACH (CONNECT + 3 DMs). No WHO (the task's
             // contact record carries it natively) and no SIGNAL (redundant with
             // WHAT I SAW). No cadence-tracking text — Max schedules follow-ups
             // himself. The EMAIL OPENER is a signal-specific lead-in pasted
-            // above the templated email body, angled differently from LinkedIn
-            // message 1 so a prospect on both channels never sees the same
-            // observation twice.
+            // above the templated email body, angled differently from the
+            // LinkedIn connect note so a prospect on both channels never sees
+            // the same observation twice.
             `COMPANY: ${ctx.companyLine}\n` +
             `${ctx.callHook ? `\nWHAT I SAW: ${ctx.callHook}\n` : ""}` +
             `${ctx.emailOpener ? `\nEMAIL OPENER: ${stripEmDashes(ctx.emailOpener)}\n` : ""}` +
             `\nPROFILE: ${linkedinHref}\n` +
-            `\nLINKEDIN OUTREACH:\n` +
-            (ctx.linkedin
-              ? `1. ${stripEmDashes(ctx.linkedin.connect)}\n\n` +
-                `2. ${stripEmDashes(ctx.linkedin.dm)}\n\n` +
-                `3. ${stripEmDashes(ctx.linkedin.resurface)}`
-              : `${draft?.text || ctx.outreach || "—"}\n\n` +
-                `(Update the brief to generate the 3-message LinkedIn set.)`)
+            `\nLINKEDIN OUTREACH:\n\n` +
+            (() => {
+              const li = ctx.linkedin;
+              if (!li)
+                return `${draft?.text || ctx.outreach || "—"}\n\n(Update the brief to generate the 4-touch LinkedIn set.)`;
+              const parts = [`CONNECT: ${stripEmDashes(li.connect)}`];
+              if (li.dm1) {
+                parts.push(`1. ${stripEmDashes(li.dm1)}`);
+                if (li.dm2) parts.push(`2. ${stripEmDashes(li.dm2)}`);
+                if (li.dm3) parts.push(`3. ${stripEmDashes(li.dm3)}`);
+              } else {
+                // Legacy 3-message brief (connect / dm / resurface).
+                if (li.dm) parts.push(`1. ${stripEmDashes(li.dm)}`);
+                if (li.resurface) parts.push(`2. ${stripEmDashes(li.resurface)}`);
+                parts.push(`(Update the brief to generate the 4-touch set.)`);
+              }
+              return parts.join("\n\n");
+            })()
           }
         />
       </div>

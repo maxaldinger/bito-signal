@@ -209,9 +209,13 @@ export interface CompanyIntel {
    * after connect / light re-surface), generated in Max's voice with hard
    * character caps. Optional — briefs cached before this field lack it. */
   linkedinOutreach?: {
-    connect: string;           // ≤200 chars — earn the accept, no pitch/stats/links
-    dm: string;                // 400-600 chars — observation + mechanism + plain close
-    resurface: string;         // 200-350 chars — soft re-surface, not a re-pitch
+    connect: string;           // ≤200 chars — observation-led, earn the accept, no pitch/ask
+    dm1?: string;              // substance: mechanism + ICP anchor + soft ask (400-600)
+    dm2?: string;              // value/give: real peer-share drop, no ask
+    dm3?: string;              // light close: new timing hook, "worth a look?" (200-350)
+    /** Legacy pre-4-touch fields (briefs generated before the restructure). */
+    dm?: string;
+    resurface?: string;
   };
 
   /** 1-2 sentence signal-specific lead-in to paste above the templated email
