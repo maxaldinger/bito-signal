@@ -19,6 +19,7 @@ import {
   Phone,
   Loader2,
   Plus,
+  Minimize2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -760,11 +761,14 @@ export function CompanyIntel({
   intel,
   onBack,
   onRefresh,
+  onCollapse,
 }: {
   intel: Intel;
   onBack: () => void;
   /** Force-regenerate this brief (bypasses the cache). */
   onRefresh?: () => void;
+  /** Collapse the whole record (card) to its slim row — card-attached briefs only. */
+  onCollapse?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -824,12 +828,23 @@ export function CompanyIntel({
   return (
     <div className="space-y-5">
       <div className="mb-1 flex items-center justify-between gap-3">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-1.5 text-sm text-ink-400 transition-colors hover:text-ink-50"
-        >
-          <X className="h-4 w-4" /> Close brief
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 text-sm text-ink-400 transition-colors hover:text-ink-50"
+          >
+            <X className="h-4 w-4" /> Close brief
+          </button>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              title="Collapse this record to a slim row (keeps its place in the feed)"
+              className="inline-flex items-center gap-1.5 text-sm text-ink-400 transition-colors hover:text-ink-50"
+            >
+              <Minimize2 className="h-4 w-4" /> Collapse
+            </button>
+          )}
+        </div>
         {onRefresh && (
           <button
             onClick={onRefresh}

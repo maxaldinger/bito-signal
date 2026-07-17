@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, RefreshCw, ChevronUp } from "lucide-react";
 import type { CompanyIntel as Intel } from "@/lib/types";
+import { collapseCard } from "@/lib/clientStore";
 import { CompanyIntel } from "./CompanyIntel";
 
 const LOADING_LINES = [
@@ -84,7 +85,21 @@ export function IntelExpander({
             />
           ) : (
             <>
-              <CompanyIntel intel={intel} onBack={close} onRefresh={onRefresh} />
+              <CompanyIntel
+                intel={intel}
+                onBack={close}
+                onRefresh={onRefresh}
+                // Collapse the whole record to its slim row (card-attached briefs
+                // only — orphan/searched briefs have no card to collapse).
+                onCollapse={
+                  framed
+                    ? undefined
+                    : () => {
+                        collapseCard(company);
+                        close();
+                      }
+                }
+              />
               <button
                 onClick={close}
                 className="mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-ink-700 py-2.5 text-sm font-medium text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100"
