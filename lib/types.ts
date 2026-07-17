@@ -210,7 +210,7 @@ export interface CompanyIntel {
    * character caps. Optional — briefs cached before this field lack it. */
   linkedinOutreach?: {
     connect: string;           // ≤200 chars — observation-led, earn the accept, no pitch/ask
-    dm1?: string;              // substance: mechanism + ICP anchor + soft ask (400-600)
+    dm1?: string;              // substance: mechanism + ICP anchor + soft ask (300-500, tight)
     dm2?: string;              // value/give: real peer-share drop, no ask
     dm3?: string;              // light close: new timing hook, "worth a look?" (200-350)
     /** Legacy pre-4-touch fields (briefs generated before the restructure). */
