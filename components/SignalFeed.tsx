@@ -73,7 +73,8 @@ function Pager({
 }
 
 // Collapsible list of companies removed as "not a fit", with one-click restore.
-function NotAFitList() {
+// Shared with DirectoryView (Signal 2000) — the blacklist spans both views.
+export function NotAFitList() {
   const map = useBlacklist();
   const [open, setOpen] = useState(false);
   const entries = Object.entries(map);

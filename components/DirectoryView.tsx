@@ -13,7 +13,9 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { DirectoryEntry, Signal, BriefState } from "@/lib/types";
+import { useBlacklist, companyInMap } from "@/lib/clientStore";
 import { SignalCard } from "./SignalCard";
+import { NotAFitList } from "./SignalFeed";
 import { IntelExpander } from "./IntelExpander";
 
 const PAGE_SIZE = 25;
@@ -67,6 +69,7 @@ export function DirectoryView({
   const [sort, setSort] = useState<DirSort>("fit");
   const [page, setPage] = useState(1);
   const [populating, setPopulating] = useState(false);
+  const blacklistMap = useBlacklist();
 
   const load = async () => {
     setError("");
@@ -109,13 +112,19 @@ export function DirectoryView({
   const filtered = useMemo(() => {
     if (!entries) return [];
     const q = query.trim().toLowerCase();
-    const list = q ? entries.filter((e) => e.company.toLowerCase().includes(q)) : entries;
+    // Same "Not a fit" blacklist the feed honors — a blacklisted company
+    // disappears here too (restorable via the list at the bottom).
+    const list = entries.filter(
+      (e) =>
+        !companyInMap(blacklistMap, e.company) &&
+        (!q || e.company.toLowerCase().includes(q)),
+    );
     const sorted = [...list];
     if (sort === "fit") sorted.sort((a, b) => b.strength - a.strength);
     else if (sort === "size") sorted.sort((a, b) => (b.sweEstimate ?? 0) - (a.sweEstimate ?? 0));
     else sorted.sort((a, b) => a.company.localeCompare(b.company));
     return sorted;
-  }, [entries, query, sort]);
+  }, [entries, query, sort, blacklistMap]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -285,6 +294,9 @@ export function DirectoryView({
           <div className="flex justify-center">
             <Pager />
           </div>
+
+          {/* Companies removed as "not a fit" — collapsible, restorable. */}
+          <NotAFitList />
         </>
       )}
     </div>
