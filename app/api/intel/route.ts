@@ -59,12 +59,20 @@ Motion: pick exactly one of PLG, Top-Down, Champion-Led, Land-and-Expand from th
 
 Outreach angle: one concrete angle tied to a specific live signal you found, with a 3-5 line draft message a rep could send today.
 
-LinkedIn outreach — three LinkedIn-NATIVE messages (not email copy), each keyed off the callHook signal, written in the rep's voice:
-VOICE: lead with a mechanism, never a compliment (no "congrats on the role", no "hope this finds you well"); plain declarative sentences, direct to the point of blunt, technically literate; the signature analogy is the coding agent that rediscovers the codebase every session vs. one that already knows the architecture ("starts blind", "grepping blind"); quantify the problem when space allows ("80% understanding the system, 20% acting on it"); plain declarative close.
-HARD RULES (never violate): NO em dashes anywhere — use periods or commas. Banned: "I hope this finds you well", "I'd love to", triple-adjective lists, "isn't just X, it's Y" constructions. No signature, no sign-off. Ready to paste verbatim, no placeholders like [Name].
-- connect: HARD CAP 300 characters including spaces. Job: earn the accept. NOT a pitch — no stats, no meeting ask, no links. One specific observation tied to the signal plus a reason to connect. Conversational.
-- dm: 400-600 characters. Assumes they accepted. One technical observation from the signal, then the core mechanism (the context layer that stops agents rediscovering the system every session), then a plain close such as "Have time for a brief 15-minute call this week?".
-- resurface: 200-350 characters. Soft re-surface, NOT a re-pitch. One new angle or a low-pressure "worth a look?" close.
+LinkedIn outreach — three LinkedIn-NATIVE messages (not email copy), keyed off the callHook signal, in the rep's voice.
+STRUCTURE RULE (most important): the signal is the HOOK, not the subject. Maximum ONE CLAUSE establishing relevance from the signal, then pivot immediately to what Bito does and the outcome. Target ~20% prospect-context, ~80% Bito mechanism + outcome. ASSERT the mechanism; do not explain it at length.
+NEVER (each of these is a failure): open by narrating the prospect's own business back at them ("You built X to solve Y" — they already know; it wastes the most valuable line; the research sharpens the SENDER, it is not the message); bury what Bito does past sentence two; spend multiple sentences explaining the mechanism; run wordy. If a sentence describes the prospect rather than Bito or the outcome, cut it or compress it to a clause.
+VOICE: lead with mechanism, never a compliment. Plain declarative sentences, direct to the point of blunt, technically literate. Draw on these exact anchor lines from the rep's sent templates: "It's the difference between an agent that knows your system and one rediscovering it every session." / "We give your AI a map of your codebase, so it stops rediscovering everything from scratch every session." / "Every session starts blind, re-crawling your repos with no memory of how the system fits together."
+HARD RULES (never violate): NO em dashes anywhere. Use periods or commas. Banned: "congrats on the role", "I hope this finds you well", "I'd love to", triple-adjective lists, "isn't just X, it's Y" constructions. No signature, no sign-off. Ready to paste verbatim, no placeholders like [Name].
+- connect (Day 3): HARD CAP 200 characters including spaces. Earn the accept, don't pitch. No stats, no meeting ask, no links. One sharp clause of relevance, then a plain reason to connect.
+- dm (Day 9): 400-600 characters. One clause of relevance, mechanism by sentence two, then the MANDATORY ICP ANCHOR: explicitly name the environment Bito is built for — enterprise codebases with many interconnected repos/microservices where cross-service dependencies span many files — using THIS prospect's specific architecture detail from the signal (e.g. "your 600+ microservice codebase", "your multi-repo Kubernetes stack") so it is concrete to them. Name that complexity ONLY as setup for the mechanism, in the same breath, never as its own descriptive sentence: context-blind agents break down precisely when reasoning across many interconnected services and repos, rediscovering cross-service contracts and dependencies from scratch each session; that is where Bito's pre-computed graph delivers, and the advantage scales with complexity. Close with a concrete outcome and a plain ask ("Have time for a brief 15-minute call this week?").
+- resurface (Day 23): 200-350 characters. A NEW angle or timing hook from the signal, soft close ("worth a quick look?"). Do NOT re-explain Bito.
+GOLD STANDARD — match this quality and structure. Its FACTS are calibration only: never reuse CVS, 600+ microservices, Health100, Agentforce, or Google for any other company; every fact in YOUR output comes from THIS prospect's signal.
+Example signal: CVS built an internal DevEx platform across a 600+ microservice codebase; now layering agentic AI (Health100, Agentforce); Health100 launched with Google.
+Example connect (165 chars): "Every coding agent you deploy on 600+ microservices starts blind, rediscovering cross-repo dependencies each session. That's the exact layer we fix. Worth connecting?"
+Example dm (~575 chars): "You're layering agentic AI across 600+ interconnected microservices. That's exactly where context-blind agents fall apart: they rediscover cross-service contracts and dependencies from scratch every session, so generated code fits a generic pattern instead of yours. Bito pre-computes a graph across your code, commits, and tickets, so the agent already knows your architecture before it starts. The advantage scales with complexity, which is why it lands hardest in multi-repo microservice environments like yours. Have time for a brief 15-minute call this week?"
+Example resurface (~240 chars): "Following up on the context-layer note. Your Health100 launch with Google is accelerating the agent rollout, and the cross-repo context problem compounds fast at that scale. Worth a quick look at what our indexing does for a codebase like yours?"
+Why the example works: #1 names complexity + the fix, no pitch. #2 names their architecture as setup, mechanism by sentence two, ICP anchored, then asks. #3 fresh timing hook, no re-explaining.
 
 Citations: list every distinct source you actually used.
 
@@ -93,7 +101,7 @@ Output ONLY one JSON object — no prose, no code fences:
   "callHook": "ONE glanceable sentence a rep can drop in a call — the single most valuable, specific signal you found (a number, event, or quote), not generic. e.g. 'Shipping 1,300+ PRs/day and accepting 20K lines of Copilot code daily — review is now the bottleneck.'",
   "motion": { "primary": "PLG|Top-Down|Champion-Led|Land-and-Expand", "firstMove": "concrete first action", "keyContactName": "the specific person the first move targets (real full name) or null if generic", "keyContactTitle": "that person's title or null" },
   "outreach": { "hook": "", "channel": "Email|LinkedIn|Engineering Community|Warm Intro", "proof": "the specific signal behind the hook", "draftMessage": "3-5 lines" },
-  "linkedinOutreach": { "connect": "connect note, HARD CAP 300 chars", "dm": "DM after connect, 400-600 chars", "resurface": "light re-surface, 200-350 chars" },
+  "linkedinOutreach": { "connect": "connect note, HARD CAP 200 chars", "dm": "DM after connect, 400-600 chars", "resurface": "light re-surface, 200-350 chars" },
   "citations": [ { "title": "", "source": "publisher", "url": "https://...", "date": "YYYY-MM-DD or omit", "kind": "hiring|oss|ma|funding|ai|news|other" } ]
 }`;
 
@@ -254,7 +262,7 @@ export async function GET(req: NextRequest) {
       callHook: String(parsed.callHook || ""),
       linkedinOutreach: parsed.linkedinOutreach?.connect
         ? {
-            connect: enforceLinkedin(String(parsed.linkedinOutreach.connect), 300),
+            connect: enforceLinkedin(String(parsed.linkedinOutreach.connect), 200),
             dm: enforceLinkedin(String(parsed.linkedinOutreach.dm || ""), 600),
             resurface: enforceLinkedin(String(parsed.linkedinOutreach.resurface || ""), 350),
           }
