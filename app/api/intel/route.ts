@@ -74,6 +74,8 @@ Example dm (~575 chars): "You're layering agentic AI across 600+ interconnected 
 Example resurface (~240 chars): "Following up on the context-layer note. Your Health100 launch with Google is accelerating the agent rollout, and the cross-repo context problem compounds fast at that scale. Worth a quick look at what our indexing does for a codebase like yours?"
 Why the example works: #1 names complexity + the fix, no pitch. #2 names their architecture as setup, mechanism by sentence two, ICP anchored, then asks. #3 fresh timing hook, no re-explaining.
 
+Email opener — ONE or TWO sentences, pasted as a personalized lead-in ABOVE a templated email body (it is a lead-in, not a paragraph). Same voice and hard rules as the LinkedIn messages: mechanism-first, no em dashes, no fluff, specific never generic. It must draw from the callHook signal but frame it from a DIFFERENT angle than the LinkedIn connect note — a prospect who receives both the email and the connect request must never see the same observation twice (different fact, different framing, or a different consequence of the same signal).
+
 Citations: list every distinct source you actually used.
 
 Never include <cite> tags or any citation markup inside JSON string values — write plain prose; sources belong only in the "citations" array.
@@ -102,6 +104,7 @@ Output ONLY one JSON object — no prose, no code fences:
   "motion": { "primary": "PLG|Top-Down|Champion-Led|Land-and-Expand", "firstMove": "concrete first action", "keyContactName": "the specific person the first move targets (real full name) or null if generic", "keyContactTitle": "that person's title or null" },
   "outreach": { "hook": "", "channel": "Email|LinkedIn|Engineering Community|Warm Intro", "proof": "the specific signal behind the hook", "draftMessage": "3-5 lines" },
   "linkedinOutreach": { "connect": "connect note, HARD CAP 200 chars", "dm": "DM after connect, 400-600 chars", "resurface": "light re-surface, 200-350 chars" },
+  "emailOpener": "1-2 sentence signal-specific email lead-in, different angle than the connect note",
   "citations": [ { "title": "", "source": "publisher", "url": "https://...", "date": "YYYY-MM-DD or omit", "kind": "hiring|oss|ma|funding|ai|news|other" } ]
 }`;
 
@@ -117,6 +120,7 @@ interface ModelIntel {
   summary?: string;
   callHook?: string;
   linkedinOutreach?: { connect?: string; dm?: string; resurface?: string };
+  emailOpener?: string;
   whyBito?: string[];
   stakeholders?: Partial<Stakeholder>[];
   painPoints?: CompanyIntel["painPoints"];
@@ -267,6 +271,8 @@ export async function GET(req: NextRequest) {
             resurface: enforceLinkedin(String(parsed.linkedinOutreach.resurface || ""), 350),
           }
         : undefined,
+      // Lead-in, not a paragraph — same dash/length hygiene as the LinkedIn set.
+      emailOpener: parsed.emailOpener ? enforceLinkedin(String(parsed.emailOpener), 350) : undefined,
       whyBito: (parsed.whyBito ?? []).map(String).filter(Boolean).slice(0, 5),
       stakeholders: (parsed.stakeholders ?? [])
         .filter((s) => s?.role)

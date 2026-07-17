@@ -177,6 +177,8 @@ interface ContactTaskContext {
   callHook: string;
   /** The 3 LinkedIn-native messages (connect / DM / re-surface), when the brief has them. */
   linkedin?: { connect: string; dm: string; resurface: string };
+  /** Signal-specific 1-2 sentence lead-in for above the templated email body. */
+  emailOpener?: string;
   /** Legacy single outreach draft — fallback for briefs cached before linkedinOutreach. */
   outreach: string;
 }
@@ -500,12 +502,17 @@ function ApolloPersonCard({
           autoCheckDelayMs={autoCheckDelayMs}
           defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}`}
           defaultBody={
-            // LinkedIn-workflow note: COMPANY → WHAT I SAW → PROFILE → LINKEDIN
-            // OUTREACH (3 numbered). No WHO (the task's contact record carries
-            // it natively) and no SIGNAL (redundant with WHAT I SAW). No
-            // cadence-tracking text — Max schedules follow-ups himself.
+            // LinkedIn-workflow note: COMPANY → WHAT I SAW → EMAIL OPENER →
+            // PROFILE → LINKEDIN OUTREACH (3 numbered). No WHO (the task's
+            // contact record carries it natively) and no SIGNAL (redundant with
+            // WHAT I SAW). No cadence-tracking text — Max schedules follow-ups
+            // himself. The EMAIL OPENER is a signal-specific lead-in pasted
+            // above the templated email body, angled differently from LinkedIn
+            // message 1 so a prospect on both channels never sees the same
+            // observation twice.
             `COMPANY: ${ctx.companyLine}\n` +
             `${ctx.callHook ? `\nWHAT I SAW: ${ctx.callHook}\n` : ""}` +
+            `${ctx.emailOpener ? `\nEMAIL OPENER: ${stripEmDashes(ctx.emailOpener)}\n` : ""}` +
             `\nPROFILE: ${linkedinHref}\n` +
             `\nLINKEDIN OUTREACH:\n` +
             (ctx.linkedin
@@ -782,6 +789,7 @@ export function CompanyIntel({
       `. ICP fit ${intel.icp.total}/99.${intel.oneLiner ? ` ${intel.oneLiner}` : ""}`,
     callHook: intel.callHook,
     linkedin: intel.linkedinOutreach,
+    emailOpener: intel.emailOpener,
     outreach: stripEmDashes(intel.outreach.draftMessage || intel.outreach.hook || ""),
   };
 

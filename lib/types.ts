@@ -214,6 +214,11 @@ export interface CompanyIntel {
     resurface: string;         // 200-350 chars — soft re-surface, not a re-pitch
   };
 
+  /** 1-2 sentence signal-specific lead-in to paste above the templated email
+   * body. Different angle on the signal than the LinkedIn connect note, so a
+   * prospect on both channels never sees the same observation twice. */
+  emailOpener?: string;
+
   // Why Bito (segment-tailored, evidence-grounded)
   whyBito: string[];
 
