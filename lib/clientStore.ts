@@ -129,7 +129,16 @@ export function initStateSync() {
 // Generic localStorage-backed store with a stable snapshot reference. An
 // optional `coerce` migrates whatever shape is on disk into the current one.
 // Every store also registers for cross-device sync (see above).
-function makeStore<T>(key: string, empty: T, coerce?: (raw: unknown) => T) {
+//
+// KEY VERSION: bumping this orphans ALL prior state everywhere at once — old
+// localStorage keys are never read again and old bito_state rows never match
+// the registry, so a factory reset sticks without a per-device manual clear.
+// (A plain server wipe would NOT stick: the load-time union-merge would push
+// each device's localStorage right back up.) v2 = 2026-07-16 full reset.
+const KEY_VERSION = ".v2";
+
+function makeStore<T>(baseKey: string, empty: T, coerce?: (raw: unknown) => T) {
+  const key = `${baseKey}${KEY_VERSION}`;
   let cache: T | null = null;
   const listeners = new Set<() => void>();
 

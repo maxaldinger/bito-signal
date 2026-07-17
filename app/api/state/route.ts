@@ -7,20 +7,25 @@ import { fetchState, upsertState } from "@/lib/supabase";
 export const maxDuration = 20;
 
 // Only the client store keys we actually sync — guards the table against junk.
-const ALLOWED = new Set([
-  "bito-prospected",
-  "bito-deepdive-scores",
-  "bito-lowpriority",
-  "bito-collapsed",
-  "bito-hs-presence",
-  "bito-blacklist",
-  "bito-reviewed",
-  "bito-favorites",
-  "bito-last-due",
-  "bito-sweep-cursor",
-  "bito-company-blurbs",
-  "bito-apollo-reveals",
-]);
+// ".v2" matches clientStore's KEY_VERSION (bumped 2026-07-16 for the factory
+// reset); un-versioned names from stale pre-reset tabs are rejected so old
+// state can't re-seed the wiped table.
+const ALLOWED = new Set(
+  [
+    "bito-prospected",
+    "bito-deepdive-scores",
+    "bito-lowpriority",
+    "bito-collapsed",
+    "bito-hs-presence",
+    "bito-blacklist",
+    "bito-reviewed",
+    "bito-favorites",
+    "bito-last-due",
+    "bito-sweep-cursor",
+    "bito-company-blurbs",
+    "bito-apollo-reveals",
+  ].map((k) => `${k}.v2`),
+);
 
 export async function GET() {
   const r = await fetchState();
