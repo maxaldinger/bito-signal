@@ -191,6 +191,7 @@ function ApolloPersonCard({
   domain,
   ctx,
   autoCheckDelayMs,
+  hideWithoutEmail = true,
 }: {
   person: EnrichContact;
   company: string;
@@ -198,6 +199,10 @@ function ApolloPersonCard({
   ctx: ContactTaskContext;
   /** Stagger this card's auto HubSpot check (HubSpot search caps ~4 req/s). */
   autoCheckDelayMs: number;
+  /** Remove the card entirely when the reveal finds no company-domain email
+   *  (default). The pinned first-move contact opts out — it's named in the
+   *  motion, so it stays visible and is worked via LinkedIn instead. */
+  hideWithoutEmail?: boolean;
 }) {
   // One in-flight reveal kind at a time, per card.
   const [loading, setLoading] = useState<RevealKind | null>(null);
@@ -377,6 +382,10 @@ function ApolloPersonCard({
       ? revealedEmail
       : undefined;
   const emailChecked = emailRes !== undefined; // reveal finished (found or not)
+
+  // No company email surfaced → don't show the contact at all (after all hooks
+  // above have run). The pinned first-move card opts out via hideWithoutEmail.
+  if (hideWithoutEmail && emailChecked && !companyEmail) return null;
 
   return (
     <div
@@ -692,6 +701,7 @@ function ApolloStakeholders({
             domain={domain}
             ctx={ctx}
             autoCheckDelayMs={0}
+            hideWithoutEmail={false}
           />
         </div>
       )}
