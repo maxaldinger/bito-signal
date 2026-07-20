@@ -50,6 +50,71 @@ function toSignal(e: DirectoryEntry): Signal {
   };
 }
 
+// Pager with a jump-to-page box. Module-level (stable identity) so the input
+// keeps focus across the parent's re-renders — an inline component would remount
+// on every keystroke and drop focus. The box shows the current page; type a
+// number + Enter (or blur) to jump, clamped to [1, totalPages].
+function Pager({
+  page,
+  totalPages,
+  onJump,
+}: {
+  page: number;
+  totalPages: number;
+  onJump: (p: number) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const editing = draft !== "";
+
+  if (totalPages <= 1) return null;
+
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (!Number.isNaN(n)) onJump(Math.min(totalPages, Math.max(1, n)));
+    setDraft("");
+  };
+
+  return (
+    <div className="flex items-center gap-2 font-mono text-[11px] text-ink-400">
+      <button
+        onClick={() => onJump(page - 1)}
+        disabled={page <= 1}
+        className="inline-flex items-center gap-0.5 rounded border border-ink-700 px-2 py-1 text-ink-300 transition-colors hover:bg-ink-800 disabled:opacity-40"
+      >
+        <ChevronLeft className="h-3 w-3" /> Prev
+      </button>
+      <span className="flex items-center gap-1">
+        pg
+        <input
+          type="text"
+          inputMode="numeric"
+          aria-label="Jump to page"
+          value={editing ? draft : String(page)}
+          onFocus={() => setDraft(String(page))}
+          onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            else if (e.key === "Escape") {
+              setDraft("");
+              e.currentTarget.blur();
+            }
+          }}
+          className="w-10 rounded border border-ink-700 bg-ink-900 px-1 py-0.5 text-center font-semibold text-ink-100 outline-none focus:border-neon-600/50"
+        />
+        / {totalPages}
+      </span>
+      <button
+        onClick={() => onJump(page + 1)}
+        disabled={page >= totalPages}
+        className="inline-flex items-center gap-0.5 rounded border border-ink-700 px-2 py-1 text-ink-300 transition-colors hover:bg-ink-800 disabled:opacity-40"
+      >
+        Next <ChevronRight className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
 export function DirectoryView({
   briefs,
   onSelectCompany,
@@ -149,29 +214,6 @@ export function DirectoryView({
   const toggleCompany = (account: string) =>
     briefs[account] ? onCloseIntel(account) : onSelectCompany(account);
 
-  const Pager = () =>
-    totalPages <= 1 ? null : (
-      <div className="flex items-center gap-2 font-mono text-[11px] text-ink-400">
-        <button
-          onClick={() => setPage(safePage - 1)}
-          disabled={safePage <= 1}
-          className="inline-flex items-center gap-0.5 rounded border border-ink-700 px-2 py-1 text-ink-300 transition-colors hover:bg-ink-800 disabled:opacity-40"
-        >
-          <ChevronLeft className="h-3 w-3" /> Prev
-        </button>
-        <span>
-          pg <span className="font-semibold text-ink-100">{safePage}</span> / {totalPages}
-        </span>
-        <button
-          onClick={() => setPage(safePage + 1)}
-          disabled={safePage >= totalPages}
-          className="inline-flex items-center gap-0.5 rounded border border-ink-700 px-2 py-1 text-ink-300 transition-colors hover:bg-ink-800 disabled:opacity-40"
-        >
-          Next <ChevronRight className="h-3 w-3" />
-        </button>
-      </div>
-    );
-
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-3">
@@ -247,7 +289,7 @@ export function DirectoryView({
       ) : (
         <>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Pager />
+            <Pager page={safePage} totalPages={totalPages} onJump={setPage} />
             <div className="flex min-w-0 items-center gap-2 sm:ml-auto">
               <label className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-ink-400">
                 <ArrowDownUp className="h-3.5 w-3.5" /> sort
@@ -292,7 +334,7 @@ export function DirectoryView({
           )}
 
           <div className="flex justify-center">
-            <Pager />
+            <Pager page={safePage} totalPages={totalPages} onJump={setPage} />
           </div>
 
           {/* Companies removed as "not a fit" — collapsible, restorable. */}
