@@ -11,6 +11,7 @@ import {
   X,
   RotateCcw,
   Building2,
+  Github,
   type LucideIcon,
 } from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
@@ -18,11 +19,12 @@ import type { SegmentId, SignalTypeId } from "@/lib/types";
 import { useFavorites, useProspectedCount, clearAllProspected } from "@/lib/clientStore";
 import { SegmentIcon } from "./SegmentIcon";
 
-export type TabId = "feed" | "directory" | "favorites" | "assist";
+export type TabId = "feed" | "directory" | "github" | "favorites" | "assist";
 
 const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "feed", label: "Signal Feed", icon: Radio },
   { id: "directory", label: "Signal 2000", icon: Building2 },
+  { id: "github", label: "GitHub Prospecting", icon: Github },
   { id: "favorites", label: "Signal favorites", icon: Star },
   { id: "assist", label: "Sales Assist", icon: Sparkles },
 ];

@@ -1,0 +1,831 @@
+"use client";
+
+// GitHub Prospecting — developers at target-sized companies engaging with
+// knowledge-graph / context-layer-adjacent OSS repos. A new signal source
+// alongside the WARN-filing and stack-signal detection: each card is a PERSON
+// (not a company), with their resolved employer, verified work email + title
+// from Apollo, and a suggested "WHAT I SAW" opener. Contribution signals
+// (merged PRs, commits) always rank above passive stars.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  BookMarked,
+  Building2,
+  Check,
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  GitCommitHorizontal,
+  GitFork,
+  GitPullRequest,
+  Github,
+  Loader2,
+  MailCheck,
+  MapPin,
+  RefreshCw,
+  Search,
+  Star,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  ACTION_LABELS,
+  CONTRIBUTION_ACTIONS,
+  type GitHubAction,
+  type MonitoredRepo,
+  type Prospect,
+  type SyncSummary,
+} from "@/lib/githubProspect/types";
+import { fmtNum, timeAgo } from "@/lib/format";
+import { MetricCard } from "./MetricCard";
+import { HubSpotActions } from "./HubSpotActions";
+
+const PAGE_SIZE = 25;
+
+// Chip color: violet for the OSS/contribution family (matches the existing
+// "oss" signal-type color), neutral ink for passive engagement.
+const OSS_COLOR = "#8b5cf6";
+
+const ACTION_ICON: Record<GitHubAction, LucideIcon> = {
+  pr_merged: GitPullRequest,
+  pr_opened: GitPullRequest,
+  committed: GitCommitHorizontal,
+  forked: GitFork,
+  starred: Star,
+};
+
+async function readJson(res: Response): Promise<Record<string, unknown>> {
+  try {
+    return await res.json();
+  } catch {
+    return { error: `HTTP ${res.status} — ${res.statusText || "non-JSON response"}` };
+  }
+}
+
+function repoShortName(repoKey: string): string {
+  return repoKey.split("/")[1] ?? repoKey;
+}
+
+function isContribution(action?: GitHubAction): boolean {
+  return !!action && (CONTRIBUTION_ACTIONS as string[]).includes(action);
+}
+
+// Prev / page / Next — mirrors the feed's simple pager.
+function Pager({
+  page,
+  totalPages,
+  onPage,
+}: {
+  page: number;
+  totalPages: number;
+  onPage: (p: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-center gap-3">
+      <button
+        onClick={() => onPage(Math.max(1, page - 1))}
+        disabled={page <= 1}
+        className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Prev
+      </button>
+      <span className="font-mono text-xs tabular-nums text-ink-400">
+        pg {page} / {totalPages}
+      </span>
+      <button
+        onClick={() => onPage(Math.min(totalPages, page + 1))}
+        disabled={page >= totalPages}
+        className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Next
+      </button>
+    </div>
+  );
+}
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        });
+      }}
+      className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-neon-600/40 hover:text-neon-200"
+    >
+      {copied ? <Check className="h-3 w-3 text-neon-400" /> : <Copy className="h-3 w-3" />}
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
+
+function StatusChip({ p }: { p: Prospect }) {
+  if (p.status === "enriched")
+    return (
+      <span className="rounded border border-neon-600/30 bg-neon-500/10 px-1.5 py-0.5 font-mono text-[11px] text-neon-300">
+        ready
+      </span>
+    );
+  if (p.status === "suppressed")
+    return (
+      <span
+        title={p.suppressedReason}
+        className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[11px] text-amber-300"
+      >
+        suppressed
+      </span>
+    );
+  if (p.status === "no_match")
+    return (
+      <span
+        title={p.suppressedReason}
+        className="rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5 font-mono text-[11px] text-ink-500"
+      >
+        no match
+      </span>
+    );
+  return (
+    <span className="rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5 font-mono text-[11px] text-ink-400">
+      pending enrich
+    </span>
+  );
+}
+
+/** Registrable root ("us.experian.com" → "experian.com") — mirrors the
+ * HubSpotActions off-domain email guard. */
+function rootOf(d: string): string {
+  const parts = d.toLowerCase().trim().replace(/^www\./, "").split(".").filter(Boolean);
+  return parts.length <= 2 ? parts.join(".") : parts.slice(-2).join(".");
+}
+
+function ProspectCard({ p, repos, index }: { p: Prospect; repos: Map<string, MonitoredRepo>; index: number }) {
+  const displayName = p.name ?? p.login;
+  const bestRepo = p.bestRepo ? repos.get(p.bestRepo) : undefined;
+  const contribution = isContribution(p.bestAction);
+  const shownSignals = p.signals.slice(0, 4);
+  const extraSignals = p.signals.length - shownSignals.length;
+  // HubSpotActions' contract: pass only a company-domain email. Anything else
+  // (legacy rows, personal fallbacks) renders unverified and stays out of CRM.
+  const emailDomain = p.email?.split("@")[1];
+  const companyEmail =
+    p.email && emailDomain && (!p.companyDomain || rootOf(emailDomain) === rootOf(p.companyDomain))
+      ? p.email
+      : undefined;
+  // Freeze the auto-check stagger at mount — position churn from re-sorts
+  // must not re-fire /api/hubspot/search for every moved card.
+  const mountDelayMs = useRef(index * 300).current;
+
+  const taskBody = [
+    `WHO: ${displayName} (github.com/${p.login})${p.title ? ` — ${p.title}` : ""}`,
+    `COMPANY: ${p.company ?? "unresolved"}${p.headcount ? ` (~${fmtNum(p.headcount)} employees)` : ""}`,
+    p.bestAction && p.bestRepo
+      ? `SIGNAL: ${ACTION_LABELS[p.bestAction]} ${repoShortName(p.bestRepo)}${bestRepo ? ` — ${bestRepo.whyMatters}` : ""}`
+      : "",
+    p.opener ? `SUGGESTED OUTREACH: ${p.opener}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    <div className="animate-fade-in rounded-lg border border-ink-700 bg-ink-900 p-4 transition-colors hover:border-ink-600 sm:p-5">
+      {/* Header: person + handle + score */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          {p.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={p.avatarUrl}
+              alt=""
+              loading="lazy"
+              className="h-10 w-10 shrink-0 rounded-full border border-ink-700"
+            />
+          ) : (
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-ink-700 bg-ink-950">
+              <Github className="h-5 w-5 text-ink-400" />
+            </span>
+          )}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="truncate text-sm font-semibold text-ink-50">{displayName}</span>
+              <a
+                href={p.githubUrl ?? `https://github.com/${p.login}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-mono text-xs text-neon-300 transition-colors hover:text-neon-200"
+              >
+                @{p.login}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+              <StatusChip p={p} />
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {p.company && (
+                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-100">
+                  <Building2 className="h-3.5 w-3.5 text-ink-400" />
+                  {p.company}
+                </span>
+              )}
+              {typeof p.headcount === "number" && (
+                <span className="rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5 font-mono text-[11px] text-ink-400">
+                  ~{fmtNum(p.headcount)} employees
+                </span>
+              )}
+              {p.location && (
+                <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-500">
+                  <MapPin className="h-3 w-3" />
+                  {p.location}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        {/* Contribution-weighted score */}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className="font-mono text-sm font-bold tabular-nums" style={{ color: OSS_COLOR }}>
+            {Math.min(99, p.score)}
+          </span>
+          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-ink-800">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{ width: `${Math.min(100, p.score)}%`, backgroundColor: OSS_COLOR }}
+            />
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-ink-500">
+            {contribution ? "contributor" : "engagement"}
+          </span>
+        </div>
+      </div>
+
+      {/* Title + verified email */}
+      {(p.title || p.email) && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          {p.title && <span className="text-sm text-ink-300">{p.title}</span>}
+          {companyEmail ? (
+            <span className="inline-flex items-center gap-1.5">
+              <MailCheck className="h-3.5 w-3.5 text-neon-400" />
+              <span className="font-mono text-xs text-neon-300">{companyEmail}</span>
+              <CopyButton text={companyEmail} label="Copy" />
+            </span>
+          ) : p.email ? (
+            // Off-company-domain address — shown, but never badged as verified.
+            <span className="font-mono text-xs text-ink-400">{p.email}</span>
+          ) : null}
+          {p.linkedinUrl && (
+            <a
+              href={p.linkedinUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-mono text-[11px] text-sky-400 transition-colors hover:text-sky-500"
+            >
+              LinkedIn
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Signal chips — contributions colored, passive neutral */}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {shownSignals.map((s, i) => {
+          const Icon = ACTION_ICON[s.action];
+          const contrib = isContribution(s.action);
+          const inner = (
+            <>
+              <Icon className="h-3.5 w-3.5" />
+              {ACTION_LABELS[s.action]} {repoShortName(s.repo)}
+              {s.at && <span className="opacity-70">· {timeAgo(s.at.slice(0, 10))}</span>}
+            </>
+          );
+          const cls = `inline-flex items-center gap-1.5 rounded px-2 py-1 font-mono text-[11px] font-medium ${
+            contrib ? "" : "border border-ink-700 bg-ink-950 text-ink-400"
+          }`;
+          const style = contrib
+            ? { backgroundColor: `${OSS_COLOR}1c`, color: OSS_COLOR }
+            : undefined;
+          return s.url ? (
+            <a
+              key={`${s.repo}-${s.action}-${i}`}
+              href={s.url}
+              target="_blank"
+              rel="noreferrer"
+              className={`${cls} transition-opacity hover:opacity-80`}
+              style={style}
+            >
+              {inner}
+            </a>
+          ) : (
+            <span key={`${s.repo}-${s.action}-${i}`} className={cls} style={style}>
+              {inner}
+            </span>
+          );
+        })}
+        {extraSignals > 0 && (
+          <span className="rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5 font-mono text-[11px] text-ink-500">
+            +{extraSignals} more
+          </span>
+        )}
+      </div>
+
+      {/* Why this repo matters */}
+      {bestRepo && (
+        <p className="mt-2 text-xs leading-relaxed text-ink-400">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+            why {bestRepo.name}:{" "}
+          </span>
+          {bestRepo.whyMatters}
+        </p>
+      )}
+
+      {/* Suppression reason */}
+      {(p.status === "suppressed" || p.status === "no_match") && p.suppressedReason && (
+        <p className="mt-2 text-xs text-amber-300/80">{p.suppressedReason}</p>
+      )}
+
+      {/* Suggested opener */}
+      {p.opener && (
+        <div className="mt-4 border-t border-ink-700 pt-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+              suggested opener
+            </span>
+            <CopyButton text={p.opener} label="Copy opener" />
+          </div>
+          <p className="text-sm leading-relaxed text-ink-200">{p.opener}</p>
+        </div>
+      )}
+
+      {/* HubSpot actions */}
+      <div className="mt-4 border-t border-ink-700 pt-3">
+        <HubSpotActions
+          kind="contact"
+          name={displayName}
+          email={companyEmail}
+          jobtitle={p.title}
+          companyName={p.company}
+          companyDomain={p.companyDomain}
+          compact
+          autoCheck={Boolean(companyEmail)}
+          autoCheckDelayMs={mountDelayMs}
+          defaultSubject={`SIGNAL DASH - GitHub - ${displayName}`}
+          defaultBody={taskBody}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Collapsible watchlist footer — the curated repo list (reviewed monthly).
+function Watchlist({ repos }: { repos: MonitoredRepo[] }) {
+  const [open, setOpen] = useState(false);
+  if (repos.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-ink-700 bg-ink-900/50 p-3">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-1 py-0.5 text-ink-300 transition-colors hover:text-ink-50"
+      >
+        <span className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-400">
+          <BookMarked className="h-3.5 w-3.5" />
+          repo watchlist
+          <span className="rounded bg-neon-500/15 px-1 py-0.5 text-neon-300">{repos.length}</span>
+          <span className="normal-case tracking-normal text-ink-500">
+            reviewed monthly — this category moves fast
+          </span>
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 text-ink-500 transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {open && (
+        <div className="mt-3 space-y-2">
+          {repos.map((r) => (
+            <div
+              key={r.repoKey}
+              className={`rounded-lg border border-ink-700 bg-ink-950 p-3 ${r.active ? "" : "opacity-50"}`}
+            >
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <a
+                  href={`https://github.com/${r.owner}/${r.name}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-neon-300 transition-colors hover:text-neon-200"
+                >
+                  {r.owner}/{r.name}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+                <span className="rounded border border-ink-700 bg-ink-900 px-1.5 py-0.5 font-mono text-[10px] text-ink-400">
+                  {r.category}
+                </span>
+                {typeof r.stars === "number" && (
+                  <span className="inline-flex items-center gap-1 font-mono text-[10px] text-ink-500">
+                    <Star className="h-3 w-3" />
+                    {fmtNum(r.stars)}
+                  </span>
+                )}
+                {!r.active && (
+                  <span className="font-mono text-[10px] text-amber-300">inactive</span>
+                )}
+                {r.lastPolledAt && (
+                  <span className="ml-auto font-mono text-[10px] text-ink-500">
+                    polled {timeAgo(r.lastPolledAt.slice(0, 10))}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-ink-400">{r.whyMatters}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type TierFilter = "all" | "contributors" | "forked" | "starred";
+type StatusFilter = "active" | "ready" | "pending" | "suppressed" | "all";
+type SortId = "signal" | "recent";
+
+export function GitHubProspecting() {
+  const [prospects, setProspects] = useState<Prospect[] | null>(null);
+  const [repos, setRepos] = useState<MonitoredRepo[]>([]);
+  const [totalSignals, setTotalSignals] = useState(0);
+  const [configured, setConfigured] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState<false | "full" | "enrich">(false);
+  const [syncResult, setSyncResult] = useState<SyncSummary | null>(null);
+
+  const [query, setQuery] = useState("");
+  const [repoFilter, setRepoFilter] = useState("all");
+  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [sort, setSort] = useState<SortId>("signal");
+  const [page, setPage] = useState(1);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/github-prospect", { cache: "no-store" });
+      const data = await readJson(res);
+      if (typeof data.configured === "boolean") setConfigured(data.configured);
+      if (data.ok) {
+        setProspects((data.prospects as Prospect[]) ?? []);
+        setRepos((data.repos as MonitoredRepo[]) ?? []);
+        setTotalSignals(typeof data.totalSignals === "number" ? data.totalSignals : 0);
+        setError(null);
+      } else {
+        setProspects([]);
+        setRepos(((data.repos as MonitoredRepo[]) ?? []) || []);
+        // Unconfigured deployments get the dedicated setup notice, not a
+        // duplicate error banner on top of it.
+        setError(
+          data.configured === false
+            ? null
+            : typeof data.error === "string"
+              ? data.error
+              : `HTTP ${res.status}`,
+        );
+      }
+    } catch (e) {
+      setProspects([]);
+      setError(String((e as Error)?.message || e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const runSync = useCallback(
+    async (mode: "full" | "enrich") => {
+      setSyncing(mode);
+      setSyncResult(null);
+      try {
+        const res = await fetch(
+          `/api/github-prospect/sync${mode === "enrich" ? "?mode=enrich" : ""}`,
+          { method: "POST", cache: "no-store" },
+        );
+        const raw = await readJson(res);
+        // Normalize defensively — a gateway timeout returns non-JSON.
+        const num = (v: unknown) => (typeof v === "number" ? v : 0);
+        setSyncResult({
+          ok: raw.ok === true,
+          error: typeof raw.error === "string" ? raw.error : undefined,
+          reposPolled: num(raw.reposPolled),
+          newSignals: num(raw.newSignals),
+          resolved: num(raw.resolved),
+          enriched: num(raw.enriched),
+          suppressed: num(raw.suppressed),
+          openers: num(raw.openers),
+          notes: Array.isArray(raw.notes) ? raw.notes.map(String) : [],
+        });
+        await load();
+      } catch (e) {
+        setSyncResult({
+          ok: false,
+          error: String((e as Error)?.message || e),
+          reposPolled: 0,
+          newSignals: 0,
+          resolved: 0,
+          enriched: 0,
+          suppressed: 0,
+          openers: 0,
+          notes: [],
+        });
+      } finally {
+        setSyncing(false);
+      }
+    },
+    [load],
+  );
+
+  const repoMap = useMemo(() => new Map(repos.map((r) => [r.repoKey, r])), [repos]);
+
+  const all = useMemo(() => prospects ?? [], [prospects]);
+  const readyCount = useMemo(() => all.filter((p) => p.status === "enriched").length, [all]);
+  const pendingCount = useMemo(
+    () => all.filter((p) => p.status === "new" || p.status === "resolved").length,
+    [all],
+  );
+  const contributorCount = useMemo(
+    () => all.filter((p) => isContribution(p.bestAction)).length,
+    [all],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = all.filter((p) => {
+      if (statusFilter === "active" && (p.status === "suppressed" || p.status === "no_match"))
+        return false;
+      if (statusFilter === "ready" && p.status !== "enriched") return false;
+      if (statusFilter === "pending" && p.status !== "new" && p.status !== "resolved") return false;
+      if (statusFilter === "suppressed" && p.status !== "suppressed" && p.status !== "no_match")
+        return false;
+      if (tierFilter === "contributors" && !isContribution(p.bestAction)) return false;
+      if (tierFilter === "forked" && p.bestAction !== "forked") return false;
+      if (tierFilter === "starred" && p.bestAction !== "starred") return false;
+      if (repoFilter !== "all" && p.bestRepo !== repoFilter && !p.signals.some((s) => s.repo === repoFilter))
+        return false;
+      if (
+        q &&
+        !p.login.toLowerCase().includes(q) &&
+        !(p.name ?? "").toLowerCase().includes(q) &&
+        !(p.company ?? "").toLowerCase().includes(q)
+      )
+        return false;
+      return true;
+    });
+    // Contributions over stars: score already encodes the weighting, so the
+    // default sort is score-first in both modes.
+    const sorted = [...list];
+    if (sort === "recent") {
+      sorted.sort((a, b) => (b.lastSignalAt ?? "").localeCompare(a.lastSignalAt ?? "") || b.score - a.score);
+    } else {
+      sorted.sort(
+        (a, b) => b.score - a.score || (b.lastSignalAt ?? "").localeCompare(a.lastSignalAt ?? ""),
+      );
+    }
+    return sorted;
+  }, [all, query, repoFilter, tierFilter, statusFilter, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const loading = prospects === null;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h2 className="flex items-center gap-2 text-xl font-bold text-ink-50">
+          <Github className="h-5 w-5 text-neon-400" />
+          GitHub Prospecting
+        </h2>
+        <p className="mt-1 text-sm text-ink-300">
+          Developers at target-sized companies engaging with knowledge-graph and
+          context-layer repos. Contributions rank above stars; emails come verified from
+          Apollo, never scraped from commits.
+        </p>
+      </div>
+
+      {/* Metrics */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <MetricCard label="Watchlist repos" value={repos.length} icon={BookMarked} color="text-neon-400" loading={loading} />
+        <MetricCard label="People tracked" value={all.length} icon={Users} color="text-violet-400" loading={loading} />
+        <MetricCard label="Email ready" value={readyCount} icon={MailCheck} color="text-neon-400" loading={loading} />
+        <MetricCard label="Contributors" value={contributorCount} icon={GitPullRequest} color="text-violet-400" loading={loading} />
+      </div>
+
+      {/* Sync controls */}
+      <div className="rounded-lg border border-ink-700 bg-ink-900 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => void runSync("full")}
+            disabled={syncing !== false}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-neon-600/50 bg-neon-500/15 px-5 py-2.5 text-sm font-semibold text-neon-300 shadow-glow-sm transition-all hover:bg-neon-500/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+          >
+            {syncing === "full" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            {syncing === "full" ? "Syncing…" : "Sync watchlist"}
+          </button>
+          {pendingCount > 0 && (
+            <button
+              onClick={() => void runSync("enrich")}
+              disabled={syncing !== false}
+              className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-neon-600/40 hover:text-neon-200 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {syncing === "enrich" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <MailCheck className="h-3.5 w-3.5" />
+              )}
+              Enrich pending ({pendingCount})
+            </button>
+          )}
+          <span className="font-mono text-[11px] text-ink-500">
+            {fmtNum(totalSignals)} raw signals · weekly cron + on-demand · incremental
+          </span>
+        </div>
+
+        {syncing !== false && (
+          <p className="mt-2 font-mono text-xs text-neon-400">
+            ▸ {syncing === "full" ? "polling watchlist, resolving people, enriching…" : "resolving + enriching pending people…"}
+          </p>
+        )}
+
+        {syncResult && (
+          <div
+            className={`mt-3 flex items-start gap-3 rounded-lg border px-4 py-2.5 ${
+              syncResult.ok
+                ? "border-neon-600/30 bg-neon-500/10"
+                : "border-red-500/30 bg-red-500/10"
+            }`}
+          >
+            {syncResult.ok ? (
+              <Check className="mt-0.5 h-4 w-4 shrink-0 text-neon-400" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+            )}
+            <div className="min-w-0 text-xs leading-relaxed">
+              {syncResult.ok ? (
+                <p className="text-ink-200">
+                  Polled {syncResult.reposPolled} repos · {syncResult.newSignals} new signals ·{" "}
+                  {syncResult.resolved} resolved · {syncResult.enriched} enriched ·{" "}
+                  {syncResult.suppressed} suppressed · {syncResult.openers} openers
+                </p>
+              ) : (
+                <p className="text-red-200">{syncResult.error ?? "Sync failed"}</p>
+              )}
+              {syncResult.notes.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-amber-300/90">
+                  {syncResult.notes.slice(0, 5).map((n, i) => (
+                    <li key={i}>· {n}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <p className="text-xs leading-relaxed text-amber-200">{error}</p>
+        </div>
+      )}
+      {!configured && (
+        <div className="flex items-start gap-3 rounded-lg border border-violet-500/30 bg-violet-500/10 p-4">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-violet-400" />
+          <p className="text-xs leading-relaxed text-violet-200">
+            Supabase is not configured — set SUPABASE_URL and SUPABASE_ANON_KEY to enable
+            GitHub prospecting.
+          </p>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex flex-1 items-center gap-2 rounded-lg border border-ink-700 bg-ink-950 px-3.5 py-2.5">
+          <Search className="h-4 w-4 shrink-0 text-ink-400" />
+          <input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search people, handles, companies…"
+            className="w-full bg-transparent font-mono text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none"
+          />
+        </div>
+        <select
+          value={repoFilter}
+          onChange={(e) => {
+            setRepoFilter(e.target.value);
+            setPage(1);
+          }}
+          className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none sm:flex-none"
+        >
+          <option value="all">All repos</option>
+          {repos.map((r) => (
+            <option key={r.repoKey} value={r.repoKey}>
+              {r.owner}/{r.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={tierFilter}
+          onChange={(e) => {
+            setTierFilter(e.target.value as TierFilter);
+            setPage(1);
+          }}
+          className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none sm:flex-none"
+        >
+          <option value="all">All signal tiers</option>
+          <option value="contributors">Contributors (PRs + commits)</option>
+          <option value="forked">Forked</option>
+          <option value="starred">Starred</option>
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value as StatusFilter);
+            setPage(1);
+          }}
+          className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none sm:flex-none"
+        >
+          <option value="active">Active pipeline</option>
+          <option value="ready">Ready (email verified)</option>
+          <option value="pending">Pending enrich</option>
+          <option value="suppressed">Suppressed / no match</option>
+          <option value="all">Everything</option>
+        </select>
+        <select
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value as SortId);
+            setPage(1);
+          }}
+          className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none sm:flex-none"
+        >
+          <option value="signal">Strongest signal</option>
+          <option value="recent">Most recent</option>
+        </select>
+      </div>
+
+      {/* List */}
+      {loading ? (
+        <div className="space-y-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-ink-700 bg-ink-900 p-5">
+              <div className="skeleton h-4 w-3/4 rounded" />
+              <div className="skeleton mt-3 h-3 w-1/2 rounded" />
+              <div className="skeleton mt-3 h-3 w-2/3 rounded" />
+            </div>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
+          <p className="text-sm text-ink-300">
+            {all.length === 0
+              ? "No GitHub prospects yet."
+              : "No prospects match the current filters."}
+          </p>
+          <p className="mt-1 text-xs text-ink-500">
+            {all.length === 0
+              ? "Run the first watchlist sync to collect stargazers, forks and contributors."
+              : "Loosen the repo / tier / status filters, or clear the search."}
+          </p>
+          {all.length === 0 && (
+            <button
+              onClick={() => void runSync("full")}
+              disabled={syncing !== false}
+              className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-neon-600/50 bg-neon-500/15 px-5 py-2.5 text-sm font-semibold text-neon-300 shadow-glow-sm transition-all hover:bg-neon-500/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+            >
+              {syncing !== false ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Run first sync
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          <Pager page={safePage} totalPages={totalPages} onPage={setPage} />
+          <div className="space-y-4">
+            {pageItems.map((p, i) => (
+              <ProspectCard key={p.login} p={p} repos={repoMap} index={i} />
+            ))}
+          </div>
+          <Pager page={safePage} totalPages={totalPages} onPage={setPage} />
+        </>
+      )}
+
+      <Watchlist repos={repos} />
+    </div>
+  );
+}

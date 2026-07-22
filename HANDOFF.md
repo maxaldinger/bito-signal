@@ -1,4 +1,38 @@
-# Bito Signal — Session Handoff (2026-06-16)
+# Bito Signal — Session Handoff (2026-06-16; GitHub Prospecting added 2026-07-22)
+
+---
+
+## GitHub Prospecting (added 2026-07-22)
+
+New tab: developers at target-sized companies engaging with knowledge-graph /
+context-layer-adjacent OSS repos (CodeGraph, GitNexus, Serena, claude-context,
+MCP servers, Cody OSS snapshot, tree-sitter, GraphRAG family, LlamaIndex — 19
+repos, verified live, reviewed monthly).
+
+**Data model (already migrated in Supabase):** `bito_monitored_repos` (watchlist
++ per-repo incremental `poll_cursor`), `bito_github_signals` (one row per
+person/repo/action/timestamp, unique-keyed so re-runs are idempotent),
+`bito_enriched_contacts` (resolved person + company + verified email/title;
+`status`: new → resolved → enriched | no_match | suppressed).
+
+**Pipeline** (`lib/githubProspect/`, `/api/github-prospect/sync`): incremental
+GitHub poll (stars/forks/commits/PRs; cursors only advance past what was
+provably read AND inserted) → contribution-weighted per-person aggregates
+(merged PR 50, commit 40, PR 30, fork 12, star 5) → company resolution (profile
+field → org membership → commit-email DOMAINS only, never addresses) → Apollo
+org search (free; size floor `GITHUB_PROSPECT_MIN_EMPLOYEES`, default 100) →
+Apollo people-match (credits; email must be company-root-domain + not
+guessed/unavailable or the person is no_match) → HubSpot contact dedupe
+(fail-closed) + active-Apollo-sequence suppression → "WHAT I SAW" openers on
+FAST_MODEL. Weekly Vercel cron in `vercel.json` (Mon 06:00 UTC) + on-demand
+"Sync watchlist" / "Enrich pending" buttons; every skipped stage reports an
+honest note.
+
+**Operational:** set `GITHUB_TOKEN` in Vercel — keyless works for a demo (40-req
+budget) but stargazer TIMESTAMPS 401 without a token. Each enrich run matches ≤10
+people (score-ordered, contributors first) so Apollo credit spend is bounded and
+resumable. Out of scope by design: auto-send, scraping commit emails for
+outreach, changes to existing signal sources.
 
 Single-tenant prospecting tool for Bito (AI code review). Next.js, deploys from `main`
 to Vercel (`bito-new-customer-intel.vercel.app`, portal/HubSpot id `39485798`).

@@ -23,6 +23,12 @@ export function supabaseConfigured(): boolean {
   return config() !== null;
 }
 
+/** Connection details for satellite PostgREST stores (lib/githubProspect/store.ts)
+ * so they share this file's env handling without re-reading process.env. */
+export function supabaseRestConfig(): { url: string; key: string } | null {
+  return config();
+}
+
 interface SignalRow {
   id: string;
   account: string;
