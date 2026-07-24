@@ -448,6 +448,17 @@ type TierFilter = "all" | "contributors" | "forked" | "starred";
 type StatusFilter = "active" | "ready" | "pending" | "suppressed" | "all";
 type SortId = "signal" | "recent";
 
+/** Company-size floor applied in the UI (not at enrichment time) so the bar can
+ *  be moved without re-spending Apollo credits — headcount is already stored.
+ *  Employee count is the practical stand-in for codebase scale. */
+const SIZE_OPTIONS = [
+  { id: "0", label: "Any company size" },
+  { id: "250", label: "250+ employees" },
+  { id: "1000", label: "1,000+ employees" },
+  { id: "5000", label: "5,000+ employees" },
+  { id: "10000", label: "10,000+ employees" },
+] as const;
+
 export function GitHubProspecting() {
   const [prospects, setProspects] = useState<Prospect[] | null>(null);
   const [repos, setRepos] = useState<MonitoredRepo[]>([]);
@@ -460,9 +471,14 @@ export function GitHubProspecting() {
   const [query, setQuery] = useState("");
   const [repoFilter, setRepoFilter] = useState("all");
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  // Default to the workable stream: people with a verified email at a company
+  // that cleared the size bar. The raw-username queue is pipeline plumbing, not
+  // prospects — it lives behind "Pending enrich".
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ready");
+  const [minSize, setMinSize] = useState("1000");
   const [sort, setSort] = useState<SortId>("signal");
   const [page, setPage] = useState(1);
+  const [autoEnriching, setAutoEnriching] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -565,6 +581,10 @@ export function GitHubProspecting() {
       if (tierFilter === "contributors" && !isContribution(p.bestAction)) return false;
       if (tierFilter === "forked" && p.bestAction !== "forked") return false;
       if (tierFilter === "starred" && p.bestAction !== "starred") return false;
+      // Size floor. Unknown headcount only survives at "Any" — an unsized
+      // company can't be claimed to have a moderate-to-large codebase.
+      const floor = Number(minSize);
+      if (floor > 0 && !(typeof p.headcount === "number" && p.headcount >= floor)) return false;
       if (repoFilter !== "all" && p.bestRepo !== repoFilter && !p.signals.some((s) => s.repo === repoFilter))
         return false;
       if (
@@ -587,13 +607,43 @@ export function GitHubProspecting() {
       );
     }
     return sorted;
-  }, [all, query, repoFilter, tierFilter, statusFilter, sort]);
+  }, [all, query, repoFilter, tierFilter, statusFilter, minSize, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageItems = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const loading = prospects === null;
+
+  // Per-page enrichment: landing on (or advancing to) a page pumps the pending
+  // queue one bounded batch. The backend pass is score-ordered, so browsing
+  // pulls the strongest unresolved signals through resolve → size-filter →
+  // Apollo in the order you'd want them. Guarded so only one runs at a time and
+  // never while a manual sync is in flight; the free org lookup applies the
+  // size floor before the paid people-match, so sub-threshold companies never
+  // cost a credit.
+  const autoRef = useRef(false);
+  useEffect(() => {
+    if (loading || !configured || syncing || pendingCount === 0) return;
+    if (autoRef.current) return;
+    autoRef.current = true;
+    setAutoEnriching(true);
+    void (async () => {
+      try {
+        await fetch("/api/github-prospect/sync?mode=enrich", {
+          method: "POST",
+          cache: "no-store",
+        });
+        await load();
+      } catch {
+        // Silent — the manual "Enrich pending" button surfaces real errors.
+      } finally {
+        setAutoEnriching(false);
+        autoRef.current = false;
+      }
+    })();
+    // safePage in deps: paging forward triggers the next batch.
+  }, [safePage, loading, configured, syncing, pendingCount, load]);
 
   return (
     <div className="space-y-6">
@@ -608,6 +658,13 @@ export function GitHubProspecting() {
           context-layer repos. Contributions rank above stars; emails come verified from
           Apollo, never scraped from commits.
         </p>
+        {autoEnriching && (
+          <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-[11px] text-neon-400">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            enriching the pending queue — {pendingCount.toLocaleString()} left, unresolved
+            names resolve into this list as they clear the size bar
+          </p>
+        )}
       </div>
 
       {/* Metrics */}
@@ -751,6 +808,21 @@ export function GitHubProspecting() {
           <option value="contributors">Contributors (PRs + commits)</option>
           <option value="forked">Forked</option>
           <option value="starred">Starred</option>
+        </select>
+        <select
+          value={minSize}
+          onChange={(e) => {
+            setMinSize(e.target.value);
+            setPage(1);
+          }}
+          title="Company-size floor — the practical stand-in for codebase scale"
+          className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600 focus:border-neon-600/40 focus:outline-none sm:flex-none"
+        >
+          {SIZE_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
         </select>
         <select
           value={statusFilter}
