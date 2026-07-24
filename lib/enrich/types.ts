@@ -36,6 +36,15 @@ export interface EnrichContact {
   department?: string;
   /** Country the person is based in, when the provider returns it. */
   country?: string;
+  /** ICP persona verdict (lib/icpClassifier). Set server-side before the
+   *  contact reaches the UI; absent when the classifier is unconfigured. */
+  icp?: {
+    classification: "TARGET" | "ACCOUNT_ANCHOR" | "INFLUENCER" | "REJECT";
+    confidence: "high" | "medium" | "low";
+    ownsDevTooling: boolean;
+    reason: string;
+    recommendedAction: string;
+  };
 }
 
 // --------- Apollo.io ---------

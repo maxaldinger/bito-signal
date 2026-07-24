@@ -407,6 +407,18 @@ function ApolloPersonCard({
               In HubSpot
             </span>
           )}
+          {person.icp && (
+            <span
+              title={`${person.icp.reason} · ${person.icp.recommendedAction} (confidence: ${person.icp.confidence})`}
+              className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${
+                person.icp.classification === "TARGET"
+                  ? "border border-neon-600/40 bg-neon-500/15 text-neon-300"
+                  : "border border-violet-500/40 bg-violet-500/15 text-violet-300"
+              }`}
+            >
+              {person.icp.classification === "TARGET" ? "target" : "anchor"}
+            </span>
+          )}
           {person.seniority && (
             <span className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-ink-300">
               {person.seniority.replace(/_/g, " ")}
@@ -419,6 +431,14 @@ function ApolloPersonCard({
           {person.title}
           {person.title && displayCountry ? " · " : ""}
           {displayCountry && <span className="text-ink-500">{displayCountry}</span>}
+        </p>
+      )}
+      {person.icp && (
+        <p className="mt-1 text-[11px] leading-snug text-ink-500">
+          {person.icp.reason}
+          {person.icp.confidence === "low" && (
+            <span className="ml-1 text-amber-400/80">(low confidence)</span>
+          )}
         </p>
       )}
 
@@ -667,11 +687,15 @@ function ApolloStakeholders({
 
   // Drop the pinned person from the list so they're not shown twice.
   const rest = pinnedContact ? people.filter((p) => !isPinned(p)) : people;
-  // Decision-makers and gatekeepers only. Apollo is now queried by seniority
-  // alone, so ICs shouldn't arrive at all — this is a belt-and-braces filter in
-  // case a leader-titled record slips the seniority facet, and it keeps cached
-  // pre-change briefs from rendering (and auto-revealing) their old IC pool.
-  const decisionMakers = rest.filter(isDecisionMaker);
+  // Queue gate. When the ICP classifier ran, IT decides — only TARGET and
+  // ACCOUNT_ANCHOR reach the main queue (INFLUENCER/REJECT are logged, not
+  // shown). Contacts from briefs cached before the classifier existed have no
+  // verdict, so they fall back to the seniority heuristic rather than vanishing.
+  const decisionMakers = rest.filter((p) =>
+    p.icp ? p.icp.classification === "TARGET" || p.icp.classification === "ACCOUNT_ANCHOR" : isDecisionMaker(p),
+  );
+  const influencers = rest.filter((p) => p.icp?.classification === "INFLUENCER");
+  const rejected = rest.filter((p) => p.icp?.classification === "REJECT");
   const dmShown = decisionMakers.slice(0, perColumn * 2);
 
   const poolHasMore = decisionMakers.length > perColumn * 2;
@@ -715,7 +739,11 @@ function ApolloStakeholders({
         </p>
         <div className="grid gap-3 lg:grid-cols-2">
           {dmShown.length === 0 ? (
-            <p className="text-xs text-ink-500">No engineering leaders surfaced.</p>
+            <p className="text-xs text-ink-500">
+              No developer-tooling owners surfaced.
+              {rejected.length + influencers.length > 0 &&
+                ` The classifier screened out ${rejected.length + influencers.length} of ${rest.length} surfaced profiles.`}
+            </p>
           ) : (
             dmShown.map((p, i) => (
               <ApolloPersonCard
@@ -730,6 +758,28 @@ function ApolloStakeholders({
           )}
         </div>
       </div>
+
+      {/* Account map: adjacent people worth knowing about, not worth first
+          touch. Names + reasons only — no cards, so nothing auto-reveals and
+          no Apollo credit is spent on them. */}
+      {influencers.length > 0 && (
+        <details className="rounded-lg border border-ink-800 bg-ink-950/40 p-3">
+          <summary className="cursor-pointer font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink-400">
+            account map — {influencers.length} influencer{influencers.length === 1 ? "" : "s"}
+          </summary>
+          <ul className="mt-2 space-y-1.5">
+            {influencers.map((p, i) => (
+              <li key={p.apolloId || `inf-${i}`} className="text-xs text-ink-300">
+                <span className="font-medium text-ink-100">{p.name}</span>
+                {p.title ? <span className="text-ink-400"> · {p.title}</span> : null}
+                {p.icp?.reason ? (
+                  <span className="block text-[11px] text-ink-500">{p.icp.reason}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {canPullMore && (
         <div className="flex justify-center">

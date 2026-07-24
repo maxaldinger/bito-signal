@@ -7,6 +7,7 @@
 //     on lower plans). The old /mixed_people/search path 403s on most plans.
 // Auth: x-api-key header.
 
+import { classifyProfiles } from "../icpClassifier";
 import type { ApolloData, EnrichContact, ProviderResult } from "./types";
 import { pickAiDevTools } from "./types";
 import type { RegionId } from "../data";
@@ -560,6 +561,10 @@ export async function apolloPeopleByTitle(
   let orgId: string | undefined;
   let orgDomain = domain;
   let orgName: string | undefined;
+  // Company-level context for the ICP classifier. Division matters more than
+  // the logo at big diversified groups (Thermo Fisher, Danaher), so headcount
+  // sharpens ACCOUNT_ANCHOR vs REJECT materially.
+  let orgEmployees: number | undefined;
 
   // Without a domain we must resolve the org by name to get a filter handle.
   if (!orgDomain) {
@@ -575,6 +580,8 @@ export async function apolloPeopleByTitle(
       orgId = str(exact.id);
       orgDomain = str(exact.primary_domain);
       orgName = str(exact.name);
+      const emp = (exact as { estimated_num_employees?: unknown }).estimated_num_employees;
+      if (typeof emp === "number" && Number.isFinite(emp)) orgEmployees = emp;
     } catch (e) {
       return fail(true, isTimeout(e) ? "Apollo org lookup timed out" : "Apollo org lookup failed");
     }
@@ -629,8 +636,11 @@ export async function apolloPeopleByTitle(
       const b = r.body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
       return [...(b?.people ?? []), ...(b?.contacts ?? [])];
     };
-    // Keep only engineering/technology leaders from the seniority sweep —
-    // seniority alone also returns Finance/HR/Legal VPs.
+    // Cheap pre-filter only. The seniority facet returns every department, so
+    // this drops the obvious Finance/HR/Legal bulk before we spend classifier
+    // tokens. It is deliberately PERMISSIVE — the ICP classifier below makes
+    // the real call, because a regex cannot tell "Engineering and Asset
+    // Optimization" (a plant job) from "Engineering Platform" (the buyer).
     const dmRaw = peopleOf(dmRes).filter((p) => TECH_LEADER_RE.test(str(p.title) ?? ""));
 
     const seen = new Set<string>();
@@ -645,7 +655,23 @@ export async function apolloPeopleByTitle(
     // Paged on the leader query alone now. TECH_LEADER_RE filters AFTER the
     // page is fetched, so compare against the raw page size, not the kept count.
     const hasMore = peopleOf(dmRes).length >= perPage;
-    const people = merged.map(toContact).filter((c): c is EnrichContact => c !== undefined);
+    const contacts = merged.map(toContact).filter((c): c is EnrichContact => c !== undefined);
+    // ICP persona pass — decides who reaches the review queue. Runs on the whole
+    // page BEFORE any card renders, because each rendered card auto-reveals an
+    // email (a credit); classifying first means we never spend one on a REJECT.
+    // Apollo search itself is free, so the only cost here is Haiku tokens.
+    const verdicts = await classifyProfiles(contacts, (c) => ({
+      company: orgName ?? company,
+      titles: c.title,
+      headline: c.title,
+      description: [c.seniority && `seniority: ${c.seniority}`, c.department && `department: ${c.department}`]
+        .filter(Boolean)
+        .join("; "),
+      companySignals: orgEmployees
+        ? `~${orgEmployees.toLocaleString()} total employees (whole company, not the software org)`
+        : undefined,
+    }));
+    const people = contacts.map((c, i) => ({ ...c, icp: verdicts[i] }));
     if (people.length === 0)
       return {
         configured: true,

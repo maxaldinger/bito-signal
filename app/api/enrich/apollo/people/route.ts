@@ -5,7 +5,10 @@ import { apolloPeopleByTitle } from "@/lib/enrich/apollo";
 // Free people-by-title search — returns real engineering leaders with stable
 // Apollo ids (last names obfuscated until revealed per-person). Drives the
 // stakeholder cards in a deep dive.
-export const maxDuration = 30;
+// 60s: the Apollo search is fast, but the ICP classifier adds a few Haiku
+// waves over the page. The s-maxage below means a reopened brief serves from
+// the CDN and re-classifies nothing.
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const company = req.nextUrl.searchParams.get("company")?.trim() || "";
