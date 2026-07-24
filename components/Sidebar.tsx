@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Radio,
   Sparkles,
@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Building2,
   Github,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
@@ -79,6 +80,35 @@ function FilterHeading({
 // because an earlier bug stamped records the app merely *found* in HubSpot, not
 // ones it actually pushed — so the stored marks can't be trusted and a clean
 // reset (re-earned on every real push) is the only sure fix. Two-click confirm.
+function LogoutButton() {
+  const [busy, setBusy] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    fetch("/api/auth/status")
+      .then((r) => r.json())
+      .then((d: { enabled?: boolean }) => setEnabled(Boolean(d.enabled)))
+      .catch(() => {});
+  }, []);
+  if (!enabled) return null; // gate off — nothing to sign out of
+  return (
+    <button
+      onClick={async () => {
+        if (busy) return;
+        setBusy(true);
+        try {
+          await fetch("/api/auth/logout", { method: "POST" });
+        } catch {
+          // ignore — navigate regardless; middleware re-gates.
+        }
+        window.location.assign("/login");
+      }}
+      className="inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-500 transition-colors hover:text-ink-300"
+    >
+      <LogOut className="h-3.5 w-3.5" /> {busy ? "signing out…" : "sign out"}
+    </button>
+  );
+}
+
 function ResetProspected() {
   const count = useProspectedCount();
   const [armed, setArmed] = useState(false);
@@ -480,9 +510,10 @@ export function Sidebar({
 
         <ResetProspected />
 
-        <p className="mt-auto pt-6 text-center font-mono text-[10px] text-ink-500">
-          built for bito.ai
-        </p>
+        <div className="mt-auto pt-6 text-center">
+          <LogoutButton />
+          <p className="mt-3 font-mono text-[10px] text-ink-500">built for bito.ai</p>
+        </div>
         </div>
       </aside>
     </>
