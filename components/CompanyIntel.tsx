@@ -214,6 +214,12 @@ function ApolloPersonCard({
   // them in when they arrive, since the people SEARCH is too thin to include them.
   const [revealedName, setRevealedName] = useState<string | undefined>(undefined);
   const [revealedCountry, setRevealedCountry] = useState<string | undefined>(undefined);
+  // Per-person connect note. The brief's linkedinOutreach.connect is written
+  // once per COMPANY, so pushing it verbatim sends the same note to everyone in
+  // the org — and misattributes it when the signal was one person's podcast or
+  // talk. Generated on demand for this contact; falls back to the company note.
+  const [personalConnect, setPersonalConnect] = useState<string | undefined>(undefined);
+  const [connectLoading, setConnectLoading] = useState(false);
 
   const reveal = async (kind: RevealKind) => {
     if (loading) return;
@@ -271,6 +277,47 @@ function ApolloPersonCard({
       setLoading(null);
     }
   };
+
+  // Personalize the connect note for THIS contact. The brief writes one note
+  // per company, so without this every person in the org receives the same
+  // text, and any signal about a named individual ("your DX podcast") gets
+  // misattributed to colleagues who had nothing to do with it. Staggered with
+  // the reveal so a page of cards doesn't burst. Failure is silent — the
+  // company-level note is a fine fallback.
+  useEffect(() => {
+    if (!ctx.callHook || !ctx.linkedin) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      setConnectLoading(true);
+      fetch("/api/outreach/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company,
+          companyLine: ctx.companyLine,
+          callHook: ctx.callHook,
+          name: person.name,
+          title: person.title,
+          classification: person.icp?.classification,
+        }),
+      })
+        .then((r) => r.json())
+        .then((d: { ok?: boolean; connect?: string }) => {
+          if (!cancelled && d.ok && d.connect) setPersonalConnect(d.connect);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setConnectLoading(false);
+        });
+    }, autoCheckDelayMs + 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // person.name/title are stable for a mounted card; ctx is rebuilt per render
+    // so it is deliberately not a dependency (it would refire every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [person.apolloId, person.name, company, autoCheckDelayMs]);
 
   // Auto-reveal email on mount so names un-obfuscate and contact info is ready
   // without manual clicks. Phone is intentionally NOT auto-revealed: Apollo only
@@ -550,7 +597,8 @@ function ApolloPersonCard({
               const li = ctx.linkedin;
               if (!li)
                 return `${draft?.text || ctx.outreach || "—"}\n\n(Update the brief to generate the 4-touch LinkedIn set.)`;
-              const parts = [`CONNECT: ${stripEmDashes(li.connect)}`];
+              // Per-person note when it generated, else the company-level one.
+              const parts = [`CONNECT: ${stripEmDashes(personalConnect || li.connect)}`];
               if (li.dm1) {
                 parts.push(`1. ${stripEmDashes(li.dm1)}`);
                 if (li.dm2) parts.push(`2. ${stripEmDashes(li.dm2)}`);
