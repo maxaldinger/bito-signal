@@ -93,9 +93,19 @@ const ENG_TITLES = [
 // misses. Empirically the seniority facet lifts leader hits ~30x (Starbucks
 // 32 -> 1,005; Walmart 145 -> 5,555). Seniority alone also returns Finance/HR/
 // Legal VPs, so we keep only the engineering/technology leaders via TECH_LEADER_RE.
-const DM_SENIORITIES = ["c_suite", "vp", "head", "director"];
+// owner/founder/partner included so founder-CTOs at smaller orgs are fetched —
+// Apollo files them under `founder`, not `c_suite`, and the client's own
+// DECISION_SENIORITY already accepts them. They used to arrive via the deleted
+// ENG_TITLES query; without them here nothing would replace that path.
+const DM_SENIORITIES = ["c_suite", "vp", "head", "director", "owner", "founder", "partner"];
+// Two groups on purpose. Acronyms need BOTH boundaries or "ai" matches
+// "Aircraft"; word STEMS need only a leading one. The previous single-group
+// form closed with \b, so `technolog`, `infrastructur`, `reliab` and `develop`
+// could never match the words they were written for — "Chief Technology
+// Officer" was rejected outright. That stayed hidden while the ENG_TITLES query
+// (which bypassed this filter) also fed the map; it is now the only gate.
 const TECH_LEADER_RE =
-  /\b(c[ti]o|ctpo|cdo|engineer|engineering|technolog|technical|software|platform|infrastructur|devops|sre|reliab|architect|develop|data|machine\s*learning|ml|ai|cloud|digital|security)\b/i;
+  /\b(?:c[ti]o|ctpo|cdo|sre|ml|ai)\b|\b(?:engineer|technolog|technical|information|software|platform|infrastructur|infra|devops|reliab|architect|develop|data|machine\s*learning|cloud|digital|security)/i;
 
 function apiHeaders(key: string): Record<string, string> {
   return {
@@ -600,55 +610,56 @@ export async function apolloPeopleByTitle(
       else if (orgDomain) qs.append("q_organization_domains_list[]", orgDomain);
     };
 
-    // Query 1 — ICs / "feels the pain", matched by literal engineering titles.
-    const titleQs = new URLSearchParams({ page: pageNum, per_page: String(perPage) });
-    for (const t of ENG_TITLES) titleQs.append("person_titles[]", t);
-    orgFilter(titleQs);
-
-    // Query 2 — decision-makers / "gates the deal", matched by SENIORITY (not
-    // title) so we catch leaders a fixed title list misses, then tech-filtered.
+    // DECISION-MAKERS ONLY. The IC / "feels the pain" title query was removed
+    // deliberately: every sourced contact renders a card that auto-reveals an
+    // email on mount, so pulling ICs spent Apollo credits on people who neither
+    // sign nor gate the deal. Leaders are matched by SENIORITY (not literal
+    // titles) so we catch the ones a fixed list misses, then tech-filtered.
     const dmQs = new URLSearchParams({ page: pageNum, per_page: String(perPage) });
     for (const s of DM_SENIORITIES) dmQs.append("person_seniorities[]", s);
     orgFilter(dmQs);
 
-    const [titleRes, dmRes, pinned] = await Promise.all([
-      apolloJson(`${BASE}/mixed_people/api_search?${titleQs}`, key, "POST"),
+    const [dmRes, pinned] = await Promise.all([
       apolloJson(`${BASE}/mixed_people/api_search?${dmQs}`, key, "POST"),
       findPinned(),
     ]);
-    if (titleRes.status !== 200) return fail(true, statusError(titleRes.status, "people search"));
+    if (dmRes.status !== 200) return fail(true, statusError(dmRes.status, "people search"));
 
     const peopleOf = (r: { body: unknown }): ApolloPerson[] => {
       const b = r.body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
       return [...(b?.people ?? []), ...(b?.contacts ?? [])];
     };
-    const titleRaw = peopleOf(titleRes);
-    // Keep only engineering/technology leaders from the seniority sweep.
-    const dmRaw =
-      dmRes.status === 200
-        ? peopleOf(dmRes).filter((p) => TECH_LEADER_RE.test(str(p.title) ?? ""))
-        : [];
+    // Keep only engineering/technology leaders from the seniority sweep —
+    // seniority alone also returns Finance/HR/Legal VPs.
+    const dmRaw = peopleOf(dmRes).filter((p) => TECH_LEADER_RE.test(str(p.title) ?? ""));
 
-    // Merge, leaders first (so the "gates the deal" column fills), dedup by id.
     const seen = new Set<string>();
     const merged: ApolloPerson[] = [];
-    for (const p of [...dmRaw, ...titleRaw]) {
+    for (const p of dmRaw) {
       const id = str(p.id) ?? normName(str(p.name) ?? `${p.first_name ?? ""} ${p.last_name ?? ""}`);
       if (id && seen.has(id)) continue;
       if (id) seen.add(id);
       merged.push(p);
     }
 
-    const hasMore = titleRaw.length >= perPage || dmRaw.length >= perPage;
+    // Paged on the leader query alone now. TECH_LEADER_RE filters AFTER the
+    // page is fetched, so compare against the raw page size, not the kept count.
+    const hasMore = peopleOf(dmRes).length >= perPage;
     const people = merged.map(toContact).filter((c): c is EnrichContact => c !== undefined);
     if (people.length === 0)
       return {
         configured: true,
-        ok: page <= 1 ? false : true,
-        error: page <= 1 ? "No engineering leaders found" : undefined,
+        // ok:true even on page 1. A page of Finance/HR/Legal leaders is an
+        // ordinary outcome of a seniority-only sweep, not an error — and a
+        // false here 502s the route, which makes the client drop the `pinned`
+        // first-move contact it would otherwise still render.
+        ok: true,
         orgName,
         people: [],
-        hasMore: false,
+        // Carry the REAL value: a full raw page that kept nobody still has more
+        // pages behind it. Hardcoding false here permanently ended pagination
+        // the first time one page happened to hold no engineering leaders.
+        hasMore,
         pinned,
       };
     return { configured: true, ok: true, orgName, people, hasMore, pinned };

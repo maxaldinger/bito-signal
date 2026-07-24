@@ -665,27 +665,30 @@ function ApolloStakeholders({
     ((!!p.apolloId && p.apolloId === pinnedContact.apolloId) ||
       nameKey(p.name) === nameKey(pinnedContact.name));
 
-  // Drop the pinned person from the columns so they're not listed twice.
+  // Drop the pinned person from the list so they're not shown twice.
   const rest = pinnedContact ? people.filter((p) => !isPinned(p)) : people;
+  // Decision-makers and gatekeepers only. Apollo is now queried by seniority
+  // alone, so ICs shouldn't arrive at all — this is a belt-and-braces filter in
+  // case a leader-titled record slips the seniority facet, and it keeps cached
+  // pre-change briefs from rendering (and auto-revealing) their old IC pool.
   const decisionMakers = rest.filter(isDecisionMaker);
-  const practitioners = rest.filter((p) => !isDecisionMaker(p));
-  const dmShown = decisionMakers.slice(0, perColumn);
-  const prShown = practitioners.slice(0, perColumn);
+  const dmShown = decisionMakers.slice(0, perColumn * 2);
 
-  // More to show if either column has unshown people, or Apollo has more pages.
-  const poolHasMore = decisionMakers.length > perColumn || practitioners.length > perColumn;
+  const poolHasMore = decisionMakers.length > perColumn * 2;
   const canPullMore = poolHasMore || hasMore;
 
   const pullMore = async () => {
     if (loadingMore) return;
-    const next = perColumn + PER_COLUMN_STEP;
-    // Top up the pool from Apollo when showing more would run either column dry.
-    const willRunDry = decisionMakers.length < next || practitioners.length < next;
-    if (willRunDry && hasMore) {
+    const shown = perColumn * 2;
+    // Pool exhausted → fetch the next Apollo page and let it render into the
+    // CURRENT window. Widening here as well would dump a whole page of cards at
+    // once, and every card auto-reveals an email on mount.
+    if (decisionMakers.length <= shown && hasMore) {
       setLoadingMore(true);
       await fetchPage(pageFetched + 1, true).finally(() => setLoadingMore(false));
+      return;
     }
-    setPerColumn(next);
+    setPerColumn(perColumn + PER_COLUMN_STEP);
   };
 
   return (
@@ -706,48 +709,25 @@ function ApolloStakeholders({
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <div>
-          <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
-            signs / gates the deal
-          </p>
-          <div className="space-y-3">
-            {dmShown.length === 0 ? (
-              <p className="text-xs text-ink-500">None surfaced.</p>
-            ) : (
-              dmShown.map((p, i) => (
-                <ApolloPersonCard
-                  key={p.apolloId || `dm-${i}`}
-                  person={p}
-                  company={company}
-                  domain={domain}
-                  ctx={ctx}
-                  autoCheckDelayMs={i * 300}
-                />
-              ))
-            )}
-          </div>
-        </div>
-        <div>
-          <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-amber-400/90">
-            feels the pain
-          </p>
-          <div className="space-y-3">
-            {prShown.length === 0 ? (
-              <p className="text-xs text-ink-500">None surfaced.</p>
-            ) : (
-              prShown.map((p, i) => (
-                <ApolloPersonCard
-                  key={p.apolloId || `pr-${i}`}
-                  person={p}
-                  company={company}
-                  domain={domain}
-                  ctx={ctx}
-                  autoCheckDelayMs={(dmShown.length + i) * 300}
-                />
-              ))
-            )}
-          </div>
+      <div>
+        <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
+          signs / gates the deal
+        </p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {dmShown.length === 0 ? (
+            <p className="text-xs text-ink-500">No engineering leaders surfaced.</p>
+          ) : (
+            dmShown.map((p, i) => (
+              <ApolloPersonCard
+                key={p.apolloId || `dm-${i}`}
+                person={p}
+                company={company}
+                domain={domain}
+                ctx={ctx}
+                autoCheckDelayMs={i * 300}
+              />
+            ))
+          )}
         </div>
       </div>
 
