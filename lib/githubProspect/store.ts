@@ -369,6 +369,35 @@ export async function fetchProspects(cap = 3000): Promise<{
 
 /** Highest-score prospects awaiting a pipeline step (contributors first, so
  * merged-PR people always enrich before stargazers). */
+/** People suppressed ONLY for company size who now clear `floor` — the set to
+ *  re-queue when the size bar drops (e.g. an enterprise → mid-market pivot).
+ *  Matched on the size reason prefix so HubSpot-dedupe and active-sequence
+ *  suppressions are never resurrected by a threshold change. */
+export async function fetchSizeSuppressedAbove(
+  floor: number,
+  limit: number,
+): Promise<Prospect[]> {
+  const cfg = supabaseRestConfig();
+  if (!cfg) return [];
+  try {
+    const res = await fetch(
+      `${cfg.url}/rest/v1/bito_enriched_contacts?select=*&status=eq.suppressed&headcount=gte.${floor}` +
+        `&suppressed_reason=like.${encodeURIComponent("Company size*")}` +
+        `&order=score.desc,last_signal_at.desc.nullslast&limit=${limit}`,
+      {
+        headers: headers(cfg.key),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return [];
+    const rows = (await res.json()) as ProspectRow[];
+    return rows.map(rowToProspect);
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchProspectsByStatus(
   statuses: ProspectStatus[],
   limit: number,

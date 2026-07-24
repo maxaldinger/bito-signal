@@ -25,14 +25,44 @@ import {
   isFreemailDomain,
   type RequestBudget,
 } from "./collect";
-import { fetchProspectsByStatus, updateProspect } from "./store";
+import { fetchProspectsByStatus, fetchSizeSuppressedAbove, updateProspect } from "./store";
 import { ACTION_LABELS, type MonitoredRepo, type Prospect } from "./types";
 
 /** Company-size floor (total employees) — below it a prospect is suppressed,
- * not deleted, so the threshold can be tuned without losing data. */
+ * not deleted, so the threshold can be tuned without losing data.
+ *
+ * Default 1,000: Bito sells to enterprise, and the floor gates the PAID
+ * people-match, so anything well below the target segment shouldn't cost a
+ * credit. It sits deliberately under the dashboard's default 5,000 view so the
+ * UI bar can drop to enterprise-adjacent without re-enriching anyone. A real
+ * mid-market push means lowering this AND running `?mode=reopen` to re-queue
+ * the people suppressed under the old floor. */
 export function minEmployees(): number {
   const n = Number(process.env.GITHUB_PROSPECT_MIN_EMPLOYEES);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 100;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1000;
+}
+
+/** Re-queue people suppressed purely for company size who clear the CURRENT
+ * floor. Without this a lowered floor is inert: size-suppressed rows never
+ * re-enter the "resolved" queue, so the segment change would need a manual DB
+ * edit. Bounded per call; repeat until it reports 0. */
+export async function reopenSizeSuppressed(counts: PassCounts): Promise<void> {
+  const floor = minEmployees();
+  const rows = await fetchSizeSuppressedAbove(floor, REOPEN_CAP);
+  if (rows.length === 0) return;
+  let reopened = 0;
+  for (const p of rows) {
+    const r = await updateProspect(p.login, {
+      status: "resolved",
+      suppressedReason: "",
+    });
+    if (r.ok) reopened += 1;
+  }
+  if (reopened > 0) {
+    counts.notes.push(
+      `Re-queued ${reopened} prospect(s) suppressed under a higher size floor (now ≥ ${floor.toLocaleString()} employees)`,
+    );
+  }
 }
 
 // --------- Company-field cleanup ---------
@@ -166,6 +196,7 @@ export interface PassCounts {
 const RESOLVE_CAP = 20;
 const ENRICH_CAP = 10;
 const OPENER_CAP = 12;
+const REOPEN_CAP = 50;
 
 /** Stage 1 — resolve `new` prospects to a company via the GitHub API. */
 export async function resolveNewProspects(

@@ -17,6 +17,7 @@ import { collectRepo, type RequestBudget } from "@/lib/githubProspect/collect";
 import {
   enrichResolvedProspects,
   generateOpeners,
+  reopenSizeSuppressed,
   resolveNewProspects,
   type PassCounts,
 } from "@/lib/githubProspect/enrich";
@@ -78,7 +79,11 @@ async function aggregateTouchedLogins(events: GitHubSignalEvent[]): Promise<{ ok
 }
 
 async function runSync(req: NextRequest): Promise<NextResponse> {
-  const mode = req.nextUrl.searchParams.get("mode")?.trim().toLowerCase() === "enrich" ? "enrich" : "full";
+  const rawMode = req.nextUrl.searchParams.get("mode")?.trim().toLowerCase();
+  // "reopen" re-queues people suppressed under a higher size floor, then runs
+  // the normal enrich pass over them — the one action a segment change needs.
+  const mode: "full" | "enrich" | "reopen" =
+    rawMode === "enrich" ? "enrich" : rawMode === "reopen" ? "reopen" : "full";
   const noStore = { headers: { "Cache-Control": "no-store" } };
 
   if (!supabaseConfigured()) {
@@ -168,7 +173,8 @@ async function runSync(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // ---- Resolve → enrich → openers ----------------------------------------
+    // ---- Reopen → resolve → enrich → openers -------------------------------
+    if (mode === "reopen") await reopenSizeSuppressed(counts);
     await resolveNewProspects(token, budget, counts);
     await enrichResolvedProspects(counts);
     await generateOpeners(repoRes.repos, counts);

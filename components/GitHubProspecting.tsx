@@ -452,11 +452,11 @@ type SortId = "signal" | "recent";
  *  be moved without re-spending Apollo credits — headcount is already stored.
  *  Employee count is the practical stand-in for codebase scale. */
 const SIZE_OPTIONS = [
+  { id: "5000", label: "Enterprise (5,000+)" },
+  { id: "10000", label: "Large enterprise (10,000+)" },
+  { id: "1000", label: "Enterprise-adjacent (1,000+)" },
+  { id: "250", label: "Mid-market (250+)" },
   { id: "0", label: "Any company size" },
-  { id: "250", label: "250+ employees" },
-  { id: "1000", label: "1,000+ employees" },
-  { id: "5000", label: "5,000+ employees" },
-  { id: "10000", label: "10,000+ employees" },
 ] as const;
 
 export function GitHubProspecting() {
@@ -465,7 +465,7 @@ export function GitHubProspecting() {
   const [totalSignals, setTotalSignals] = useState(0);
   const [configured, setConfigured] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState<false | "full" | "enrich">(false);
+  const [syncing, setSyncing] = useState<false | "full" | "enrich" | "reopen">(false);
   const [syncResult, setSyncResult] = useState<SyncSummary | null>(null);
 
   const [query, setQuery] = useState("");
@@ -475,7 +475,10 @@ export function GitHubProspecting() {
   // that cleared the size bar. The raw-username queue is pipeline plumbing, not
   // prospects — it lives behind "Pending enrich".
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ready");
-  const [minSize, setMinSize] = useState("1000");
+  // Enterprise is the segment Bito sells to. Dropping to 1,000 is instant (the
+  // server floor sits there, so those people are already enriched); going below
+  // it needs a `?mode=reopen` pass to re-queue size-suppressed prospects.
+  const [minSize, setMinSize] = useState("5000");
   const [sort, setSort] = useState<SortId>("signal");
   const [page, setPage] = useState(1);
   const [autoEnriching, setAutoEnriching] = useState(false);
@@ -514,12 +517,12 @@ export function GitHubProspecting() {
   }, [load]);
 
   const runSync = useCallback(
-    async (mode: "full" | "enrich") => {
+    async (mode: "full" | "enrich" | "reopen") => {
       setSyncing(mode);
       setSyncResult(null);
       try {
         const res = await fetch(
-          `/api/github-prospect/sync${mode === "enrich" ? "?mode=enrich" : ""}`,
+          `/api/github-prospect/sync${mode === "full" ? "" : `?mode=${mode}`}`,
           { method: "POST", cache: "no-store" },
         );
         const raw = await readJson(res);
@@ -566,6 +569,15 @@ export function GitHubProspecting() {
   );
   const contributorCount = useMemo(
     () => all.filter((p) => isContribution(p.bestAction)).length,
+    [all],
+  );
+  // People parked purely for company size. Surfacing the count is what makes a
+  // segment change discoverable — without it a lowered floor looks broken.
+  const sizeSuppressedCount = useMemo(
+    () =>
+      all.filter(
+        (p) => p.status === "suppressed" && (p.suppressedReason ?? "").startsWith("Company size"),
+      ).length,
     [all],
   );
 
@@ -704,6 +716,21 @@ export function GitHubProspecting() {
               Enrich pending ({pendingCount})
             </button>
           )}
+          {sizeSuppressedCount > 0 && (
+            <button
+              onClick={() => void runSync("reopen")}
+              disabled={syncing !== false}
+              title="Re-queue people who were suppressed for company size but clear the current server floor (GITHUB_PROSPECT_MIN_EMPLOYEES). Needed after lowering the floor for a mid-market push."
+              className="inline-flex items-center gap-1 rounded border border-ink-700 px-2.5 py-1.5 text-xs font-medium text-ink-400 transition-colors hover:border-neon-600/40 hover:text-neon-200 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {syncing === "reopen" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              Re-queue size-suppressed ({sizeSuppressedCount})
+            </button>
+          )}
           <span className="font-mono text-[11px] text-ink-500">
             {fmtNum(totalSignals)} raw signals · weekly cron + on-demand · incremental
           </span>
@@ -711,7 +738,12 @@ export function GitHubProspecting() {
 
         {syncing !== false && (
           <p className="mt-2 font-mono text-xs text-neon-400">
-            ▸ {syncing === "full" ? "polling watchlist, resolving people, enriching…" : "resolving + enriching pending people…"}
+            ▸{" "}
+            {syncing === "full"
+              ? "polling watchlist, resolving people, enriching…"
+              : syncing === "reopen"
+                ? "re-queuing people suppressed under a higher size floor…"
+                : "resolving + enriching pending people…"}
           </p>
         )}
 
