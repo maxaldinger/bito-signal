@@ -4,19 +4,31 @@
 import { NextResponse } from "next/server";
 import {
   countGitHubSignals,
+  fetchDirectoryDomainIndex,
   fetchMonitoredRepos,
   fetchProspects,
+  rootDomain,
 } from "@/lib/githubProspect/store";
 
 export const maxDuration = 30;
 
 export async function GET() {
   try {
-    const [repos, prospects, totalSignals] = await Promise.all([
+    const [repos, prospects, totalSignals, dirIndex] = await Promise.all([
       fetchMonitoredRepos(),
       fetchProspects(),
       countGitHubSignals(),
+      fetchDirectoryDomainIndex(),
     ]);
+    // Signal 2000 join, done server-side so the client never ships 2,000
+    // directory rows just to compare domains.
+    if (dirIndex.size > 0) {
+      for (const p of prospects.prospects) {
+        if (!p.companyDomain) continue;
+        const hit = dirIndex.get(rootDomain(p.companyDomain));
+        if (hit) p.directory = hit;
+      }
+    }
     const configured = repos.configured && prospects.configured;
     const ok = repos.ok && prospects.ok;
     return NextResponse.json(

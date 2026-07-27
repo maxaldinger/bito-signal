@@ -221,17 +221,25 @@ function ProspectCard({ p, repos, index }: { p: Prospect; repos: Map<string, Mon
                 <ExternalLink className="h-3 w-3" />
               </a>
               <StatusChip p={p} />
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-              {p.company && (
-                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-100">
-                  <Building2 className="h-3.5 w-3.5 text-ink-400" />
-                  {p.company}
+              {p.directory && (
+                <span
+                  title={`${p.directory.company} is in your Signal 2000 target universe`}
+                  className="inline-flex items-center gap-1 rounded border border-violet-500/40 bg-violet-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide text-violet-300"
+                >
+                  <Building2 className="h-3 w-3" /> signal 2000
                 </span>
               )}
-              {typeof p.headcount === "number" && (
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {(p.directory?.company || p.company) && (
+                <span className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-100">
+                  <Building2 className="h-3.5 w-3.5 text-ink-400" />
+                  {p.directory?.company || p.company}
+                </span>
+              )}
+              {(typeof p.headcount === "number" || typeof p.directory?.employees === "number") && (
                 <span className="rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5 font-mono text-[11px] text-ink-400">
-                  ~{fmtNum(p.headcount)} employees
+                  ~{fmtNum(p.headcount ?? p.directory?.employees ?? 0)} employees
                 </span>
               )}
               {p.location && (
@@ -454,12 +462,15 @@ interface FilterState {
   tier: TierFilter;
   status: StatusFilter;
   size: string;
+  /** Signal 2000 accounts only. */
+  targetOnly: boolean;
 }
 
 /** The single source of truth for "does this prospect show". Module-level and
  *  parameterized so the empty state can re-run it with one filter relaxed to
  *  work out which one is hiding everything. */
 function passesFilters(p: Prospect, f: FilterState): boolean {
+  if (f.targetOnly && !p.directory) return false;
   if (f.status === "active" && (p.status === "suppressed" || p.status === "no_match")) return false;
   if (f.status === "ready" && p.status !== "enriched") return false;
   if (f.status === "pending" && p.status !== "new" && p.status !== "resolved") return false;
@@ -513,6 +524,7 @@ export function GitHubProspecting() {
   // server floor sits there, so those people are already enriched); going below
   // it needs a `?mode=reopen` pass to re-queue size-suppressed prospects.
   const [minSize, setMinSize] = useState("5000");
+  const [targetOnly, setTargetOnly] = useState(false);
   const [sort, setSort] = useState<SortId>("signal");
   const [page, setPage] = useState(1);
 
@@ -621,23 +633,36 @@ export function GitHubProspecting() {
       tier: tierFilter,
       status: statusFilter,
       size: minSize,
+      targetOnly,
     }),
-    [query, repoFilter, tierFilter, statusFilter, minSize],
+    [query, repoFilter, tierFilter, statusFilter, minSize, targetOnly],
   );
 
   const filtered = useMemo(() => {
     const sorted = all.filter((p) => passesFilters(p, active));
-    // Contributions over stars: score already encodes the weighting, so the
-    // default sort is score-first in both modes.
+    // Signal 2000 accounts float to the top of BOTH sorts: someone at a company
+    // already in the target universe outranks a stronger raw signal at a
+    // company that isn't. Within each group the normal ordering applies.
+    const tier = (p: Prospect) => (p.directory ? 0 : 1);
     if (sort === "recent") {
-      sorted.sort((a, b) => (b.lastSignalAt ?? "").localeCompare(a.lastSignalAt ?? "") || b.score - a.score);
+      sorted.sort(
+        (a, b) =>
+          tier(a) - tier(b) ||
+          (b.lastSignalAt ?? "").localeCompare(a.lastSignalAt ?? "") ||
+          b.score - a.score,
+      );
     } else {
       sorted.sort(
-        (a, b) => b.score - a.score || (b.lastSignalAt ?? "").localeCompare(a.lastSignalAt ?? ""),
+        (a, b) =>
+          tier(a) - tier(b) ||
+          b.score - a.score ||
+          (b.lastSignalAt ?? "").localeCompare(a.lastSignalAt ?? ""),
       );
     }
     return sorted;
   }, [all, active, sort]);
+
+  const targetCount = useMemo(() => all.filter((p) => p.directory).length, [all]);
 
   // How many tracked people even HAVE a company size. Headcount is only written
   // during enrichment, so early in a run this is ~0 — and then every size floor
@@ -675,6 +700,12 @@ export function GitHubProspecting() {
             },
           ]
         : []),
+      {
+        label: "the “Signal 2000 only” filter",
+        fixLabel: "Include non-target accounts",
+        fix: () => setTargetOnly(false),
+        relaxed: { ...active, targetOnly: false },
+      },
       {
         label: "the status filter",
         fixLabel: "Show everything",
@@ -907,6 +938,21 @@ export function GitHubProspecting() {
           <option value="forked">Forked</option>
           <option value="starred">Starred</option>
         </select>
+        <button
+          onClick={() => {
+            setTargetOnly((v) => !v);
+            setPage(1);
+          }}
+          title="Only people whose company domain matches a Signal 2000 target account"
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-xs font-medium transition-colors ${
+            targetOnly
+              ? "border-violet-500/50 bg-violet-500/15 text-violet-300"
+              : "border-ink-700 bg-ink-900 text-ink-300 hover:border-ink-600"
+          }`}
+        >
+          <Building2 className="h-3.5 w-3.5" />
+          Signal 2000 only{targetCount > 0 ? ` (${targetCount})` : ""}
+        </button>
         <select
           value={minSize}
           onChange={(e) => {
@@ -1014,6 +1060,7 @@ export function GitHubProspecting() {
                     setTierFilter("all");
                     setStatusFilter("all");
                     setMinSize("0");
+                    setTargetOnly(false);
                     setPage(1);
                   }}
                   className="rounded-lg border border-ink-700 px-3 py-1.5 font-mono text-xs font-medium text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200"

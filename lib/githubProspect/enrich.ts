@@ -25,7 +25,13 @@ import {
   isFreemailDomain,
   type RequestBudget,
 } from "./collect";
-import { fetchProspectsByStatus, fetchSizeSuppressedAbove, updateProspect } from "./store";
+import {
+  fetchDirectoryDomainIndex,
+  fetchProspectsByStatus,
+  fetchSizeSuppressedAbove,
+  rootDomain,
+  updateProspect,
+} from "./store";
 import { ACTION_LABELS, type MonitoredRepo, type Prospect } from "./types";
 
 /** Company-size floor (total employees) — below it a prospect is suppressed,
@@ -351,6 +357,8 @@ export async function resolveNewProspects(
 export async function enrichResolvedProspects(counts: PassCounts): Promise<void> {
   const floor = minEmployees();
   const pending = await fetchProspectsByStatus(["resolved"], ENRICH_CAP);
+  // One directory read per pass, shared by every prospect in the batch.
+  const dirIndex = pending.length > 0 ? await fetchDirectoryDomainIndex() : new Map();
   let hubspotDown = false;
   for (const p of pending) {
     if (!p.name) {
@@ -363,22 +371,34 @@ export async function enrichResolvedProspects(counts: PassCounts): Promise<void>
     const companyGuess = p.company ?? p.companyDomain;
     if (!companyGuess) continue;
 
-    // Free org lookup: canonical name, domain, real headcount. Pass the domain
-    // resolved from the prospect's profile email or public commit history when
-    // we have one — it keys Apollo exactly, where the name search is fuzzy and
-    // can land on a subsidiary (e.g. "Nordstrom" → Nordstrom Trunk Club).
     let company = p.company;
     let companyDomain = p.companyDomain;
     let headcount = p.headcount;
-    const org = await apolloOrgLookup(companyGuess, p.companyDomain);
-    if (!org.ok && org.error?.includes("APOLLO_API_KEY")) {
-      counts.notes.push("Enrichment skipped — APOLLO_API_KEY not set");
-      return;
+
+    // Signal 2000 fast path: if this person's corporate domain is already a
+    // target account, the directory has the canonical name AND the headcount,
+    // so the size gate can decide without calling Apollo at all.
+    const dirHit = p.companyDomain ? dirIndex.get(rootDomain(p.companyDomain)) : undefined;
+    if (dirHit) {
+      company = dirHit.company;
+      headcount = dirHit.employees ?? headcount;
     }
-    if (org.ok) {
-      company = org.orgName ?? company;
-      companyDomain = org.domain ?? companyDomain;
-      headcount = org.headcount ?? headcount;
+
+    // Otherwise the free org lookup: canonical name, domain, real headcount.
+    // Pass the domain resolved from the prospect's profile email or public
+    // commit history when we have one — it keys Apollo exactly, where the name
+    // search is fuzzy and can land on a subsidiary ("Nordstrom" → Trunk Club).
+    if (typeof headcount !== "number") {
+      const org = await apolloOrgLookup(companyGuess, p.companyDomain);
+      if (!org.ok && org.error?.includes("APOLLO_API_KEY")) {
+        counts.notes.push("Enrichment skipped — APOLLO_API_KEY not set");
+        return;
+      }
+      if (org.ok) {
+        company = org.orgName ?? company;
+        companyDomain = org.domain ?? companyDomain;
+        headcount = org.headcount ?? headcount;
+      }
     }
 
     // SPEND GATE. Everything above this line is free; the people-match below

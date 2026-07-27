@@ -369,6 +369,67 @@ export async function fetchProspects(cap = 3000): Promise<{
 
 /** Highest-score prospects awaiting a pipeline step (contributors first, so
  * merged-PR people always enrich before stargazers). */
+/** Registrable root of a domain ("us.experian.com" → "experian.com") so a
+ *  prospect on a regional subdomain still matches the directory's root entry. */
+export function rootDomain(d: string): string {
+  const parts = String(d || "").toLowerCase().trim().replace(/^www\./, "").split(".").filter(Boolean);
+  return parts.length <= 2 ? parts.join(".") : parts.slice(-2).join(".");
+}
+
+export interface DirectoryMatch {
+  company: string;
+  employees?: number;
+  sweEstimate?: number;
+  segment?: string;
+}
+
+/** Root-domain → Signal 2000 entry. Built from bito_directory so a GitHub
+ *  prospect whose corporate domain matches a target account can be surfaced
+ *  first — and sized for free, without an Apollo call. */
+export async function fetchDirectoryDomainIndex(): Promise<Map<string, DirectoryMatch>> {
+  const cfg = supabaseRestConfig();
+  const index = new Map<string, DirectoryMatch>();
+  if (!cfg) return index;
+  try {
+    // Only rows that HAVE a domain are useful here; ask PostgREST to filter so
+    // we transfer ~half the table.
+    for (let offset = 0; offset < 4000; offset += 1000) {
+      const res = await fetch(
+        `${cfg.url}/rest/v1/bito_directory?select=company,domain,estimated_employees,swe_estimate,segment` +
+          `&domain=not.is.null&limit=1000&offset=${offset}`,
+        { headers: headers(cfg.key), signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" },
+      );
+      if (!res.ok) break;
+      const rows = (await res.json()) as {
+        company: string;
+        domain: string | null;
+        estimated_employees: number | null;
+        swe_estimate: number | null;
+        segment: string | null;
+      }[];
+      if (!Array.isArray(rows) || rows.length === 0) break;
+      for (const r of rows) {
+        if (!r.domain) continue;
+        const key = rootDomain(r.domain);
+        // First write wins — the directory is ordered by strength, so the more
+        // significant company keeps the key if two share a root domain.
+        if (key && !index.has(key)) {
+          index.set(key, {
+            company: r.company,
+            employees: typeof r.estimated_employees === "number" ? r.estimated_employees : undefined,
+            sweEstimate: typeof r.swe_estimate === "number" ? r.swe_estimate : undefined,
+            segment: r.segment ?? undefined,
+          });
+        }
+      }
+      if (rows.length < 1000) break;
+    }
+  } catch {
+    // Index is an enhancement — an empty map just means no boosting this run.
+  }
+  return index;
+}
+
 /** People suppressed ONLY for company size who now clear `floor` — the set to
  *  re-queue when the size bar drops (e.g. an enterprise → mid-market pivot).
  *  Matched on the size reason prefix so HubSpot-dedupe and active-sequence

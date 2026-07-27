@@ -101,6 +101,16 @@ export interface Prospect {
   headcount?: number; // company employees (Apollo org search, free)
   hubspotContactId?: string;
   hubspotCompanyId?: string;
+  /** Signal 2000 hit: this person's company domain matches a row in
+   *  bito_directory, i.e. they work at an account already in the target
+   *  universe. Computed at read time by joining on root domain — NOT stored, so
+   *  it stays correct as the directory changes and needs no schema migration. */
+  directory?: {
+    company: string; // the directory's canonical company name
+    employees?: number;
+    sweEstimate?: number;
+    segment?: string;
+  };
   score: number; // summed ACTION_WEIGHTS — contributions rank first
   bestAction?: GitHubAction;
   bestRepo?: string;
