@@ -114,10 +114,53 @@ interface OrgLookup {
   headcount?: number;
 }
 
-/** Free company lookup via mixed_companies/search — no credits consumed. */
-export async function apolloOrgLookup(company: string): Promise<OrgLookup> {
+/** Read a company's canonical name + real headcount straight from a domain.
+ *  Free (organizations/enrich consumes no credits) and exact — no fuzzy name
+ *  matching, so "nordstrom.com" can't land on Nordstrom Trunk Club. */
+async function apolloOrgByDomain(domain: string, key: string): Promise<OrgLookup | null> {
+  try {
+    const res = await fetch(
+      `${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`,
+      { headers: apolloHeaders(key), signal: AbortSignal.timeout(APOLLO_TIMEOUT_MS) },
+    );
+    if (!res.ok) return null;
+    const body = (await res.json()) as { organization?: Record<string, unknown> };
+    const org = body.organization;
+    if (!org) return null;
+    const emp = org.estimated_num_employees;
+    const name = typeof org.name === "string" && org.name.trim() ? org.name.trim() : undefined;
+    const primary =
+      typeof org.primary_domain === "string" && org.primary_domain.trim()
+        ? org.primary_domain.trim()
+        : domain;
+    return {
+      ok: true,
+      orgName: name,
+      domain: primary,
+      headcount: typeof emp === "number" && Number.isFinite(emp) ? emp : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Free company lookup. Prefers a KNOWN CORPORATE DOMAIN (resolved from the
+ *  prospect's profile email or public commit history, freemail already filtered)
+ *  because a domain is an exact key, where a name search is fuzzy. Falls back to
+ *  searching by name when no domain is known. Consumes no credits either way. */
+export async function apolloOrgLookup(company: string, knownDomain?: string): Promise<OrgLookup> {
   const key = process.env.APOLLO_API_KEY;
   if (!key) return { ok: false, error: "APOLLO_API_KEY not set" };
+
+  // Domain-first: exact, and it returns the headcount the size gate needs.
+  if (knownDomain) {
+    const byDomain = await apolloOrgByDomain(knownDomain, key);
+    if (byDomain?.headcount !== undefined) return byDomain;
+    // No headcount from the domain (or the lookup failed) — fall through to the
+    // name search rather than giving up, then re-enrich from whatever domain
+    // that turns up.
+  }
+
   try {
     const qs = new URLSearchParams({
       q_organization_name: company,
@@ -152,22 +195,11 @@ export async function apolloOrgLookup(company: string): Promise<OrgLookup> {
     // real number and does not consume credits, so the gate can do its job.
     let headcount = num(org.estimated_num_employees);
     if (headcount === undefined && domain) {
-      try {
-        const er = await fetch(
-          `${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`,
-          {
-            headers: apolloHeaders(key),
-            signal: AbortSignal.timeout(APOLLO_TIMEOUT_MS),
-          },
-        );
-        if (er.ok) {
-          const eb = (await er.json()) as { organization?: Record<string, unknown> };
-          headcount = num(eb.organization?.estimated_num_employees);
-        }
-      } catch {
-        // Leave headcount undefined; the caller treats unknown size as a hard
-        // stop (below) rather than guessing.
-      }
+      // Same domain-keyed enrich as the fast path above. Unknown headcount is
+      // left undefined on failure; the caller treats that as a hard stop rather
+      // than guessing and spending a match credit.
+      const byDomain = await apolloOrgByDomain(domain, key);
+      headcount = byDomain?.headcount;
     }
     return { ok: true, orgName, domain, headcount };
   } catch (e) {
@@ -331,11 +363,14 @@ export async function enrichResolvedProspects(counts: PassCounts): Promise<void>
     const companyGuess = p.company ?? p.companyDomain;
     if (!companyGuess) continue;
 
-    // Free org lookup: canonical name, domain, real headcount.
+    // Free org lookup: canonical name, domain, real headcount. Pass the domain
+    // resolved from the prospect's profile email or public commit history when
+    // we have one — it keys Apollo exactly, where the name search is fuzzy and
+    // can land on a subsidiary (e.g. "Nordstrom" → Nordstrom Trunk Club).
     let company = p.company;
     let companyDomain = p.companyDomain;
     let headcount = p.headcount;
-    const org = await apolloOrgLookup(companyGuess);
+    const org = await apolloOrgLookup(companyGuess, p.companyDomain);
     if (!org.ok && org.error?.includes("APOLLO_API_KEY")) {
       counts.notes.push("Enrichment skipped — APOLLO_API_KEY not set");
       return;
