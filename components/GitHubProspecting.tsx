@@ -515,7 +515,6 @@ export function GitHubProspecting() {
   const [minSize, setMinSize] = useState("5000");
   const [sort, setSort] = useState<SortId>("signal");
   const [page, setPage] = useState(1);
-  const [autoEnriching, setAutoEnriching] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -721,28 +720,15 @@ export function GitHubProspecting() {
   // never while a manual sync is in flight; the free org lookup applies the
   // size floor before the paid people-match, so sub-threshold companies never
   // cost a credit.
-  const autoRef = useRef(false);
-  useEffect(() => {
-    if (loading || !configured || syncing || pendingCount === 0) return;
-    if (autoRef.current) return;
-    autoRef.current = true;
-    setAutoEnriching(true);
-    void (async () => {
-      try {
-        await fetch("/api/github-prospect/sync?mode=enrich", {
-          method: "POST",
-          cache: "no-store",
-        });
-        await load();
-      } catch {
-        // Silent — the manual "Enrich pending" button surfaces real errors.
-      } finally {
-        setAutoEnriching(false);
-        autoRef.current = false;
-      }
-    })();
-    // safePage in deps: paging forward triggers the next batch.
-  }, [safePage, loading, configured, syncing, pendingCount, load]);
+  // Per-page auto-enrichment was REMOVED. Enrichment ends in a paid Apollo
+  // people-match, so browsing pages must never spend on its own — merely
+  // opening this tab was pumping the queue a batch at a time. Enrichment is now
+  // strictly opt-in via the "Enrich pending" button, which processes one
+  // bounded batch per click.
+  //
+  // The spend is only safe because the free size gate (lib/githubProspect/
+  // enrich.ts) rejects too-small and unknown-size companies BEFORE the paid
+  // call, so a click costs credits for enterprise-sized matches only.
 
   return (
     <div className="space-y-6">
@@ -757,13 +743,6 @@ export function GitHubProspecting() {
           context-layer repos. Contributions rank above stars; emails come verified from
           Apollo, never scraped from commits.
         </p>
-        {autoEnriching && (
-          <p className="mt-2 inline-flex items-center gap-1.5 font-mono text-[11px] text-neon-400">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            enriching the pending queue — {pendingCount.toLocaleString()} left, unresolved
-            names resolve into this list as they clear the size bar
-          </p>
-        )}
       </div>
 
       {/* Metrics */}
@@ -800,7 +779,7 @@ export function GitHubProspecting() {
               ) : (
                 <MailCheck className="h-3.5 w-3.5" />
               )}
-              Enrich pending ({pendingCount})
+              Enrich next 10 of {fmtNum(pendingCount)}
             </button>
           )}
           {sizeSuppressedCount > 0 && (

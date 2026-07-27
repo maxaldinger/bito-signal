@@ -141,12 +141,35 @@ export async function apolloOrgLookup(company: string): Promise<OrgLookup> {
     const org = exact ?? records[0];
     const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
     const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
-    return {
-      ok: true,
-      orgName: str(org.name),
-      domain: str(org.primary_domain),
-      headcount: num(org.estimated_num_employees),
-    };
+    const orgName = str(org.name);
+    const domain = str(org.primary_domain);
+
+    // mixed_companies/search does NOT return estimated_num_employees — it only
+    // carries headcount GROWTH rates. Verified against the live API: Microsoft,
+    // Nordstrom and Harness all come back undefined. That silently disabled the
+    // size gate, so every resolved person fell through to the PAID people-match
+    // regardless of company size. organizations/enrich (keyed by domain) has the
+    // real number and does not consume credits, so the gate can do its job.
+    let headcount = num(org.estimated_num_employees);
+    if (headcount === undefined && domain) {
+      try {
+        const er = await fetch(
+          `${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`,
+          {
+            headers: apolloHeaders(key),
+            signal: AbortSignal.timeout(APOLLO_TIMEOUT_MS),
+          },
+        );
+        if (er.ok) {
+          const eb = (await er.json()) as { organization?: Record<string, unknown> };
+          headcount = num(eb.organization?.estimated_num_employees);
+        }
+      } catch {
+        // Leave headcount undefined; the caller treats unknown size as a hard
+        // stop (below) rather than guessing.
+      }
+    }
+    return { ok: true, orgName, domain, headcount };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -323,7 +346,23 @@ export async function enrichResolvedProspects(counts: PassCounts): Promise<void>
       headcount = org.headcount ?? headcount;
     }
 
-    if (typeof headcount === "number" && headcount < floor) {
+    // SPEND GATE. Everything above this line is free; the people-match below
+    // costs a credit. Both a known-too-small company AND an unknown size stop
+    // here — "unknown" must not mean "spend anyway", which is exactly what the
+    // old `typeof headcount === "number"` guard did once the lookup stopped
+    // returning sizes: it passed every unsized company straight to the paid
+    // call. Suppressed (not deleted), so ?mode=reopen can re-queue them.
+    if (typeof headcount !== "number") {
+      await updateProspect(p.login, {
+        company,
+        companyDomain,
+        status: "suppressed",
+        suppressedReason: `Company size unknown for "${company}" — not spending a match credit without it`,
+      });
+      counts.suppressed += 1;
+      continue;
+    }
+    if (headcount < floor) {
       await updateProspect(p.login, {
         company,
         companyDomain,
