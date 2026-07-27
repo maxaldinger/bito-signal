@@ -369,11 +369,30 @@ export async function fetchProspects(cap = 3000): Promise<{
 
 /** Highest-score prospects awaiting a pipeline step (contributors first, so
  * merged-PR people always enrich before stargazers). */
+/** Multi-label public suffixes. Without these, "monite.co.uk" collapses to
+ *  "co.uk" — and every unrelated UK company then shares one key, producing
+ *  false Signal 2000 matches (observed: monite.co.uk matching Universal Display
+ *  via a bare "co.uk" root). Not the full Public Suffix List, just the ccTLD
+ *  second-levels that actually occur in corporate domains. */
+const MULTI_SUFFIX = new Set([
+  "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "net.uk", "ltd.uk", "plc.uk",
+  "com.au", "net.au", "org.au", "edu.au", "gov.au",
+  "co.jp", "or.jp", "ne.jp", "ac.jp", "go.jp",
+  "co.nz", "com.br", "com.mx", "com.ar", "com.co", "com.pe",
+  "com.cn", "com.hk", "com.tw", "com.sg", "com.my", "com.ph", "com.vn",
+  "co.in", "co.id", "co.kr", "co.th", "co.il", "co.za", "com.tr", "com.sa",
+  "com.ua", "com.pl", "com.es", "com.pt", "co.at",
+]);
+
 /** Registrable root of a domain ("us.experian.com" → "experian.com") so a
  *  prospect on a regional subdomain still matches the directory's root entry. */
 export function rootDomain(d: string): string {
   const parts = String(d || "").toLowerCase().trim().replace(/^www\./, "").split(".").filter(Boolean);
-  return parts.length <= 2 ? parts.join(".") : parts.slice(-2).join(".");
+  if (parts.length <= 2) return parts.join(".");
+  const lastTwo = parts.slice(-2).join(".");
+  // "foo.co.uk" needs three labels to stay a company; "us.experian.com" needs two.
+  if (MULTI_SUFFIX.has(lastTwo)) return parts.slice(-3).join(".");
+  return lastTwo;
 }
 
 export interface DirectoryMatch {
@@ -411,9 +430,13 @@ export async function fetchDirectoryDomainIndex(): Promise<Map<string, Directory
       for (const r of rows) {
         if (!r.domain) continue;
         const key = rootDomain(r.domain);
+        // Never key on a bare public suffix or a single label — a directory row
+        // with a malformed domain would otherwise capture every prospect in
+        // that ccTLD.
+        if (!key || !key.includes(".") || MULTI_SUFFIX.has(key)) continue;
         // First write wins — the directory is ordered by strength, so the more
         // significant company keeps the key if two share a root domain.
-        if (key && !index.has(key)) {
+        if (!index.has(key)) {
           index.set(key, {
             company: r.company,
             employees: typeof r.estimated_employees === "number" ? r.estimated_employees : undefined,
