@@ -395,20 +395,122 @@ export function rootDomain(d: string): string {
   return lastTwo;
 }
 
+/** Why a company counts as a target, strongest intent first. */
+export type TargetKind = "prospected" | "researched" | "directory";
+
 export interface DirectoryMatch {
   company: string;
   employees?: number;
   sweEstimate?: number;
   segment?: string;
+  kind: TargetKind;
 }
 
-/** Root-domain → Signal 2000 entry. Built from bito_directory so a GitHub
- *  prospect whose corporate domain matches a target account can be surfaced
- *  first — and sized for free, without an Apollo call. */
-export async function fetchDirectoryDomainIndex(): Promise<Map<string, DirectoryMatch>> {
+const TARGET_RANK: Record<TargetKind, number> = { prospected: 0, researched: 1, directory: 2 };
+
+// Mirrors normCompany() in lib/clientStore.ts EXACTLY — the prospected store is
+// keyed with it, so any divergence silently stops those matches working.
+const COMPANY_SUFFIX =
+  /\b(inc|incorporated|corp|corporation|co|company|llc|ltd|limited|gmbh|plc|sa|ag|nv|bv|pte|pvt|private|holdings)\b/g;
+export function normCompanyName(s: string): string {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[.,]/g, " ")
+    .replace(COMPANY_SUFFIX, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Domain- and name-keyed lookups over every target source. */
+export interface TargetIndex {
+  byDomain: Map<string, DirectoryMatch>;
+  byName: Map<string, DirectoryMatch>;
+  size: number;
+}
+
+/** Keep the strongest-intent entry when several sources name the same company. */
+function offer(map: Map<string, DirectoryMatch>, key: string, m: DirectoryMatch) {
+  if (!key) return;
+  const cur = map.get(key);
+  if (!cur || TARGET_RANK[m.kind] < TARGET_RANK[cur.kind]) map.set(key, m);
+}
+
+/** Every target account, from all three sources, keyed by BOTH root domain and
+ *  normalized name:
+ *
+ *    prospected  — pushed to HubSpot from the feed (strongest: real intent)
+ *    researched  — an intel brief exists (carries domain + SWE estimate)
+ *    directory   — the standing Signal 2000 universe
+ *
+ *  Name keys matter because prospected marks store only company names, and many
+ *  GitHub prospects resolve to a name without a domain. */
+export async function fetchTargetIndex(): Promise<TargetIndex> {
   const cfg = supabaseRestConfig();
-  const index = new Map<string, DirectoryMatch>();
-  if (!cfg) return index;
+  const byDomain = new Map<string, DirectoryMatch>();
+  const byName = new Map<string, DirectoryMatch>();
+  if (!cfg) return { byDomain, byName, size: 0 };
+
+  const addDomain = (domain: string | undefined | null, m: DirectoryMatch) => {
+    if (!domain) return;
+    const key = rootDomain(domain);
+    // Never key on a bare public suffix or single label.
+    if (!key || !key.includes(".") || MULTI_SUFFIX.has(key)) return;
+    offer(byDomain, key, m);
+  };
+
+  // --- Briefs: researched companies, and the best source of domain+SWE. ---
+  try {
+    const res = await fetch(
+      `${cfg.url}/rest/v1/bito_briefs?select=company,intel&limit=2000`,
+      { headers: headers(cfg.key), signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" },
+    );
+    if (res.ok) {
+      const rows = (await res.json()) as { company: string; intel: Record<string, unknown> | null }[];
+      for (const r of Array.isArray(rows) ? rows : []) {
+        const intel = r.intel ?? {};
+        const swe = intel.sweEstimate;
+        const m: DirectoryMatch = {
+          company: r.company,
+          sweEstimate: typeof swe === "number" ? swe : undefined,
+          kind: "researched",
+        };
+        addDomain(typeof intel.domain === "string" ? intel.domain : undefined, m);
+        offer(byName, normCompanyName(r.company), m);
+      }
+    }
+  } catch {
+    /* best effort */
+  }
+
+  // --- Prospected marks: names only, but the strongest signal of intent. ---
+  try {
+    const res = await fetch(
+      `${cfg.url}/rest/v1/bito_state?select=value&store=eq.bito-prospected.v2&limit=1`,
+      { headers: headers(cfg.key), signal: AbortSignal.timeout(TIMEOUT_MS), cache: "no-store" },
+    );
+    if (res.ok) {
+      const rows = (await res.json()) as { value?: { companies?: Record<string, unknown> } }[];
+      const companies = rows?.[0]?.value?.companies ?? {};
+      for (const key of Object.keys(companies)) {
+        // Keys are ALREADY normCompany'd by the client store.
+        const existing = byName.get(key);
+        offer(byName, key, {
+          company: existing?.company ?? key,
+          sweEstimate: existing?.sweEstimate,
+          employees: existing?.employees,
+          kind: "prospected",
+        });
+        // Promote the domain entry too, when a brief gave us one.
+        for (const [dk, dv] of byDomain)
+          if (normCompanyName(dv.company) === key)
+            byDomain.set(dk, { ...dv, kind: "prospected" });
+      }
+    }
+  } catch {
+    /* best effort */
+  }
+
+  // --- Signal 2000 directory. ---
   try {
     // Only rows that HAVE a domain are useful here; ask PostgREST to filter so
     // we transfer ~half the table.
@@ -428,29 +530,41 @@ export async function fetchDirectoryDomainIndex(): Promise<Map<string, Directory
       }[];
       if (!Array.isArray(rows) || rows.length === 0) break;
       for (const r of rows) {
-        if (!r.domain) continue;
-        const key = rootDomain(r.domain);
-        // Never key on a bare public suffix or a single label — a directory row
-        // with a malformed domain would otherwise capture every prospect in
-        // that ccTLD.
-        if (!key || !key.includes(".") || MULTI_SUFFIX.has(key)) continue;
-        // First write wins — the directory is ordered by strength, so the more
-        // significant company keeps the key if two share a root domain.
-        if (!index.has(key)) {
-          index.set(key, {
-            company: r.company,
-            employees: typeof r.estimated_employees === "number" ? r.estimated_employees : undefined,
-            sweEstimate: typeof r.swe_estimate === "number" ? r.swe_estimate : undefined,
-            segment: r.segment ?? undefined,
-          });
-        }
+        const m: DirectoryMatch = {
+          company: r.company,
+          employees: typeof r.estimated_employees === "number" ? r.estimated_employees : undefined,
+          sweEstimate: typeof r.swe_estimate === "number" ? r.swe_estimate : undefined,
+          segment: r.segment ?? undefined,
+          kind: "directory",
+        };
+        // offer() keeps a stronger prospected/researched entry if one exists.
+        addDomain(r.domain, m);
+        offer(byName, normCompanyName(r.company), m);
       }
       if (rows.length < 1000) break;
     }
   } catch {
     // Index is an enhancement — an empty map just means no boosting this run.
   }
-  return index;
+  return { byDomain, byName, size: byDomain.size + byName.size };
+}
+
+/** Match a prospect to a target account: domain first (precise), then company
+ *  name (catches prospected marks, which store no domain). */
+export function matchTarget(
+  idx: TargetIndex,
+  companyDomain?: string,
+  company?: string,
+): DirectoryMatch | undefined {
+  if (companyDomain) {
+    const hit = idx.byDomain.get(rootDomain(companyDomain));
+    if (hit) return hit;
+  }
+  if (company) {
+    const key = normCompanyName(company);
+    if (key) return idx.byName.get(key);
+  }
+  return undefined;
 }
 
 /** People suppressed ONLY for company size who now clear `floor` — the set to

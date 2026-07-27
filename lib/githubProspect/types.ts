@@ -101,15 +101,17 @@ export interface Prospect {
   headcount?: number; // company employees (Apollo org search, free)
   hubspotContactId?: string;
   hubspotCompanyId?: string;
-  /** Signal 2000 hit: this person's company domain matches a row in
-   *  bito_directory, i.e. they work at an account already in the target
-   *  universe. Computed at read time by joining on root domain — NOT stored, so
-   *  it stays correct as the directory changes and needs no schema migration. */
+  /** Target-account hit: this person works somewhere already in the pipeline —
+   *  pushed to HubSpot ("prospected"), given an intel brief ("researched"), or
+   *  standing in Signal 2000 ("directory"). Computed at read time by joining on
+   *  root domain then normalized company name — NOT stored, so it stays correct
+   *  as those sets change and needs no schema migration. */
   directory?: {
-    company: string; // the directory's canonical company name
+    company: string; // canonical company name from the matching source
     employees?: number;
     sweEstimate?: number;
     segment?: string;
+    kind: "prospected" | "researched" | "directory";
   };
   score: number; // summed ACTION_WEIGHTS — contributions rank first
   bestAction?: GitHubAction;

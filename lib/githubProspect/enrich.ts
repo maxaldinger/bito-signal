@@ -26,10 +26,10 @@ import {
   type RequestBudget,
 } from "./collect";
 import {
-  fetchDirectoryDomainIndex,
   fetchProspectsByStatus,
   fetchSizeSuppressedAbove,
-  rootDomain,
+  fetchTargetIndex,
+  matchTarget,
   updateProspect,
 } from "./store";
 import { ACTION_LABELS, type MonitoredRepo, type Prospect } from "./types";
@@ -357,8 +357,8 @@ export async function resolveNewProspects(
 export async function enrichResolvedProspects(counts: PassCounts): Promise<void> {
   const floor = minEmployees();
   const pending = await fetchProspectsByStatus(["resolved"], ENRICH_CAP);
-  // One directory read per pass, shared by every prospect in the batch.
-  const dirIndex = pending.length > 0 ? await fetchDirectoryDomainIndex() : new Map();
+  // One target-index read per pass, shared by every prospect in the batch.
+  const targets = pending.length > 0 ? await fetchTargetIndex() : null;
   let hubspotDown = false;
   for (const p of pending) {
     if (!p.name) {
@@ -375,10 +375,10 @@ export async function enrichResolvedProspects(counts: PassCounts): Promise<void>
     let companyDomain = p.companyDomain;
     let headcount = p.headcount;
 
-    // Signal 2000 fast path: if this person's corporate domain is already a
-    // target account, the directory has the canonical name AND the headcount,
-    // so the size gate can decide without calling Apollo at all.
-    const dirHit = p.companyDomain ? dirIndex.get(rootDomain(p.companyDomain)) : undefined;
+    // Target-account fast path: a company you've prospected, researched, or
+    // that sits in Signal 2000 already has a canonical name and (usually) a
+    // size, so the gate can decide without calling Apollo at all.
+    const dirHit = targets ? matchTarget(targets, p.companyDomain, p.company) : undefined;
     if (dirHit) {
       company = dirHit.company;
       headcount = dirHit.employees ?? headcount;

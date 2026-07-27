@@ -221,14 +221,7 @@ function ProspectCard({ p, repos, index }: { p: Prospect; repos: Map<string, Mon
                 <ExternalLink className="h-3 w-3" />
               </a>
               <StatusChip p={p} />
-              {p.directory && (
-                <span
-                  title={`${p.directory.company} is in your Signal 2000 target universe`}
-                  className="inline-flex items-center gap-1 rounded border border-violet-500/40 bg-violet-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide text-violet-300"
-                >
-                  <Building2 className="h-3 w-3" /> signal 2000
-                </span>
-              )}
+              {p.directory && <TargetChip d={p.directory} />}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
               {(p.directory?.company || p.company) && (
@@ -456,6 +449,37 @@ type TierFilter = "all" | "contributors" | "forked" | "starred";
 type StatusFilter = "active" | "ready" | "pending" | "suppressed" | "all";
 type SortId = "signal" | "recent";
 
+/** Why this person's company is already a target — strongest intent first. */
+const TARGET_STYLE = {
+  prospected: {
+    label: "prospected",
+    hint: "already pushed to HubSpot from the signal feed",
+    cls: "border-orange-500/40 bg-orange-500/15 text-orange-200",
+  },
+  researched: {
+    label: "researched",
+    hint: "you've generated an intel brief for this company",
+    cls: "border-neon-600/40 bg-neon-500/15 text-neon-300",
+  },
+  directory: {
+    label: "signal 2000",
+    hint: "in your standing Signal 2000 target universe",
+    cls: "border-violet-500/40 bg-violet-500/15 text-violet-300",
+  },
+} as const;
+
+function TargetChip({ d }: { d: NonNullable<Prospect["directory"]> }) {
+  const s = TARGET_STYLE[d.kind] ?? TARGET_STYLE.directory;
+  return (
+    <span
+      title={`${d.company} — ${s.hint}`}
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${s.cls}`}
+    >
+      <Building2 className="h-3 w-3" /> {s.label}
+    </span>
+  );
+}
+
 interface FilterState {
   q: string;
   repo: string;
@@ -640,10 +664,12 @@ export function GitHubProspecting() {
 
   const filtered = useMemo(() => {
     const sorted = all.filter((p) => passesFilters(p, active));
-    // Signal 2000 accounts float to the top of BOTH sorts: someone at a company
-    // already in the target universe outranks a stronger raw signal at a
-    // company that isn't. Within each group the normal ordering applies.
-    const tier = (p: Prospect) => (p.directory ? 0 : 1);
+    // Target accounts float to the top of BOTH sorts, strongest intent first:
+    // prospected > researched > Signal 2000 > everyone else. Someone at a
+    // company you're already working outranks a stronger raw signal at a
+    // company you aren't. Within each tier the normal ordering applies.
+    const RANK = { prospected: 0, researched: 1, directory: 2 } as const;
+    const tier = (p: Prospect) => (p.directory ? RANK[p.directory.kind] ?? 2 : 3);
     if (sort === "recent") {
       sorted.sort(
         (a, b) =>
@@ -701,7 +727,7 @@ export function GitHubProspecting() {
           ]
         : []),
       {
-        label: "the “Signal 2000 only” filter",
+        label: "the “Target accounts only” filter",
         fixLabel: "Include non-target accounts",
         fix: () => setTargetOnly(false),
         relaxed: { ...active, targetOnly: false },
@@ -943,7 +969,7 @@ export function GitHubProspecting() {
             setTargetOnly((v) => !v);
             setPage(1);
           }}
-          title="Only people whose company domain matches a Signal 2000 target account"
+          title="Only people at companies you've prospected, researched, or that sit in Signal 2000"
           className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-xs font-medium transition-colors ${
             targetOnly
               ? "border-violet-500/50 bg-violet-500/15 text-violet-300"
@@ -951,7 +977,7 @@ export function GitHubProspecting() {
           }`}
         >
           <Building2 className="h-3.5 w-3.5" />
-          Signal 2000 only{targetCount > 0 ? ` (${targetCount})` : ""}
+          Target accounts only{targetCount > 0 ? ` (${targetCount})` : ""}
         </button>
         <select
           value={minSize}
