@@ -448,6 +448,40 @@ type TierFilter = "all" | "contributors" | "forked" | "starred";
 type StatusFilter = "active" | "ready" | "pending" | "suppressed" | "all";
 type SortId = "signal" | "recent";
 
+interface FilterState {
+  q: string;
+  repo: string;
+  tier: TierFilter;
+  status: StatusFilter;
+  size: string;
+}
+
+/** The single source of truth for "does this prospect show". Module-level and
+ *  parameterized so the empty state can re-run it with one filter relaxed to
+ *  work out which one is hiding everything. */
+function passesFilters(p: Prospect, f: FilterState): boolean {
+  if (f.status === "active" && (p.status === "suppressed" || p.status === "no_match")) return false;
+  if (f.status === "ready" && p.status !== "enriched") return false;
+  if (f.status === "pending" && p.status !== "new" && p.status !== "resolved") return false;
+  if (f.status === "suppressed" && p.status !== "suppressed" && p.status !== "no_match") return false;
+  if (f.tier === "contributors" && !isContribution(p.bestAction)) return false;
+  if (f.tier === "forked" && p.bestAction !== "forked") return false;
+  if (f.tier === "starred" && p.bestAction !== "starred") return false;
+  // Size floor. Unknown headcount only survives at "Any" — an unsized company
+  // can't be claimed to have a moderate-to-large codebase.
+  const floor = Number(f.size);
+  if (floor > 0 && !(typeof p.headcount === "number" && p.headcount >= floor)) return false;
+  if (f.repo !== "all" && p.bestRepo !== f.repo && !p.signals.some((s) => s.repo === f.repo)) return false;
+  if (
+    f.q &&
+    !p.login.toLowerCase().includes(f.q) &&
+    !(p.name ?? "").toLowerCase().includes(f.q) &&
+    !(p.company ?? "").toLowerCase().includes(f.q)
+  )
+    return false;
+  return true;
+}
+
 /** Company-size floor applied in the UI (not at enrichment time) so the bar can
  *  be moved without re-spending Apollo credits — headcount is already stored.
  *  Employee count is the practical stand-in for codebase scale. */
@@ -581,36 +615,21 @@ export function GitHubProspecting() {
     [all],
   );
 
+  const active: FilterState = useMemo(
+    () => ({
+      q: query.trim().toLowerCase(),
+      repo: repoFilter,
+      tier: tierFilter,
+      status: statusFilter,
+      size: minSize,
+    }),
+    [query, repoFilter, tierFilter, statusFilter, minSize],
+  );
+
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = all.filter((p) => {
-      if (statusFilter === "active" && (p.status === "suppressed" || p.status === "no_match"))
-        return false;
-      if (statusFilter === "ready" && p.status !== "enriched") return false;
-      if (statusFilter === "pending" && p.status !== "new" && p.status !== "resolved") return false;
-      if (statusFilter === "suppressed" && p.status !== "suppressed" && p.status !== "no_match")
-        return false;
-      if (tierFilter === "contributors" && !isContribution(p.bestAction)) return false;
-      if (tierFilter === "forked" && p.bestAction !== "forked") return false;
-      if (tierFilter === "starred" && p.bestAction !== "starred") return false;
-      // Size floor. Unknown headcount only survives at "Any" — an unsized
-      // company can't be claimed to have a moderate-to-large codebase.
-      const floor = Number(minSize);
-      if (floor > 0 && !(typeof p.headcount === "number" && p.headcount >= floor)) return false;
-      if (repoFilter !== "all" && p.bestRepo !== repoFilter && !p.signals.some((s) => s.repo === repoFilter))
-        return false;
-      if (
-        q &&
-        !p.login.toLowerCase().includes(q) &&
-        !(p.name ?? "").toLowerCase().includes(q) &&
-        !(p.company ?? "").toLowerCase().includes(q)
-      )
-        return false;
-      return true;
-    });
+    const sorted = all.filter((p) => passesFilters(p, active));
     // Contributions over stars: score already encodes the weighting, so the
     // default sort is score-first in both modes.
-    const sorted = [...list];
     if (sort === "recent") {
       sorted.sort((a, b) => (b.lastSignalAt ?? "").localeCompare(a.lastSignalAt ?? "") || b.score - a.score);
     } else {
@@ -619,7 +638,75 @@ export function GitHubProspecting() {
       );
     }
     return sorted;
-  }, [all, query, repoFilter, tierFilter, statusFilter, minSize, sort]);
+  }, [all, active, sort]);
+
+  // How many tracked people even HAVE a company size. Headcount is only written
+  // during enrichment, so early in a run this is ~0 — and then every size floor
+  // above "Any" matches nobody, which reads as a broken tab unless we say so.
+  const sizeKnownCount = useMemo(
+    () => all.filter((p) => typeof p.headcount === "number").length,
+    [all],
+  );
+
+  // When the list comes back empty, work out WHICH filter is responsible by
+  // relaxing them one at a time, so the empty state can name it and offer the
+  // exact fix instead of a vague "loosen the filters".
+  const emptyCause = useMemo(() => {
+    if (filtered.length > 0 || all.length === 0) return null;
+    const sizeLabel = SIZE_OPTIONS.find((o) => o.id === minSize)?.label ?? "size";
+    // Size is probed specially: relax it as LITTLE as possible. Offering a jump
+    // straight to "Any" would quietly abandon the enterprise segment, so step
+    // down to the HIGHEST tier that actually has people and offer that instead.
+    const currentFloor = Number(minSize);
+    const nextTier =
+      currentFloor > 0
+        ? SIZE_OPTIONS.map((o) => ({ ...o, n: Number(o.id) }))
+            .filter((o) => o.n < currentFloor)
+            .sort((a, b) => b.n - a.n)
+            .find((o) => all.some((p) => passesFilters(p, { ...active, size: o.id })))
+        : undefined;
+    const probes: { label: string; fixLabel: string; fix: () => void; relaxed: FilterState }[] = [
+      ...(nextTier
+        ? [
+            {
+              label: `the "${sizeLabel}" company-size filter`,
+              fixLabel: `Drop to ${nextTier.label}`,
+              fix: () => setMinSize(nextTier.id),
+              relaxed: { ...active, size: nextTier.id },
+            },
+          ]
+        : []),
+      {
+        label: "the status filter",
+        fixLabel: "Show everything",
+        fix: () => setStatusFilter("all"),
+        relaxed: { ...active, status: "all" },
+      },
+      {
+        label: "the signal-tier filter",
+        fixLabel: "Show all tiers",
+        fix: () => setTierFilter("all"),
+        relaxed: { ...active, tier: "all" },
+      },
+      {
+        label: "the repo filter",
+        fixLabel: "Show all repos",
+        fix: () => setRepoFilter("all"),
+        relaxed: { ...active, repo: "all" },
+      },
+      {
+        label: "the search box",
+        fixLabel: "Clear the search",
+        fix: () => setQuery(""),
+        relaxed: { ...active, q: "" },
+      },
+    ];
+    for (const probe of probes) {
+      const n = all.filter((p) => passesFilters(p, probe.relaxed)).length;
+      if (n > 0) return { ...probe, n };
+    }
+    return null;
+  }, [filtered.length, all, active, minSize]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -853,6 +940,7 @@ export function GitHubProspecting() {
           {SIZE_OPTIONS.map((o) => (
             <option key={o.id} value={o.id}>
               {o.label}
+              {o.id !== "0" && sizeKnownCount === 0 ? " — no sizes known yet" : ""}
             </option>
           ))}
         </select>
@@ -901,11 +989,61 @@ export function GitHubProspecting() {
               ? "No GitHub prospects yet."
               : "No prospects match the current filters."}
           </p>
-          <p className="mt-1 text-xs text-ink-500">
-            {all.length === 0
-              ? "Run the first watchlist sync to collect stargazers, forks and contributors."
-              : "Loosen the repo / tier / status filters, or clear the search."}
-          </p>
+          {all.length === 0 ? (
+            <p className="mt-1 text-xs text-ink-500">
+              Run the first watchlist sync to collect stargazers, forks and contributors.
+            </p>
+          ) : (
+            <>
+              {/* Name the actual cause. "Loosen the filters" is useless when one
+                  specific filter is excluding everything — especially the size
+                  floor, which matches nobody until enrichment writes headcounts. */}
+              {Number(minSize) > 0 && sizeKnownCount === 0 ? (
+                <p className="mx-auto mt-2 max-w-lg text-xs leading-relaxed text-amber-300/90">
+                  None of the {fmtNum(all.length)} tracked people have a known company size yet, so
+                  every size floor above &ldquo;Any&rdquo; matches zero. Company size is written
+                  during enrichment
+                  {pendingCount > 0 ? ` (${fmtNum(pendingCount)} still pending)` : ""}.
+                </p>
+              ) : emptyCause ? (
+                <p className="mt-2 text-xs text-ink-400">
+                  {emptyCause.label} is hiding them. Relaxing just that would show{" "}
+                  <span className="font-semibold text-ink-200">{fmtNum(emptyCause.n)}</span>.
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-ink-500">
+                  No single filter explains it, so more than one is excluding people at once.
+                  Clearing them all will show everyone.
+                </p>
+              )}
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                {emptyCause && (
+                  <button
+                    onClick={() => {
+                      emptyCause.fix();
+                      setPage(1);
+                    }}
+                    className="rounded-lg border border-neon-600/40 bg-neon-500/10 px-3 py-1.5 font-mono text-xs font-medium text-neon-300 transition-colors hover:bg-neon-500/20"
+                  >
+                    {emptyCause.fixLabel}
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setQuery("");
+                    setRepoFilter("all");
+                    setTierFilter("all");
+                    setStatusFilter("all");
+                    setMinSize("0");
+                    setPage(1);
+                  }}
+                  className="rounded-lg border border-ink-700 px-3 py-1.5 font-mono text-xs font-medium text-ink-400 transition-colors hover:border-ink-600 hover:text-ink-200"
+                >
+                  Clear all filters
+                </button>
+              </div>
+            </>
+          )}
           {all.length === 0 && (
             <button
               onClick={() => void runSync("full")}
