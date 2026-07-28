@@ -579,7 +579,14 @@ export async function fetchSizeSuppressedAbove(
   if (!cfg) return [];
   try {
     const res = await fetch(
-      `${cfg.url}/rest/v1/bito_enriched_contacts?select=*&status=eq.suppressed&headcount=gte.${floor}` +
+      `${cfg.url}/rest/v1/bito_enriched_contacts?select=*&status=eq.suppressed` +
+        // Clears the floor OR was never sized at all. Unknown-size rows MUST be
+        // included: a plain `headcount=gte.N` drops NULLs, which stranded
+        // everyone suppressed as "size unknown" forever — even after their
+        // company later became a prospected/researched target that CAN size
+        // them. Re-queued rows are re-judged by the enrich pass, so a still-
+        // unsizeable company simply suppresses again.
+        `&or=(headcount.gte.${floor},headcount.is.null)` +
         `&suppressed_reason=like.${encodeURIComponent("Company size*")}` +
         `&order=score.desc,last_signal_at.desc.nullslast&limit=${limit}`,
       {
