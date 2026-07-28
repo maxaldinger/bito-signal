@@ -21,6 +21,10 @@ export interface ICPVerdict {
   ownsDevTooling: boolean;
   reason: string;
   recommendedAction: string;
+  /** The call failed or returned something unparseable. The classification
+   *  field is a placeholder, NOT a judgement — never count it as "screened
+   *  out", and fall back to the seniority heuristic instead. */
+  failed?: boolean;
 }
 
 export interface ICPProfileInput {
@@ -230,24 +234,42 @@ interface RawVerdict {
   recommended_action?: unknown;
 }
 
-/** Parse + validate. Anything unrecognized falls back to a low-confidence
- *  REJECT, matching the spec's rule that ambiguity costs one lead, not a
- *  polluted queue. */
+/** Parse + validate. An unparseable body is a FAILURE, not a judgement — see
+ *  the `failed` flag on ICPVerdict. */
 function parseVerdict(text: string): ICPVerdict {
   const raw = extractJSON<RawVerdict>(text);
   const cls = String(raw?.classification ?? "").toUpperCase() as ICPClass;
   const conf = String(raw?.confidence ?? "").toLowerCase() as ICPConfidence;
+  if (!CLASSES.includes(cls)) {
+    return {
+      classification: "REJECT",
+      confidence: "low",
+      ownsDevTooling: false,
+      reason: "Unparseable classifier response",
+      recommendedAction: "retry",
+      failed: true,
+    };
+  }
   return {
-    classification: CLASSES.includes(cls) ? cls : "REJECT",
+    classification: cls,
     confidence: ["high", "medium", "low"].includes(conf) ? conf : "low",
     ownsDevTooling: raw?.owns_dev_tooling === true,
-    reason: String(raw?.one_line_reason ?? "").slice(0, 200) || "Unparseable classifier response",
-    recommendedAction: String(raw?.recommended_action ?? "").slice(0, 200) || "discard",
+    reason: String(raw?.one_line_reason ?? "").slice(0, 200) || "",
+    recommendedAction: String(raw?.recommended_action ?? "").slice(0, 200) || "",
   };
 }
 
-/** Classify one profile. Never throws — a failed call returns a low-confidence
- *  REJECT so a classifier outage can't silently promote junk into the queue. */
+/** Classify one profile. Never throws.
+ *
+ *  A failed call is marked `failed: true` and MUST NOT be read as a rejection.
+ *  It previously returned a plain REJECT, which made a classifier outage
+ *  indistinguishable from a deliberate screening — an account would report
+ *  "screened out 36 of 36" when the truth was 36 failed requests. Callers fall
+ *  back to the seniority heuristic when `failed` is set, so a transient outage
+ *  degrades to a slightly noisier list instead of an empty one.
+ *
+ *  Transient statuses are retried once with a short backoff, since the page
+ *  fires a burst of these concurrently and Haiku can 429 under that. */
 export async function classifyProfile(p: ICPProfileInput): Promise<ICPVerdict> {
   const user = [
     `Company: ${p.company || "(unknown)"}`,
@@ -257,25 +279,34 @@ export async function classifyProfile(p: ICPProfileInput): Promise<ICPVerdict> {
     `Company context (if available): ${p.companySignals || "(none)"}`,
   ].join("\n");
 
-  try {
-    const res = await callClaudeWithWebSearch({
-      system: SYSTEM,
-      user: `PROFILE TO CLASSIFY:\n${user}`,
-      model: FAST_MODEL,
-      webSearch: false, // pure reasoning over supplied text — no search fees
-      maxTokens: 300,
-      temperature: 0,
-    });
-    return parseVerdict(res.text);
-  } catch {
-    return {
-      classification: "REJECT",
-      confidence: "low",
-      ownsDevTooling: false,
-      reason: "Classifier call failed",
-      recommendedAction: "retry",
-    };
+  let lastError = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await callClaudeWithWebSearch({
+        system: SYSTEM,
+        user: `PROFILE TO CLASSIFY:\n${user}`,
+        model: FAST_MODEL,
+        webSearch: false, // pure reasoning over supplied text — no search fees
+        maxTokens: 300,
+        temperature: 0,
+      });
+      const v = parseVerdict(res.text);
+      if (!v.failed || attempt === 1) return v;
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+      if (attempt === 1) break;
+    }
+    // Jittered backoff so a burst of concurrent calls does not retry in lockstep.
+    await new Promise((r) => setTimeout(r, 400 + Math.floor(Math.random() * 400)));
   }
+  return {
+    classification: "REJECT",
+    confidence: "low",
+    ownsDevTooling: false,
+    reason: lastError ? `Classifier unavailable (${lastError.slice(0, 80)})` : "Classifier unavailable",
+    recommendedAction: "retry",
+    failed: true,
+  };
 }
 
 /** Classify many profiles with bounded concurrency. Haiku is cheap but a page

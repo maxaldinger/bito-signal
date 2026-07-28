@@ -806,11 +806,21 @@ function ApolloStakeholders({
   // ACCOUNT_ANCHOR reach the main queue (INFLUENCER/REJECT are logged, not
   // shown). Contacts from briefs cached before the classifier existed have no
   // verdict, so they fall back to the seniority heuristic rather than vanishing.
-  const decisionMakers = rest.filter((p) =>
-    p.icp ? p.icp.classification === "TARGET" || p.icp.classification === "ACCOUNT_ANCHOR" : isDecisionMaker(p),
-  );
-  const influencers = rest.filter((p) => p.icp?.classification === "INFLUENCER");
-  const rejected = rest.filter((p) => p.icp?.classification === "REJECT");
+  // A FAILED classification is not a verdict. Treat it as "no verdict" so the
+  // seniority heuristic decides, exactly as it does for briefs cached before
+  // the classifier existed. Without this, a rate-limited or timed-out batch
+  // reported "screened out 36 of 36" and rendered an empty section — an outage
+  // that looked identical to a deliberate screening.
+  const graded = (p: EnrichContact) => (p.icp && !p.icp.failed ? p.icp : undefined);
+  const decisionMakers = rest.filter((p) => {
+    const v = graded(p);
+    return v ? v.classification === "TARGET" || v.classification === "ACCOUNT_ANCHOR" : isDecisionMaker(p);
+  });
+  const influencers = rest.filter((p) => graded(p)?.classification === "INFLUENCER");
+  const rejected = rest.filter((p) => graded(p)?.classification === "REJECT");
+  /** Profiles the classifier could not judge at all — surfaced separately so a
+   *  classifier outage never masquerades as a screening decision. */
+  const unclassified = rest.filter((p) => p.icp?.failed).length;
 
   // ORDERING. There was none — the list arrived in Apollo's raw return order,
   // so a contact you cannot reach could sit above one you can.
@@ -907,6 +917,13 @@ function ApolloStakeholders({
               No engineering leaders surfaced.
               {rejected.length + influencers.length > 0 &&
                 ` The classifier screened out ${rejected.length + influencers.length} of ${rest.length} surfaced profiles.`}
+              {unclassified > 0 && (
+                <span className="text-amber-400/90">
+                  {" "}
+                  {unclassified} profile{unclassified === 1 ? "" : "s"} could not be classified
+                  (the classifier errored, not a screening decision) — reload to retry.
+                </span>
+              )}
             </p>
           ) : (
             dmShown.map((p, i) => (

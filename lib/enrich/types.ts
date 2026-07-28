@@ -44,6 +44,9 @@ export interface EnrichContact {
     ownsDevTooling: boolean;
     reason: string;
     recommendedAction: string;
+    /** The classifier call failed — `classification` is a placeholder, not a
+     *  judgement. Consumers must fall back rather than treat it as REJECT. */
+    failed?: boolean;
   };
 }
 
