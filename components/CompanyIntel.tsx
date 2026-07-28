@@ -739,16 +739,33 @@ function ApolloStakeholders({
   }
   if (error) return <p className="text-sm text-red-400">{error}</p>;
 
-  // The motion's named contact: Apollo's match if found, else a card built from
-  // the motion's own name/title so the person is always surfaced.
+  const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  // The motion's named contact, resolved in DESCENDING order of confidence:
+  //   1. Apollo's dedicated lookup (findPinned) — a real record with an
+  //      apolloId, so email/LinkedIn/HubSpot all work.
+  //   2. The same person already in the main results — equally enriched. This
+  //      case used to be the bug: the synthesized card below matched by name in
+  //      isPinned() and EVICTED this fully-enriched record from the grid, so
+  //      the screen showed the unreachable copy of a person we had complete
+  //      data for.
+  //   3. Nothing found — a bare card from the LLM's own name/title, which is
+  //      UNCONFIRMED: nobody has verified this person exists at this company.
+  const fromResults =
+    !pinned && keyContact?.name
+      ? people.find((p) => nameKey(p.name) === nameKey(keyContact.name!))
+      : undefined;
   const pinnedContact: EnrichContact | undefined =
-    pinned ?? (keyContact?.name ? { name: keyContact.name, title: keyContact.title } : undefined);
+    pinned ??
+    fromResults ??
+    (keyContact?.name ? { name: keyContact.name, title: keyContact.title } : undefined);
+  /** True when no provider record backs this person — the name came only from
+   *  the brief's generated motion and was never corroborated. */
+  const pinnedUnconfirmed = !pinned && !fromResults && !!pinnedContact;
 
   if (people.length === 0 && !pinnedContact) {
     return <p className="text-xs text-ink-500">No engineering stakeholders surfaced from Apollo.</p>;
   }
-
-  const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const isPinned = (p: EnrichContact) =>
     !!pinnedContact &&
     ((!!p.apolloId && p.apolloId === pinnedContact.apolloId) ||
@@ -787,10 +804,32 @@ function ApolloStakeholders({
   return (
     <div className="space-y-4">
       {pinnedContact && (
-        <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
-          <p className="mb-3 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-violet-300">
-            <Compass className="h-3.5 w-3.5" /> first move — named in the suggested motion
-          </p>
+        <div
+          className={`rounded-lg border p-3 ${
+            pinnedUnconfirmed
+              ? "border-amber-500/30 bg-amber-500/5"
+              : "border-violet-500/30 bg-violet-500/5"
+          }`}
+        >
+          {pinnedUnconfirmed ? (
+            // The brief NAMED this person, but no provider record corroborates
+            // them. Say that outright rather than presenting a generated name
+            // with the same authority as an Apollo-backed contact.
+            <div className="mb-3">
+              <p className="flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-amber-300">
+                <Compass className="h-3.5 w-3.5" /> first move — unconfirmed
+              </p>
+              <p className="mt-1 text-[11px] leading-snug text-ink-400">
+                Named by the brief&rsquo;s suggested motion, but not found in Apollo for{" "}
+                {company}. Treat the name as a lead to verify, not a contact: there is no
+                record behind it, so no email, LinkedIn, or HubSpot link can be resolved.
+              </p>
+            </div>
+          ) : (
+            <p className="mb-3 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-violet-300">
+              <Compass className="h-3.5 w-3.5" /> first move — named in the suggested motion
+            </p>
+          )}
           <ApolloPersonCard
             person={pinnedContact}
             company={company}
