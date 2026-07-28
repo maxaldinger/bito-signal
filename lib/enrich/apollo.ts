@@ -545,7 +545,10 @@ export async function apolloPeopleByTitle(
   company: string,
   domain?: string,
   page = 1,
-  pinName?: string
+  pinName?: string,
+  /** The brief's "what I saw" signal, so the ICP classifier can judge this
+   *  specific account instead of paraphrasing job titles. */
+  signal?: string
 ): Promise<ApolloPeopleResult> {
   const fail = (configured: boolean, error: string): ApolloPeopleResult => ({
     configured,
@@ -667,9 +670,20 @@ export async function apolloPeopleByTitle(
       description: [c.seniority && `seniority: ${c.seniority}`, c.department && `department: ${c.department}`]
         .filter(Boolean)
         .join("; "),
-      companySignals: orgEmployees
-        ? `~${orgEmployees.toLocaleString()} total employees (whole company, not the software org)`
-        : undefined,
+      // Real account context. Previously this was ONLY a headcount, and it was
+      // doubly dead: it is set inside the no-domain branch (briefs almost
+      // always have a domain) and mixed_companies/search does not return
+      // estimated_num_employees anyway. So the classifier saw nothing but the
+      // job title and could only paraphrase it.
+      companySignals:
+        [
+          signal ? `What we observed at this company: ${signal}` : undefined,
+          orgEmployees
+            ? `~${orgEmployees.toLocaleString()} total employees (whole company, not the software org)`
+            : undefined,
+        ]
+          .filter(Boolean)
+          .join("\n") || undefined,
     }));
     const people = contacts.map((c, i) => ({ ...c, icp: verdicts[i] }));
     if (people.length === 0)

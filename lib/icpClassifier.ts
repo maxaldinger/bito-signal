@@ -109,13 +109,25 @@ Respond with ONLY valid JSON, no markdown fences, in this exact schema:
   "classification": "TARGET" | "ACCOUNT_ANCHOR" | "INFLUENCER" | "REJECT",
   "confidence": "high" | "medium" | "low",
   "owns_dev_tooling": true | false,
-  "one_line_reason": "<max 20 words>",
+  "one_line_reason": "<max 20 words — see the rule below>",
   "recommended_action": "<max 15 words>"
 }
 
 If the role description is ambiguous between software and physical-world
 engineering, classify REJECT with confidence "low" — a false negative costs
 one missed lead; a false positive costs review time on every run.
+
+ONE_LINE_REASON RULE. The reason must add information the reader does not
+already have. They can see the person's name, title and company on the card, so
+restating the title in other words is worthless — "likely owns or gates dev
+tooling decisions" for a VP of Engineering tells them nothing.
+- When "Company context" is supplied, tie the reason to THAT: what the company
+  is doing and why this person's remit intersects it.
+- When no company context is supplied, do not pad. Say what is genuinely
+  distinguishing about the ROLE (its scope, its department, whether it is
+  platform-wide or product-line), or state the honest limit, e.g. "Title only,
+  no signal on their remit". An admission is more useful than filler.
+NEVER phrase the reason as a paraphrase of the title.
 
 CALIBRATION EXAMPLES
 

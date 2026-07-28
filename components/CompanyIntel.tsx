@@ -193,6 +193,7 @@ function ApolloPersonCard({
   ctx,
   autoCheckDelayMs,
   hideWithoutEmail = true,
+  showIcpBadge = true,
 }: {
   person: EnrichContact;
   company: string;
@@ -204,6 +205,9 @@ function ApolloPersonCard({
    *  (default). The pinned first-move contact opts out — it's named in the
    *  motion, so it stays visible and is worked via LinkedIn instead. */
   hideWithoutEmail?: boolean;
+  /** Suppressed when every visible contact shares one classification — a badge
+   *  that never varies is decoration, not information. */
+  showIcpBadge?: boolean;
 }) {
   // One in-flight reveal kind at a time, per card.
   const [loading, setLoading] = useState<RevealKind | null>(null);
@@ -463,7 +467,7 @@ function ApolloPersonCard({
               In HubSpot
             </span>
           )}
-          {person.icp && (
+          {person.icp && showIcpBadge && (
             <span
               title={`${person.icp.reason} · ${person.icp.recommendedAction} (confidence: ${person.icp.confidence})`}
               className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${
@@ -686,6 +690,9 @@ function ApolloStakeholders({
       const params = new URLSearchParams({ company, page: String(p) });
       if (domain) params.set("domain", domain);
       if (!append && pinName) params.set("pin", pinName);
+      // Forward the brief's signal so each contact's rationale can reference
+      // what's actually happening at the account, not just their title.
+      if (ctx.callHook) params.set("signal", ctx.callHook.slice(0, 600));
       const res = await fetch(`/api/enrich/apollo/people?${params.toString()}`);
       let body: ApolloPeopleResponse | { error?: string };
       try {
@@ -708,7 +715,10 @@ function ApolloStakeholders({
       setHasMore(Boolean((body as ApolloPeopleResponse).hasMore));
       setPageFetched(p);
     },
-    [company, domain, pinName],
+    // ctx.callHook only: ctx itself is rebuilt every render, which would make
+    // fetchPage a new function each time and re-fire the effect that calls it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [company, domain, pinName, ctx.callHook],
   );
 
   useEffect(() => {
@@ -782,7 +792,33 @@ function ApolloStakeholders({
   );
   const influencers = rest.filter((p) => p.icp?.classification === "INFLUENCER");
   const rejected = rest.filter((p) => p.icp?.classification === "REJECT");
-  const dmShown = decisionMakers.slice(0, perColumn * 2);
+
+  // ORDERING. There was none — the list arrived in Apollo's raw return order,
+  // so a contact you cannot reach could sit above one you can.
+  //
+  // What is knowable HERE is limited: the email is revealed per-card after
+  // mount, so deliverability is not available at sort time. Sorting on it
+  // later would make cards jump under the cursor as reveals land. So we rank
+  // on what the search itself returns, and let the verified-email gate hide
+  // the unreachable rather than merely demote them.
+  const rank = (p: EnrichContact) => {
+    let s = 0;
+    if (p.icp?.classification === "TARGET") s -= 100; // owns tooling > signs for it
+    if (p.apolloId) s -= 10; // no id means no email can ever be revealed
+    if (p.linkedinUrl) s -= 5; // a resolved profile beats a name search
+    if (p.icp?.confidence === "high") s -= 2;
+    return s;
+  };
+  const ordered = [...decisionMakers].sort((a, b) => rank(a) - rank(b));
+  const dmShown = ordered.slice(0, perColumn * 2);
+
+  // BADGE. It reads TARGET vs ANCHOR, but the filter above admits only those
+  // two, so at a Fortune-500 account where every leader classifies as
+  // ACCOUNT_ANCHOR the badge is a constant — it labels without discriminating.
+  // Only show it when the visible set actually contains both.
+  const badgeDiscriminates =
+    dmShown.some((p) => p.icp?.classification === "TARGET") &&
+    dmShown.some((p) => p.icp?.classification === "ACCOUNT_ANCHOR");
 
   const poolHasMore = decisionMakers.length > perColumn * 2;
   const canPullMore = poolHasMore || hasMore;
@@ -861,6 +897,7 @@ function ApolloStakeholders({
                 domain={domain}
                 ctx={ctx}
                 autoCheckDelayMs={i * 300}
+                showIcpBadge={badgeDiscriminates}
               />
             ))
           )}
