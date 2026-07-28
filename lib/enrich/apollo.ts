@@ -99,6 +99,26 @@ const ENG_TITLES = [
 // DECISION_SENIORITY already accepts them. They used to arrive via the deleted
 // ENG_TITLES query; without them here nothing would replace that path.
 const DM_SENIORITIES = ["c_suite", "vp", "head", "director", "owner", "founder", "partner"];
+// Engineering-LEADERSHIP titles for the second search. Apollo ORs these and
+// matches them loosely, so "engineering" catches "VP, Architecture &
+// Engineering", "Director, IT Engineering" and so on. person_departments[] was
+// tested and is silently ignored by mixed_people/api_search — titles are the
+// only server-side lever that actually narrows to engineering.
+const ENG_LEADER_TITLES = [
+  "engineering",
+  "software engineering",
+  "platform engineering",
+  "technology",
+  "developer experience",
+  "developer productivity",
+  "infrastructure",
+  "cloud engineering",
+  "chief technology officer",
+  "chief information officer",
+  "architecture",
+  "devops",
+  "site reliability",
+];
 // Two groups on purpose. Acronyms need BOTH boundaries or "ai" matches
 // "Aircraft"; word STEMS need only a leading one. The previous single-group
 // form closed with \b, so `technolog`, `infrastructur`, `reliab` and `develop`
@@ -620,20 +640,39 @@ export async function apolloPeopleByTitle(
       else if (orgDomain) qs.append("q_organization_domains_list[]", orgDomain);
     };
 
-    // DECISION-MAKERS ONLY. The IC / "feels the pain" title query was removed
-    // deliberately: every sourced contact renders a card that auto-reveals an
-    // email on mount, so pulling ICs spent Apollo credits on people who neither
-    // sign nor gate the deal. Leaders are matched by SENIORITY (not literal
-    // titles) so we catch the ones a fixed list misses, then tech-filtered.
+    // TWO queries, because seniority alone is far too thin at a large
+    // non-tech-titled enterprise. Measured on BlackRock: the seniority sweep
+    // returned 60 people of whom only 9 were engineering — the rest were
+    // Talent Acquisition, Wealth, Energy and investment leadership, discarded
+    // by the regex below. The same 60 slots spent on engineering-LEADERSHIP
+    // titles returned 60 engineering leaders.
+    //
+    // Both are org-scoped SEARCHES, which consume no Apollo credits, so this
+    // widens the pool for free. Credit spend is bounded by how many CARDS
+    // render (each auto-reveals one email), not by how many people we find.
     const dmQs = new URLSearchParams({ page: pageNum, per_page: String(perPage) });
     for (const s of DM_SENIORITIES) dmQs.append("person_seniorities[]", s);
     orgFilter(dmQs);
 
-    const [dmRes, pinned] = await Promise.all([
+    // Engineering titles AND the same seniority floor. The seniority filter is
+    // load-bearing: title keywords alone match "Site Reliability Engineer",
+    // "DevOps", "Cloud Engineer III" — the individual contributors we
+    // deliberately stopped sourcing, since every rendered card spends a reveal
+    // credit. Constrained this way the query returns only director-and-above
+    // engineering leaders.
+    const titleQs = new URLSearchParams({ page: pageNum, per_page: String(perPage) });
+    for (const t of ENG_LEADER_TITLES) titleQs.append("person_titles[]", t);
+    for (const s of DM_SENIORITIES) titleQs.append("person_seniorities[]", s);
+    orgFilter(titleQs);
+
+    const [dmRes, titleRes, pinned] = await Promise.all([
       apolloJson(`${BASE}/mixed_people/api_search?${dmQs}`, key, "POST"),
+      apolloJson(`${BASE}/mixed_people/api_search?${titleQs}`, key, "POST"),
       findPinned(),
     ]);
-    if (dmRes.status !== 200) return fail(true, statusError(dmRes.status, "people search"));
+    // Only a total failure of BOTH is fatal — either alone still yields people.
+    if (dmRes.status !== 200 && titleRes.status !== 200)
+      return fail(true, statusError(dmRes.status, "people search"));
 
     const peopleOf = (r: { body: unknown }): ApolloPerson[] => {
       const b = r.body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
@@ -644,7 +683,11 @@ export async function apolloPeopleByTitle(
     // tokens. It is deliberately PERMISSIVE — the ICP classifier below makes
     // the real call, because a regex cannot tell "Engineering and Asset
     // Optimization" (a plant job) from "Engineering Platform" (the buyer).
-    const dmRaw = peopleOf(dmRes).filter((p) => TECH_LEADER_RE.test(str(p.title) ?? ""));
+    // Title-query hits lead, since they are already engineering-scoped.
+    const dmRaw = [
+      ...(titleRes.status === 200 ? peopleOf(titleRes) : []),
+      ...(dmRes.status === 200 ? peopleOf(dmRes) : []),
+    ].filter((p) => TECH_LEADER_RE.test(str(p.title) ?? ""));
 
     const seen = new Set<string>();
     const merged: ApolloPerson[] = [];
@@ -655,9 +698,12 @@ export async function apolloPeopleByTitle(
       merged.push(p);
     }
 
-    // Paged on the leader query alone now. TECH_LEADER_RE filters AFTER the
-    // page is fetched, so compare against the raw page size, not the kept count.
-    const hasMore = peopleOf(dmRes).length >= perPage;
+    // Either query having a full page means there is more to fetch. Compare
+    // against the RAW page size — TECH_LEADER_RE filters after the fetch, so
+    // the kept count would understate what is still available.
+    const hasMore =
+      (titleRes.status === 200 && peopleOf(titleRes).length >= perPage) ||
+      (dmRes.status === 200 && peopleOf(dmRes).length >= perPage);
     const contacts = merged.map(toContact).filter((c): c is EnrichContact => c !== undefined);
     // ICP persona pass — decides who reaches the review queue. Runs on the whole
     // page BEFORE any card renders, because each rendered card auto-reveals an

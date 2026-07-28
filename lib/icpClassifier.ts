@@ -67,6 +67,16 @@ CRITICAL DISAMBIGUATION RULES (most misclassifications happen here):
 3. Data/analytics executives (CDO, VP Analytics, Head of Data) are REJECTS.
    They own data platforms, not coding tools.
 
+3b. "CIO" IS AMBIGUOUS AT FINANCIAL FIRMS. At asset managers, banks and
+   insurers it usually means Chief INVESTMENT Officer, which is a
+   portfolio-management role with no connection to software tooling. Titles
+   like "Client Chief Investment Officer", "Deputy CIO, Fixed Income",
+   "Index Equity CIO Office" are REJECTS. Only read CIO as Chief INFORMATION
+   Officer when the surrounding context is technology, IT or engineering.
+   The same caution applies to "Managing Director" at a bank: it is a rank,
+   not a function, so classify on the rest of the title and REJECT when there
+   is no engineering scope.
+
 4. The company does NOT need to be a software company. Banks, retailers,
    grocers, manufacturers, and insurers qualify if they have a large
    software engineering org (roughly 300+ software engineers). Legacy code,

@@ -448,9 +448,12 @@ function ApolloPersonCard({
   const unverifiedEmail = onCompanyDomain && !emailSendable ? revealedEmail : undefined;
   const emailChecked = emailRes !== undefined; // reveal finished (found or not)
 
-  // No company email surfaced → don't show the contact at all (after all hooks
-  // above have run). The pinned first-move card opts out via hideWithoutEmail.
-  if (hideWithoutEmail && emailChecked && !companyEmail) return null;
+  // Hide only when Apollo surfaced NO usable address at all. A contact whose
+  // address exists but is not verified stays visible: they are still workable
+  // by LinkedIn, and hiding them was gutting the list (BlackRock showed 3 of
+  // ~60 engineering leaders). The email itself is still withheld from outreach
+  // — see `unverifiedEmail` above, which renders amber and never as a mailto.
+  if (hideWithoutEmail && emailChecked && !companyEmail && !unverifiedEmail) return null;
 
   return (
     <div
