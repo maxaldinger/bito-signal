@@ -45,8 +45,12 @@ export interface HsSearchResult {
   ok: boolean;
   error?: string;
   found: boolean;
-  /** All matches (capped); first is the best guess. */
+  /** Validated matches only (capped); first is the best guess. Full-text hits
+   *  that do not actually name the queried person/company are removed. */
   records: HsRecord[];
+  /** Set when full-text hits were discarded as name mismatches — surfaced so a
+   *  silently-empty result is distinguishable from "HubSpot had nothing". */
+  note?: string;
 }
 
 export interface HsTaskResult {
@@ -195,6 +199,78 @@ interface HsObject {
   properties?: Record<string, string | null | undefined>;
 }
 
+// --------- Name-match validation ---------
+//
+// HubSpot's `query` parameter is FULL-TEXT: it OR-matches tokens across
+// searchable properties. Searching "Rich Sauser" happily returns "Sarah Rich"
+// on the shared "rich" token. Nothing downstream re-checked the result, and the
+// first row became the record a task was ATTACHED to — so one collision wrote a
+// contact's outreach onto a different, real person's timeline.
+//
+// These helpers re-validate every full-text hit against what was actually
+// asked for. Exact-key searches (email EQ / domain EQ) skip validation: they
+// are already precise.
+
+const LEGAL_SUFFIX =
+  /\b(inc|incorporated|corp|corporation|co|company|llc|l l c|ltd|limited|gmbh|plc|sa|ag|nv|bv|pte|pvt|holdings?|group|the)\b/g;
+/** Personal-name noise that must not count as a surname. */
+const NAME_NOISE = /\b(jr|sr|ii|iii|iv|phd|md|mba|cpa|pe|esq)\b/g;
+
+function nameTokens(s: string, stripLegal: boolean): string[] {
+  let t = String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // strip accents so "José" == "Jose"
+    .replace(/[^a-z0-9\s]/g, " ");
+  t = t.replace(NAME_NOISE, " ");
+  if (stripLegal) t = t.replace(LEGAL_SUFFIX, " ");
+  return t.split(/\s+/).filter(Boolean);
+}
+
+/** Would a person searching `queried` accept `found` as the same PERSON?
+ *  Surname-anchored: the last token must match (or be a clear nickname/prefix
+ *  of it), which is exactly what "Rich Sauser" vs "Sarah Rich" fails. */
+export function personNameMatches(queried: string, found: string): boolean {
+  const q = nameTokens(queried, false);
+  const f = nameTokens(found, false);
+  if (q.length === 0 || f.length === 0) return false;
+
+  const qLast = q[q.length - 1];
+  const fLast = f[f.length - 1];
+  // Surnames must agree. One may be a prefix of the other (hyphenated or
+  // truncated forms), but only when it is substantial — a 3-char prefix would
+  // re-open the collision this function exists to close.
+  const surnameOk =
+    qLast === fLast ||
+    (qLast.length >= 4 && fLast.startsWith(qLast)) ||
+    (fLast.length >= 4 && qLast.startsWith(fLast));
+  if (!surnameOk) return false;
+
+  // A surname alone is not enough — "J Sauser" vs "Rich Sauser" could be
+  // different people, but a matching first initial plus surname is the
+  // strongest signal available without an email.
+  const qFirst = q[0];
+  const fFirst = f[0];
+  if (q.length === 1 || f.length === 1) return true; // only a surname supplied
+  return (
+    qFirst === fFirst ||
+    qFirst.startsWith(fFirst) || // "rich" vs "richard" (nickname)
+    fFirst.startsWith(qFirst) ||
+    qFirst[0] === fFirst[0] // initial-only records ("R Sauser")
+  );
+}
+
+/** Would a rep accept `found` as the same COMPANY? Token-prefix, so "Ally"
+ *  matches "Ally Financial" but not "Rally Software". */
+export function companyNameMatches(queried: string, found: string): boolean {
+  const q = nameTokens(queried, true);
+  const f = nameTokens(found, true);
+  if (q.length === 0 || f.length === 0) return false;
+  const shorter = q.length <= f.length ? q : f;
+  const longer = q.length <= f.length ? f : q;
+  return shorter.every((tok, i) => longer[i] === tok);
+}
+
 /** Search HubSpot for a company (by domain, else name) or contact (by email, else name). */
 export async function hubspotSearch(
   kind: HsKind,
@@ -220,6 +296,8 @@ export async function hubspotSearch(
 
   // Exact filter when we have a strong key (domain/email); else full-text query.
   let payload: Record<string, unknown>;
+  /** Set only on the full-text path — the results then need name validation. */
+  let fullTextQuery: string | undefined;
   if (kind === "company" && opts.domain) {
     payload = {
       filterGroups: [
@@ -235,9 +313,12 @@ export async function hubspotSearch(
       limit: 5,
     };
   } else {
-    const q = (kind === "company" ? opts.name : opts.name)?.trim();
+    const q = opts.name?.trim();
     if (!q) return fail(true, `Provide a ${kind === "company" ? "company name/domain" : "contact name/email"}`);
     payload = { query: q, properties, limit: 5 };
+    // Full-text: every hit MUST be re-validated below before it can be treated
+    // as a match, because HubSpot OR-matches tokens across properties.
+    fullTextQuery = q;
   }
 
   let status: number;
@@ -251,7 +332,7 @@ export async function hubspotSearch(
 
   const results = (body as { results?: HsObject[] } | undefined)?.results ?? [];
   const pid = await portalId(key);
-  const records: HsRecord[] = results.map((r) => {
+  const all: HsRecord[] = results.map((r) => {
     const p = r.properties ?? {};
     const name =
       kind === "company"
@@ -266,7 +347,28 @@ export async function hubspotSearch(
     };
   });
 
-  return { configured: true, ok: true, found: records.length > 0, records };
+  // Validate full-text hits. A row that does not actually name the person or
+  // company we asked for is DISCARDED, not demoted — callers take records[0]
+  // and attach tasks to it, so a plausible-looking wrong row is worse than no
+  // row at all. No match now correctly reports "not in HubSpot", and the task
+  // push creates a fresh record instead of writing onto a stranger's timeline.
+  let records = all;
+  let rejected = 0;
+  if (fullTextQuery) {
+    const matches = kind === "company" ? companyNameMatches : personNameMatches;
+    records = all.filter((r) => (r.name ? matches(fullTextQuery, r.name) : false));
+    rejected = all.length - records.length;
+  }
+
+  return {
+    configured: true,
+    ok: true,
+    found: records.length > 0,
+    records,
+    ...(rejected > 0
+      ? { note: `${rejected} full-text hit${rejected === 1 ? "" : "s"} discarded as name mismatches` }
+      : {}),
+  };
 }
 
 // HubSpot default association: Contact → Company (primary).

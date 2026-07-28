@@ -33,6 +33,8 @@ interface SearchResp {
   error?: string;
   found: boolean;
   records: HsRecord[];
+  /** Present when full-text hits were discarded as name mismatches. */
+  note?: string;
 }
 interface TaskResp {
   ok: boolean;
@@ -231,8 +233,15 @@ export function HubSpotActions({
                 <ArrowUpRight className="h-3 w-3 shrink-0" />
               </a>
             ) : (
-              <span className="inline-flex items-center gap-1 text-ink-400">
+              <span
+                className="inline-flex items-center gap-1 text-ink-400"
+                // When full-text hits were rejected as name mismatches, say so:
+                // "not in HubSpot" and "HubSpot returned only wrong people" are
+                // different facts, and the rep should be able to tell them apart.
+                title={check?.note ? `${check.note} — searched "${name}"` : undefined}
+              >
                 <CircleX className="h-3.5 w-3.5" /> Not in HubSpot yet
+                {check?.note && <span className="text-ink-500"> (no name match)</span>}
               </span>
             )}
           </span>
