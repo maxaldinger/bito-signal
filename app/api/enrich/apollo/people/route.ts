@@ -29,6 +29,15 @@ export async function GET(req: NextRequest) {
   const status = result.ok ? 200 : result.configured ? 502 : 501;
   return NextResponse.json(result, {
     status,
-    headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400" },
+    // SHORT cache. This was s-maxage=3600 + stale-while-revalidate=86400, which
+    // meant a company viewed once served the SAME contact list to everyone for
+    // an hour, and could serve it stale for a further day. Every improvement to
+    // the search or the ICP classifier was therefore invisible on exactly the
+    // accounts being looked at — Goldman Sachs kept rendering a 1-contact list
+    // that predated the widened search, while Apollo held 34 engineering
+    // leaders. 60s still absorbs re-renders and rapid back-and-forth without
+    // freezing results. The upstream Apollo call is a SEARCH (no credits), so
+    // the only cost of a miss is a few Haiku classifier tokens.
+    headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
   });
 }
