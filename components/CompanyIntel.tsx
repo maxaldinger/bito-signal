@@ -25,6 +25,7 @@ import {
 
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
+import { emailStatusLabel, isSendableEmail, unsendableReason } from "@/lib/enrich/emailTrust";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
@@ -424,10 +425,18 @@ function ApolloPersonCard({
     return p.length <= 2 ? p.join(".") : p.slice(-2).join(".");
   };
   const revealedEmail = emailRes?.ok && emailRes.email ? emailRes.email : undefined;
-  const companyEmail =
-    revealedEmail && domain && rootOf(revealedEmail.split("@")[1]) === rootOf(domain)
-      ? revealedEmail
-      : undefined;
+  const onCompanyDomain =
+    !!revealedEmail && !!domain && rootOf(revealedEmail.split("@")[1]) === rootOf(domain);
+  // TWO independent gates. The domain check stops mis-association; the STATUS
+  // check stops hard bounces. Only Apollo's "verified" is sendable — an
+  // unrecognized or missing status means "unknown", and unknown must never be
+  // treated as safe to send. Apollo's reveal can return guessed/extrapolated
+  // addresses, which is what was bouncing.
+  const emailSendable = onCompanyDomain && isSendableEmail(emailRes?.emailStatus);
+  /** Safe to send AND safe to write to the CRM. */
+  const companyEmail = emailSendable ? revealedEmail : undefined;
+  /** On-domain but NOT verified: shown for research, never used for outreach. */
+  const unverifiedEmail = onCompanyDomain && !emailSendable ? revealedEmail : undefined;
   const emailChecked = emailRes !== undefined; // reveal finished (found or not)
 
   // No company email surfaced → don't show the contact at all (after all hooks
@@ -537,7 +546,7 @@ function ApolloPersonCard({
       {/* Contact email — only a COMPANY-domain address is shown/usable; if Apollo
           only has a personal/off-domain one (or none), say so plainly rather than
           surface an address that would mis-associate the contact. */}
-      {(companyEmail || emailChecked || (phoneRes?.ok && phoneRes.phone)) && (
+      {(companyEmail || unverifiedEmail || emailChecked || (phoneRes?.ok && phoneRes.phone)) && (
         <div className="mt-2 space-y-1 font-mono text-[11px]">
           {companyEmail ? (
             <p className="flex items-center gap-1.5 text-ink-200">
@@ -545,9 +554,21 @@ function ApolloPersonCard({
               <a href={`mailto:${companyEmail}`} className="break-all hover:text-sky-300">
                 {companyEmail}
               </a>
-              {emailRes?.emailStatus && (
-                <span className="text-[10px] text-ink-500">({emailRes.emailStatus})</span>
-              )}
+              <span className="text-[10px] text-neon-400">(verified)</span>
+            </p>
+          ) : unverifiedEmail ? (
+            // Deliberately NOT a mailto: an unverified address is research
+            // material, not a send target. Amber and explicit, because the old
+            // 10px grey parenthetical was easy to read straight past.
+            <p className="flex flex-wrap items-center gap-1.5 text-ink-400">
+              <Mail className="h-3 w-3 text-amber-400" />
+              <span className="break-all">{unverifiedEmail}</span>
+              <span
+                title={unsendableReason(emailRes?.emailStatus)}
+                className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300"
+              >
+                {emailStatusLabel(emailRes?.emailStatus)} — do not send
+              </span>
             </p>
           ) : emailChecked ? (
             <p className="flex items-center gap-1.5 text-ink-500">

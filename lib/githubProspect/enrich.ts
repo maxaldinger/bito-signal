@@ -16,6 +16,7 @@
 import { BITO_CONTEXT } from "../bito";
 import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "../anthropic";
 import { apolloPersonContact } from "../enrich/apollo";
+import { isSendableEmail, unsendableReason } from "../enrich/emailTrust";
 import { stripEmDashes } from "../format";
 import { hubspotSearch } from "../hubspot";
 import {
@@ -431,6 +432,10 @@ export async function enrichResolvedProspects(counts: PassCounts): Promise<void>
 
     // Verified work email + title — Apollo people-match (consumes a credit).
     // Re-use an email saved by a previous partial run instead of re-spending.
+    // An email is ONLY ever persisted after clearing the gate below, so a
+    // stored address is already-verified; the flag makes that explicit rather
+    // than relying on an empty status slipping past the check.
+    const reusedEmail = Boolean(p.email);
     const match = p.email
       ? {
           configured: true,
@@ -477,14 +482,21 @@ export async function enrichResolvedProspects(counts: PassCounts): Promise<void>
     const email = match.email;
 
     // Enforce the "verified WORK email" contract: reject personal addresses
-    // (Apollo's reveal can fall back to personal_emails) and explicitly
-    // unverified statuses — they must never surface as outreach-ready.
+    // (Apollo's reveal can fall back to personal_emails) and anything Apollo
+    // does not positively call verified.
+    //
+    // This was a DENYLIST of three statuses, which let every other value pass —
+    // including "extrapolated", which is Apollo's word for a guess. It is now an
+    // allowlist (lib/enrich/emailTrust), shared with the stakeholder cards so
+    // both pipelines apply one bar.
     const emailDomain = email.slice(email.lastIndexOf("@") + 1).toLowerCase();
-    const emailStatus = (match.emailStatus ?? "").toLowerCase();
     const offDomain = companyDomain
       ? rootDomainOf(emailDomain) !== rootDomainOf(companyDomain)
       : isFreemailDomain(emailDomain);
-    if (offDomain || emailStatus === "guessed" || emailStatus === "unavailable" || emailStatus === "unverified") {
+    // `reusedEmail` was already gated by this same check before it was stored,
+    // so it is trusted without a status. Re-revealing to re-read the status
+    // would re-spend the credit the reuse path exists to save.
+    if (offDomain || (!reusedEmail && !isSendableEmail(match.emailStatus))) {
       await updateProspect(p.login, {
         company,
         companyDomain,
@@ -492,7 +504,9 @@ export async function enrichResolvedProspects(counts: PassCounts): Promise<void>
         title: match.title,
         linkedinUrl: match.linkedinUrl,
         status: "no_match",
-        suppressedReason: "Apollo only had a personal or unverified email on file",
+        suppressedReason: offDomain
+          ? "Apollo only had a personal or off-domain email on file"
+          : unsendableReason(match.emailStatus),
       });
       continue;
     }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hubspotCreateTask, type HsKind, type HsTaskType } from "@/lib/hubspot";
 import { apolloPersonContact } from "@/lib/enrich/apollo";
+import { isSendableEmail } from "@/lib/enrich/emailTrust";
 
 // POST /api/hubspot/task
 // body: {
@@ -58,7 +59,11 @@ export async function POST(req: NextRequest) {
   if (body.kind === "contact" && body.apolloId) {
     if (!email) {
       const r = await apolloPersonContact({ id: body.apolloId, reveal: "email" });
-      if (r.ok && r.email) email = r.email;
+      // Apply the SAME verification bar the UI does. This fill-in runs
+      // server-side on an address the rep never saw, so without the check it
+      // was the one path that could write a guessed/extrapolated email into
+      // HubSpot no matter what the card displayed.
+      if (r.ok && r.email && isSendableEmail(r.emailStatus)) email = r.email;
     }
     if (!phone) {
       const r = await apolloPersonContact({ id: body.apolloId, reveal: "phone" });
