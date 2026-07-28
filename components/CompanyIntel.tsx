@@ -194,6 +194,7 @@ function ApolloPersonCard({
   autoCheckDelayMs,
   hideWithoutEmail = true,
   showIcpBadge = true,
+  unconfirmed = false,
 }: {
   person: EnrichContact;
   company: string;
@@ -208,6 +209,10 @@ function ApolloPersonCard({
   /** Suppressed when every visible contact shares one classification — a badge
    *  that never varies is decoration, not information. */
   showIcpBadge?: boolean;
+  /** No provider record backs this person (the name came from the brief's
+   *  generated motion). Blocks the HubSpot push: creating a CRM record for an
+   *  unverified name would write a possibly-fictional person into the CRM. */
+  unconfirmed?: boolean;
 }) {
   // One in-flight reveal kind at a time, per card.
   const [loading, setLoading] = useState<RevealKind | null>(null);
@@ -591,6 +596,15 @@ function ApolloPersonCard({
       )}
 
       <div className="mt-3 border-t border-ink-800 pt-3">
+        {unconfirmed ? (
+          // Pushing here would CREATE a HubSpot contact from a name only the
+          // brief's model has asserted. Verify the person exists first; the
+          // grid cards below are provider-backed and push normally.
+          <p className="font-mono text-[11px] leading-snug text-amber-300/90">
+            HubSpot push disabled — confirm this person exists before creating a CRM
+            record for them.
+          </p>
+        ) : (
         <HubSpotActions
           kind="contact"
           name={displayName}
@@ -638,6 +652,7 @@ function ApolloPersonCard({
             })()
           }
         />
+        )}
       </div>
     </div>
   );
@@ -873,6 +888,7 @@ function ApolloStakeholders({
             ctx={ctx}
             autoCheckDelayMs={0}
             hideWithoutEmail={false}
+            unconfirmed={pinnedUnconfirmed}
           />
         </div>
       )}
