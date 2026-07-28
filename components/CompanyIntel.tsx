@@ -580,7 +580,8 @@ function ApolloPersonCard({
               </span>
             </p>
           ) : emailChecked ? (
-            <p className="flex items-center gap-1.5 text-ink-500">
+            // Red: no email is a dead end for this contact, not a footnote.
+            <p className="flex items-center gap-1.5 font-semibold text-red-400">
               <Mail className="h-3 w-3" /> No company email surfaced
             </p>
           ) : null}
@@ -900,7 +901,7 @@ function ApolloStakeholders({
         <div className="grid gap-3 lg:grid-cols-2">
           {dmShown.length === 0 ? (
             <p className="text-xs text-ink-500">
-              No developer-tooling owners surfaced.
+              No engineering leaders surfaced.
               {rejected.length + influencers.length > 0 &&
                 ` The classifier screened out ${rejected.length + influencers.length} of ${rest.length} surfaced profiles.`}
             </p>

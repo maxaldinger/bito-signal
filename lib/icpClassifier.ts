@@ -75,19 +75,34 @@ CRITICAL DISAMBIGUATION RULES (most misclassifications happen here):
 
 CLASSIFICATION (choose exactly one):
 
-TARGET — Directly owns or heavily influences developer tooling decisions.
-  Title patterns: VP/Director/Head of Platform Engineering, Developer
-  Productivity, Developer Experience (DevEx), Engineering Effectiveness,
-  Engineering Enablement, Engineering Infrastructure, Developer Platform,
-  Engineering Systems. Also: VPE or CTO at companies small enough
-  (roughly under 5,000 engineers) that dev tooling rolls up to them
-  directly.
+TARGET — A senior SOFTWARE engineering leader worth contacting first. An
+  explicit developer-tooling title is the strongest form of this, but it is
+  NOT required — anyone leading a real software engineering organization at
+  director level or above is a TARGET.
+  Qualifies:
+  - Explicit tooling remit: VP/Director/Head of Platform Engineering,
+    Developer Productivity, Developer Experience (DevEx), Engineering
+    Effectiveness, Engineering Enablement, Engineering Infrastructure,
+    Developer Platform, Engineering Systems.
+  - General software engineering leadership at director level or above:
+    SVP/VP/Head/Senior Director/Director of Software Engineering,
+    Engineering, Application Development, Software Development, Cloud
+    Engineering, or a named platform/product engineering org. These people
+    set or approve the toolchain their org uses even when the title does not
+    say "tooling".
+  - VPE or CTO at companies small enough (roughly under 5,000 engineers)
+    that dev tooling rolls up to them directly.
+  Do NOT reject a genuine software engineering leader merely because the
+  title lacks the word "tooling", "platform", or "developer". Seniority plus
+  a software (not physical-world) remit is enough.
 
-ACCOUNT_ANCHOR — Too senior to be the entry point, but confirms the account
-  and marks where a deal would terminate. Map their org downward for the
-  TARGET. Title patterns: CIO, CTO, or SVP Engineering at large
-  enterprises (5,000+ engineers or Fortune 500 scale). These are future
-  economic buyers, not first-touch prospects.
+ACCOUNT_ANCHOR — Reserved for the TOP of the house at a large enterprise:
+  the person a deal terminates with, too senior to be the first touch. Use
+  it ONLY for chief-level scope — CIO, CTO, Chief Digital/Technology Officer
+  — at 5,000+ engineer or Fortune 500 scale. Map their org downward for the
+  TARGET.
+  An SVP or VP of Software Engineering is a TARGET, not an anchor, even at a
+  very large company: they run an org and can start a real evaluation.
 
 INFLUENCER — Adjacent to the buying process but not the buyer. Worth
   logging in the account map, not worth first outreach. Examples: AI
@@ -173,6 +188,17 @@ Description: Silicon/system validation, dogfood testing, wireless QA.
 Correct output: {"classification": "REJECT", "confidence": "high",
 "owns_dev_tooling": false, "one_line_reason": "Hardware validation
 engineering, not software developer tooling", "recommended_action": "discard"}
+
+EXAMPLE 5b (a general software-engineering leader — TARGET, not a reject)
+Company: American Express
+Title: SVP, Software Engineering
+Description: Leads engineering for global payments platform.
+Correct output: {"classification": "TARGET", "confidence": "high",
+"owns_dev_tooling": true, "one_line_reason": "Runs the payments platform org
+adopting agentic AI; sets its toolchain", "recommended_action": "outreach with
+TOKEN template"}
+(Note: no "tooling"/"platform"/"DevEx" in the title. Senior software
+engineering leadership is sufficient on its own.)
 
 EXAMPLE 6
 Company: Albertsons
