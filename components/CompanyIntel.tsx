@@ -26,6 +26,7 @@ import {
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { emailStatusLabel, isSendableEmail, unsendableReason } from "@/lib/enrich/emailTrust";
+import { TIER_RANK } from "@/lib/icpClassifier";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
@@ -151,6 +152,16 @@ interface ApolloRevealPayload extends ApolloRevealResult {
   name?: string;
   country?: string;
 }
+
+/** Tier badge colours. ANCHOR is the buyer, so it gets the strongest treatment;
+ *  ROUTER is amber because it means "ask them who owns this", not "pitch them". */
+const TIER_STYLE: Record<string, string> = {
+  ANCHOR: "border border-neon-600/50 bg-neon-500/20 text-neon-200",
+  TARGET: "border border-sky-500/40 bg-sky-500/15 text-sky-300",
+  ROUTER: "border border-amber-500/40 bg-amber-500/15 text-amber-300",
+  UNSCORED: "border border-ink-700 bg-ink-800 text-ink-400",
+  PASS: "border border-ink-700 bg-ink-800 text-ink-500",
+};
 
 // Apollo's `seniority` (or title, as a fallback) splits real contacts into the
 // two columns the deep dive already uses: economic buyers vs. practitioners.
@@ -477,14 +488,12 @@ function ApolloPersonCard({
           )}
           {person.icp && showIcpBadge && (
             <span
-              title={`${person.icp.reason} · ${person.icp.recommendedAction} (confidence: ${person.icp.confidence})`}
+              title={`${person.icp.reason}${person.icp.recommendedAction ? ` · ${person.icp.recommendedAction}` : ""} (confidence: ${person.icp.confidence})`}
               className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${
-                person.icp.classification === "TARGET"
-                  ? "border border-neon-600/40 bg-neon-500/15 text-neon-300"
-                  : "border border-violet-500/40 bg-violet-500/15 text-violet-300"
+                TIER_STYLE[person.icp.classification] ?? TIER_STYLE.UNSCORED
               }`}
             >
-              {person.icp.classification === "TARGET" ? "target" : "anchor"}
+              {person.icp.classification.toLowerCase()}
             </span>
           )}
           {person.seniority && (
@@ -802,22 +811,24 @@ function ApolloStakeholders({
 
   // Drop the pinned person from the list so they're not shown twice.
   const rest = pinnedContact ? people.filter((p) => !isPinned(p)) : people;
-  // Queue gate. When the ICP classifier ran, IT decides — only TARGET and
-  // ACCOUNT_ANCHOR reach the main queue (INFLUENCER/REJECT are logged, not
-  // shown). Contacts from briefs cached before the classifier existed have no
-  // verdict, so they fall back to the seniority heuristic rather than vanishing.
-  // A FAILED classification is not a verdict. Treat it as "no verdict" so the
-  // seniority heuristic decides, exactly as it does for briefs cached before
-  // the classifier existed. Without this, a rate-limited or timed-out batch
-  // reported "screened out 36 of 36" and rendered an empty section — an outage
-  // that looked identical to a deliberate screening.
+  // Queue gate. The scorer decides: ANCHOR (owns the tooling decision), TARGET
+  // (adjacent to it), ROUTER (can redirect you internally — worth one message
+  // asking who owns dev tooling) and UNSCORED all reach the queue. Only PASS is
+  // screened out, because "we could not tell" must never behave like a
+  // rejection.
+  //
+  // A FAILED verdict is not a verdict at all. Treat it as "no verdict" so the
+  // seniority heuristic decides, exactly as for briefs cached before the
+  // scorer existed. Without this, a rate-limited batch reported "screened out
+  // 36 of 36" and rendered an empty section — an outage indistinguishable from
+  // a deliberate screening.
   const graded = (p: EnrichContact) => (p.icp && !p.icp.failed ? p.icp : undefined);
   const decisionMakers = rest.filter((p) => {
     const v = graded(p);
-    return v ? v.classification === "TARGET" || v.classification === "ACCOUNT_ANCHOR" : isDecisionMaker(p);
+    return v ? v.classification !== "PASS" : isDecisionMaker(p);
   });
-  const influencers = rest.filter((p) => graded(p)?.classification === "INFLUENCER");
-  const rejected = rest.filter((p) => graded(p)?.classification === "REJECT");
+  const routers = rest.filter((p) => graded(p)?.classification === "ROUTER");
+  const rejected = rest.filter((p) => graded(p)?.classification === "PASS");
   /** Profiles the classifier could not judge at all — surfaced separately so a
    *  classifier outage never masquerades as a screening decision. */
   const unclassified = rest.filter((p) => p.icp?.failed).length;
@@ -831,8 +842,9 @@ function ApolloStakeholders({
   // on what the search itself returns, and let the verified-email gate hide
   // the unreachable rather than merely demote them.
   const rank = (p: EnrichContact) => {
-    let s = 0;
-    if (p.icp?.classification === "TARGET") s -= 100; // owns tooling > signs for it
+    // Tier dominates: ANCHOR owns the decision, TARGET is adjacent, ROUTER only
+    // redirects, UNSCORED is unknown. Reachability breaks ties within a tier.
+    let s = (TIER_RANK[p.icp?.classification ?? "UNSCORED"] ?? 3) * 100;
     if (p.apolloId) s -= 10; // no id means no email can ever be revealed
     if (p.linkedinUrl) s -= 5; // a resolved profile beats a name search
     if (p.icp?.confidence === "high") s -= 2;
@@ -841,13 +853,10 @@ function ApolloStakeholders({
   const ordered = [...decisionMakers].sort((a, b) => rank(a) - rank(b));
   const dmShown = ordered.slice(0, perColumn * 2);
 
-  // BADGE. It reads TARGET vs ANCHOR, but the filter above admits only those
-  // two, so at a Fortune-500 account where every leader classifies as
-  // ACCOUNT_ANCHOR the badge is a constant — it labels without discriminating.
-  // Only show it when the visible set actually contains both.
+  // BADGE. A tier label that never varies is decoration, not information, so
+  // only show it when the visible set actually contains more than one tier.
   const badgeDiscriminates =
-    dmShown.some((p) => p.icp?.classification === "TARGET") &&
-    dmShown.some((p) => p.icp?.classification === "ACCOUNT_ANCHOR");
+    new Set(dmShown.map((p) => p.icp?.classification).filter(Boolean)).size > 1;
 
   const poolHasMore = decisionMakers.length > perColumn * 2;
   const canPullMore = poolHasMore || hasMore;
@@ -915,13 +924,13 @@ function ApolloStakeholders({
           {dmShown.length === 0 ? (
             <p className="text-xs text-ink-500">
               No engineering leaders surfaced.
-              {rejected.length + influencers.length > 0 &&
-                ` The classifier screened out ${rejected.length + influencers.length} of ${rest.length} surfaced profiles.`}
+              {rejected.length > 0 &&
+                ` Scored ${rejected.length} of ${rest.length} surfaced profiles as PASS (no connection to how code gets written).`}
               {unclassified > 0 && (
                 <span className="text-amber-400/90">
                   {" "}
-                  {unclassified} profile{unclassified === 1 ? "" : "s"} could not be classified
-                  (the classifier errored, not a screening decision) — reload to retry.
+                  {unclassified} profile{unclassified === 1 ? "" : "s"} could not be scored (the
+                  scorer errored, not a screening decision) — reload to retry.
                 </span>
               )}
             </p>
@@ -941,26 +950,15 @@ function ApolloStakeholders({
         </div>
       </div>
 
-      {/* Account map: adjacent people worth knowing about, not worth first
-          touch. Names + reasons only — no cards, so nothing auto-reveals and
-          no Apollo credit is spent on them. */}
-      {influencers.length > 0 && (
-        <details className="rounded-lg border border-ink-800 bg-ink-950/40 p-3">
-          <summary className="cursor-pointer font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink-400">
-            account map — {influencers.length} influencer{influencers.length === 1 ? "" : "s"}
-          </summary>
-          <ul className="mt-2 space-y-1.5">
-            {influencers.map((p, i) => (
-              <li key={p.apolloId || `inf-${i}`} className="text-xs text-ink-300">
-                <span className="font-medium text-ink-100">{p.name}</span>
-                {p.title ? <span className="text-ink-400"> · {p.title}</span> : null}
-                {p.icp?.reason ? (
-                  <span className="block text-[11px] text-ink-500">{p.icp.reason}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </details>
+      {/* ROUTERs used to live in a separate collapsed "account map". They now
+          render as normal cards in the grid, ranked below ANCHOR and TARGET
+          and badged amber, because the spec makes them actionable: worth one
+          message asking who owns developer tooling. */}
+      {routers.length > 0 && (
+        <p className="font-mono text-[11px] text-ink-500">
+          {routers.length} of these {routers.length === 1 ? "is a" : "are"} ROUTER
+          {routers.length === 1 ? "" : "s"} — ask who owns developer tooling, don&rsquo;t pitch.
+        </p>
       )}
 
       {canPullMore && (

@@ -39,7 +39,10 @@ export interface EnrichContact {
   /** ICP persona verdict (lib/icpClassifier). Set server-side before the
    *  contact reaches the UI; absent when the classifier is unconfigured. */
   icp?: {
-    classification: "TARGET" | "ACCOUNT_ANCHOR" | "INFLUENCER" | "REJECT";
+    /** ANCHOR owns the tooling decision, TARGET is adjacent to it, ROUTER can
+     *  redirect you internally, PASS is unrelated, UNSCORED means the profile
+     *  did not support a confident call. */
+    classification: "ANCHOR" | "TARGET" | "ROUTER" | "PASS" | "UNSCORED";
     confidence: "high" | "medium" | "low";
     ownsDevTooling: boolean;
     reason: string;

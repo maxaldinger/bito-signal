@@ -1,18 +1,24 @@
-// ICP persona classifier — decides whether a surfaced profile is someone who
-// actually buys developer tooling, before they reach the review queue.
+// Contact tiering — scores each surfaced profile by what they actually own,
+// before they reach the review queue.
 //
 // This replaces title regexes as the qualification gate. A regex can't tell
 // "Senior Director, Engineering and Asset Optimization" (a plant job) from
-// "Director of Engineering Platform" (the buyer), and the previous one silently
-// rejected "Chief Technology Officer" for a word-boundary reason. Titles are
-// natural language; classify them with a model.
+// "Director of Engineering Platform" (the buyer). Titles are natural language;
+// score them with a model.
+//
+// Contacts are scored A PAGE AT A TIME, not one call each. Two reasons: the
+// spec requires a distinct rationale per contact ("if two contacts would
+// receive the same rationale, you have not evaluated them"), which is
+// impossible when each call is blind to the others; and a page used to fire ~30
+// concurrent Haiku calls, which is exactly the burst shape that draws a 429 and
+// made an outage look like a screening decision.
 //
 // Runs on FAST_MODEL (Haiku) with web_search OFF — pure reasoning over text the
 // caller already has, so it bills tokens only, no search fees.
 
 import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "./anthropic";
 
-export type ICPClass = "TARGET" | "ACCOUNT_ANCHOR" | "INFLUENCER" | "REJECT";
+export type ICPClass = "ANCHOR" | "TARGET" | "ROUTER" | "PASS" | "UNSCORED";
 export type ICPConfidence = "high" | "medium" | "low";
 
 export interface ICPVerdict {
@@ -32,251 +38,134 @@ export interface ICPProfileInput {
   headline?: string;
   titles?: string;
   description?: string;
-  /** Company-level signals (eng headcount, job-post keywords). Materially
-   *  improves ACCOUNT_ANCHOR vs REJECT at big diversified companies where the
-   *  division matters more than the logo (Thermo Fisher, Danaher). */
+  /** Company-level signals (eng headcount, the account's live signal). Lets the
+   *  rationale reference what is happening at THIS account rather than
+   *  paraphrasing the job title. */
   companySignals?: string;
 }
 
-/** Classifications that belong in the main review queue. */
-export const QUEUE_CLASSES: ICPClass[] = ["TARGET", "ACCOUNT_ANCHOR"];
+/** Tiers that belong in the main review queue, best first. ROUTER is included:
+ *  the spec says they are worth one message asking who owns developer tooling.
+ *  UNSCORED is included deliberately — "we could not tell" must not silently
+ *  behave like a rejection. Only PASS is screened out. */
+export const QUEUE_CLASSES: ICPClass[] = ["ANCHOR", "TARGET", "ROUTER", "UNSCORED"];
+
+/** Sort weight, lower is better. */
+export const TIER_RANK: Record<ICPClass, number> = {
+  ANCHOR: 0,
+  TARGET: 1,
+  ROUTER: 2,
+  UNSCORED: 3,
+  PASS: 4,
+};
 
 export function isQueueWorthy(v?: ICPVerdict | null): boolean {
   return !!v && QUEUE_CLASSES.includes(v.classification);
 }
 
-const SYSTEM = `You are a lead qualification classifier for Bito, which sells AI coding
-infrastructure (a context-aware gateway that reduces token cost and improves
-output quality for agentic coding tools like Copilot, Cursor, and Claude Code).
+const SYSTEM = `You are scoring individual contacts at a target account for Bito, which sells AI coding infrastructure (a context layer and model gateway) that is purchased out of engineering tooling budget.
 
-Bito's buyer is the person who owns or influences decisions about SOFTWARE
-DEVELOPER TOOLING — the tools software engineers use to write, review, and
-ship code — at companies with large software engineering organizations.
+For each contact, output a tier and a rationale.
 
-CRITICAL DISAMBIGUATION RULES (most misclassifications happen here):
+Tiers
 
-1. "Engineering" does NOT mean software engineering by default.
-   Manufacturing engineering, process engineering, plant engineering,
-   validation engineering, device engineering, asset optimization, MSAT,
-   operational readiness, and quality engineering are PHYSICAL-WORLD roles.
-   These are automatic REJECTS regardless of seniority.
+ANCHOR — Owns developer tooling, platform, or engineering infrastructure decisions for a large engineering population. Their scope statement must contain concrete evidence of this: platform engineering, developer productivity, developer experience, engineering technology, SRE, DevOps, build and release, internal tooling, or direct ownership of a large application engineering org. Title alone never qualifies someone as ANCHOR.
 
-2. "AI" in a title is NEUTRAL TO NEGATIVE, not positive. Most "AI" titled
-   executives are commercial AI leaders, AI governance/policy owners,
-   clinical/molecular/scientific AI leaders, or data science executives.
-   None of them buy developer tooling. Only score "AI" positively when it
-   appears alongside software engineering ownership (e.g., "VP AI Platform
-   Engineering").
+TARGET — Senior engineering leadership adjacent to the tooling decision. Influences it, uses it, or can bring the anchor into the room, but does not set the toolchain themselves.
 
-3. Data/analytics executives (CDO, VP Analytics, Head of Data) are REJECTS.
-   They own data platforms, not coding tools.
+ROUTER — Senior enough to redirect you internally but does not own the budget or the decision. Generic CIOs, business-unit CIOs, product executives, and corporate IT leaders belong here. They are worth one message asking who owns developer tooling, not a pitch.
 
-3b. "CIO" IS AMBIGUOUS AT FINANCIAL FIRMS. At asset managers, banks and
-   insurers it usually means Chief INVESTMENT Officer, which is a
-   portfolio-management role with no connection to software tooling. Titles
-   like "Client Chief Investment Officer", "Deputy CIO, Fixed Income",
-   "Index Equity CIO Office" are REJECTS. Only read CIO as Chief INFORMATION
-   Officer when the surrounding context is technology, IT or engineering.
-   The same caution applies to "Managing Director" at a bank: it is a rank,
-   not a function, so classify on the rest of the title and REJECT when there
-   is no engineering scope.
+PASS — No plausible connection to how code gets written or what it costs to run agents against it. Hardware-primary engineering, business or GM titles wearing technical labels, individual contributors with no scope.
 
-4. The company does NOT need to be a software company. Banks, retailers,
-   grocers, manufacturers, and insurers qualify if they have a large
-   software engineering org (roughly 300+ software engineers). Legacy code,
-   modernization initiatives, and mainframe-to-cloud programs are POSITIVE
-   signals — old sprawling codebases are the strongest fit.
+Rules
 
-CLASSIFICATION (choose exactly one):
+Judge scope, not title. "Chief Information Officer" at a large enterprise usually means corporate IT, security, and vendor management, and at banks and other large firms there are often several divisional CIOs with no authority over product engineering toolchains. Default a bare CIO to ROUTER. Promote only when the profile shows explicit ownership of engineering platform or developer tooling. A combined CIO/CTO title is worth evaluating individually rather than defaulting.
 
-TARGET — A senior SOFTWARE engineering leader worth contacting first. An
-  explicit developer-tooling title is the strongest form of this, but it is
-  NOT required — anyone leading a real software engineering organization at
-  director level or above is a TARGET.
-  Qualifies:
-  - Explicit tooling remit: VP/Director/Head of Platform Engineering,
-    Developer Productivity, Developer Experience (DevEx), Engineering
-    Effectiveness, Engineering Enablement, Engineering Infrastructure,
-    Developer Platform, Engineering Systems.
-  - General software engineering leadership at director level or above:
-    SVP/VP/Head/Senior Director/Director of Software Engineering,
-    Engineering, Application Development, Software Development, Cloud
-    Engineering, or a named platform/product engineering org. These people
-    set or approve the toolchain their org uses even when the title does not
-    say "tooling".
-  - VPE or CTO at companies small enough (roughly under 5,000 engineers)
-    that dev tooling rolls up to them directly.
-  Do NOT reject a genuine software engineering leader merely because the
-  title lacks the word "tooling", "platform", or "developer". Seniority plus
-  a software (not physical-world) remit is enough.
+Write a distinct rationale for every contact, grounded in that specific person's scope, title language, or stated responsibilities. Never reuse phrasing across contacts. If two contacts would receive the same rationale, that is a signal you have not actually evaluated them and you should re-read their profiles.
 
-ACCOUNT_ANCHOR — Reserved for the TOP of the house at a large enterprise:
-  the person a deal terminates with, too senior to be the first touch. Use
-  it ONLY for chief-level scope — CIO, CTO, Chief Digital/Technology Officer
-  — at 5,000+ engineer or Fortune 500 scale. Map their org downward for the
-  TARGET.
-  An SVP or VP of Software Engineering is a TARGET, not an anchor, even at a
-  very large company: they run an org and can start a real evaluation.
+If the available information does not support a confident tier, output UNSCORED with a one-line statement of what is missing. Do not fill the gap with a generic account-level claim about the company.
 
-INFLUENCER — Adjacent to the buying process but not the buyer. Worth
-  logging in the account map, not worth first outreach. Examples: AI
-  governance/policy owners who gate which AI tools employees may use,
-  enterprise architecture leaders, procurement-adjacent strategy execs at
-  qualified companies.
+Do not assert what a contact controls unless the source text supports it. "Dev tooling decisions terminate here" is a claim about a specific person's authority and requires evidence.
 
-REJECT — Everyone else. Includes ALL of: physical-world engineering roles
-  (see rule 1), commercial/GTM AI executives, clinical or scientific or
-  molecular AI leaders, data/analytics executives, manufacturing and
-  operations leaders, consulting/GSI partner executives, product-line
-  engineering leaders whose teams BUILD a product but who don't own
-  company-wide dev tooling (unless the company is small enough that they
-  effectively do).
+Output per contact
 
-Respond with ONLY valid JSON, no markdown fences, in this exact schema:
+Tier, then two sentences maximum: what this person actually owns, and why that does or does not put them near the purchase.
 
-{
-  "classification": "TARGET" | "ACCOUNT_ANCHOR" | "INFLUENCER" | "REJECT",
-  "confidence": "high" | "medium" | "low",
-  "owns_dev_tooling": true | false,
-  "one_line_reason": "<max 20 words — see the rule below>",
-  "recommended_action": "<max 15 words>"
-}
+OUTPUT FORMAT
+You will be given a numbered list of contacts. Respond with ONLY a JSON array, no markdown fences, one object per contact IN THE SAME ORDER:
+[
+  {
+    "n": 1,
+    "tier": "ANCHOR" | "TARGET" | "ROUTER" | "PASS" | "UNSCORED",
+    "confidence": "high" | "medium" | "low",
+    "owns_dev_tooling": true | false,
+    "rationale": "<two sentences maximum>",
+    "next_step": "<max 12 words>"
+  }
+]
+Return exactly one object for every contact you were given. For UNSCORED, the rationale is the one-line statement of what is missing.`;
 
-If the role description is ambiguous between software and physical-world
-engineering, classify REJECT with confidence "low" — a false negative costs
-one missed lead; a false positive costs review time on every run.
-
-ONE_LINE_REASON RULE. The reason must add information the reader does not
-already have. They can see the person's name, title and company on the card, so
-restating the title in other words is worthless — "likely owns or gates dev
-tooling decisions" for a VP of Engineering tells them nothing.
-- When "Company context" is supplied, tie the reason to THAT: what the company
-  is doing and why this person's remit intersects it.
-- When no company context is supplied, do not pad. Say what is genuinely
-  distinguishing about the ROLE (its scope, its department, whether it is
-  platform-wide or product-line), or state the honest limit, e.g. "Title only,
-  no signal on their remit". An admission is more useful than filler.
-NEVER phrase the reason as a paraphrase of the title.
-
-CALIBRATION EXAMPLES
-
-EXAMPLE 1
-Company: Thermo Fisher Scientific
-Title: Senior Director, Engineering and Asset Optimization, Clinical Trial Division
-Description: Previously Director of Engineering at Patheon (pharma CDMO).
-Correct output: {"classification": "REJECT", "confidence": "high",
-"owns_dev_tooling": false, "one_line_reason": "Plant/asset engineering at
-pharma manufacturing division, no software org", "recommended_action": "discard"}
-
-EXAMPLE 2
-Company: Danaher Corporation
-Title: VP and Enterprise Head for AI Molecular Design
-Description: Applying large-scale GenAI to protein engineering, chemistry,
-and genomics.
-Correct output: {"classification": "REJECT", "confidence": "high",
-"owns_dev_tooling": false, "one_line_reason": "Scientific AI for drug R&D,
-not software engineering", "recommended_action": "discard"}
-
-EXAMPLE 3
-Company: Thermo Fisher Scientific
-Title: Senior Vice President and Chief Information Officer
-Description: Enterprise IT strategy, infrastructure, vendor management.
-Correct output: {"classification": "ACCOUNT_ANCHOR", "confidence": "high",
-"owns_dev_tooling": true, "one_line_reason": "CIO of Fortune 150; dev
-tooling decisions terminate in his org", "recommended_action": "map org
-downward for platform/DevProd leader"}
-
-EXAMPLE 4
-Company: Cisco
-Title: VP, Enterprise AI Strategy (AI and Automation Center)
-Description: Ex-BCG partner. Leading enterprise AI strategy and governance.
-Correct output: {"classification": "INFLUENCER", "confidence": "medium",
-"owns_dev_tooling": false, "one_line_reason": "AI governance gate at
-qualified account; not the tooling buyer", "recommended_action": "log to
-account map, find platform engineering owner"}
-
-EXAMPLE 5
-Company: Intel
-Title: Director of Engineering (Telemetry Based Validation)
-Description: Silicon/system validation, dogfood testing, wireless QA.
-Correct output: {"classification": "REJECT", "confidence": "high",
-"owns_dev_tooling": false, "one_line_reason": "Hardware validation
-engineering, not software developer tooling", "recommended_action": "discard"}
-
-EXAMPLE 5b (a general software-engineering leader — TARGET, not a reject)
-Company: American Express
-Title: SVP, Software Engineering
-Description: Leads engineering for global payments platform.
-Correct output: {"classification": "TARGET", "confidence": "high",
-"owns_dev_tooling": true, "one_line_reason": "Runs the payments platform org
-adopting agentic AI; sets its toolchain", "recommended_action": "outreach with
-TOKEN template"}
-(Note: no "tooling"/"platform"/"DevEx" in the title. Senior software
-engineering leadership is sufficient on its own.)
-
-EXAMPLE 6
-Company: Albertsons
-Title: VP, Engineering Platform & Developer Experience
-Description: Own CI/CD, internal developer platform, and engineering
-tooling standards across digital and e-commerce engineering.
-Correct output: {"classification": "TARGET", "confidence": "high",
-"owns_dev_tooling": true, "one_line_reason": "Directly owns developer
-platform and tooling at large non-tech enterprise", "recommended_action":
-"outreach with TOKEN template"}`;
-
-const CLASSES: ICPClass[] = ["TARGET", "ACCOUNT_ANCHOR", "INFLUENCER", "REJECT"];
+const CLASSES: ICPClass[] = ["ANCHOR", "TARGET", "ROUTER", "PASS", "UNSCORED"];
 
 interface RawVerdict {
-  classification?: unknown;
+  n?: unknown;
+  tier?: unknown;
   confidence?: unknown;
   owns_dev_tooling?: unknown;
-  one_line_reason?: unknown;
-  recommended_action?: unknown;
+  rationale?: unknown;
+  next_step?: unknown;
 }
 
-/** Parse + validate. An unparseable body is a FAILURE, not a judgement — see
- *  the `failed` flag on ICPVerdict. */
-function parseVerdict(text: string): ICPVerdict {
-  const raw = extractJSON<RawVerdict>(text);
-  const cls = String(raw?.classification ?? "").toUpperCase() as ICPClass;
+function toVerdict(raw: RawVerdict | undefined): ICPVerdict {
+  const tier = String(raw?.tier ?? "").toUpperCase() as ICPClass;
   const conf = String(raw?.confidence ?? "").toLowerCase() as ICPConfidence;
-  if (!CLASSES.includes(cls)) {
+  if (!CLASSES.includes(tier)) {
     return {
-      classification: "REJECT",
+      classification: "UNSCORED",
       confidence: "low",
       ownsDevTooling: false,
-      reason: "Unparseable classifier response",
+      reason: "Scorer returned no usable tier for this contact",
       recommendedAction: "retry",
       failed: true,
     };
   }
   return {
-    classification: cls,
+    classification: tier,
     confidence: ["high", "medium", "low"].includes(conf) ? conf : "low",
     ownsDevTooling: raw?.owns_dev_tooling === true,
-    reason: String(raw?.one_line_reason ?? "").slice(0, 200) || "",
-    recommendedAction: String(raw?.recommended_action ?? "").slice(0, 200) || "",
+    reason: String(raw?.rationale ?? "").slice(0, 300),
+    recommendedAction: String(raw?.next_step ?? "").slice(0, 120),
   };
 }
 
-/** Classify one profile. Never throws.
- *
- *  A failed call is marked `failed: true` and MUST NOT be read as a rejection.
- *  It previously returned a plain REJECT, which made a classifier outage
- *  indistinguishable from a deliberate screening — an account would report
- *  "screened out 36 of 36" when the truth was 36 failed requests. Callers fall
- *  back to the seniority heuristic when `failed` is set, so a transient outage
- *  degrades to a slightly noisier list instead of an empty one.
- *
- *  Transient statuses are retried once with a short backoff, since the page
- *  fires a burst of these concurrently and Haiku can 429 under that. */
-export async function classifyProfile(p: ICPProfileInput): Promise<ICPVerdict> {
+function failedVerdict(why: string): ICPVerdict {
+  return {
+    classification: "UNSCORED",
+    confidence: "low",
+    ownsDevTooling: false,
+    reason: why,
+    recommendedAction: "retry",
+    failed: true,
+  };
+}
+
+function renderProfile(p: ICPProfileInput, n: number): string {
+  return [
+    `${n}. Company: ${p.company || "(unknown)"}`,
+    `   Headline: ${p.headline || "(none)"}`,
+    `   Current title(s): ${p.titles || "(none)"}`,
+    `   Scope / role description: ${p.description || "(none)"}`,
+  ].join("\n");
+}
+
+/** Score one page of contacts in a single call, so the model can differentiate
+ *  their rationales against each other. Never throws. */
+async function scoreBatch(items: ICPProfileInput[]): Promise<ICPVerdict[]> {
+  const context = items.find((i) => i.companySignals)?.companySignals;
   const user = [
-    `Company: ${p.company || "(unknown)"}`,
-    `Headline: ${p.headline || "(none)"}`,
-    `Current title(s): ${p.titles || "(none)"}`,
-    `Role description: ${p.description || "(none)"}`,
-    `Company context (if available): ${p.companySignals || "(none)"}`,
+    context ? `Account context (applies to all contacts below):\n${context}\n` : "",
+    `Score these ${items.length} contact${items.length === 1 ? "" : "s"}. Return exactly ${items.length} object${items.length === 1 ? "" : "s"} in order.\n`,
+    items.map((p, i) => renderProfile(p, i + 1)).join("\n\n"),
   ].join("\n");
 
   let lastError = "";
@@ -284,49 +173,54 @@ export async function classifyProfile(p: ICPProfileInput): Promise<ICPVerdict> {
     try {
       const res = await callClaudeWithWebSearch({
         system: SYSTEM,
-        user: `PROFILE TO CLASSIFY:\n${user}`,
+        user,
         model: FAST_MODEL,
         webSearch: false, // pure reasoning over supplied text — no search fees
-        maxTokens: 300,
+        maxTokens: Math.min(4000, 260 * items.length + 400),
         temperature: 0,
       });
-      const v = parseVerdict(res.text);
-      if (!v.failed || attempt === 1) return v;
+      const arr = extractJSON<RawVerdict[]>(res.text);
+      if (Array.isArray(arr) && arr.length > 0) {
+        // Map by the model's own `n`. Positional fallback ONLY when the array
+        // is exactly the right length — otherwise a short array shifts every
+        // later verdict onto the wrong person, which is worse than admitting
+        // we did not get one for them.
+        const aligned = arr.length === items.length;
+        return items.map((_, i) => {
+          const byN = arr.find((r) => Number(r?.n) === i + 1);
+          if (byN) return toVerdict(byN);
+          if (aligned) return toVerdict(arr[i]);
+          return failedVerdict("Scorer omitted this contact from its response");
+        });
+      }
+      lastError = "scorer returned no JSON array";
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
-      if (attempt === 1) break;
     }
-    // Jittered backoff so a burst of concurrent calls does not retry in lockstep.
-    await new Promise((r) => setTimeout(r, 400 + Math.floor(Math.random() * 400)));
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 500 + Math.floor(Math.random() * 400)));
   }
-  return {
-    classification: "REJECT",
-    confidence: "low",
-    ownsDevTooling: false,
-    reason: lastError ? `Classifier unavailable (${lastError.slice(0, 80)})` : "Classifier unavailable",
-    recommendedAction: "retry",
-    failed: true,
-  };
+  return items.map(() => failedVerdict(`Scorer unavailable (${lastError.slice(0, 80)})`));
 }
 
-/** Classify many profiles with bounded concurrency. Haiku is cheap but a page
- *  of 30 sequential calls is slow, and unbounded parallelism trips rate limits. */
+/** Score a single contact (kept for callers that have exactly one). */
+export async function classifyProfile(p: ICPProfileInput): Promise<ICPVerdict> {
+  const [v] = await scoreBatch([p]);
+  return v ?? failedVerdict("Scorer returned nothing");
+}
+
+/** Score many contacts. Batched so rationales are written against each other
+ *  rather than in isolation, and so a page is a couple of calls instead of
+ *  thirty concurrent ones. */
 export async function classifyProfiles<T>(
   items: T[],
   toInput: (item: T) => ICPProfileInput,
-  concurrency = 8,
+  batchSize = 10,
 ): Promise<ICPVerdict[]> {
-  const out: ICPVerdict[] = new Array(items.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const i = next++;
-      if (i >= items.length) return;
-      out[i] = await classifyProfile(toInput(items[i]));
-    }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
-  );
-  return out;
+  if (items.length === 0) return [];
+  const inputs = items.map(toInput);
+  const batches: ICPProfileInput[][] = [];
+  for (let i = 0; i < inputs.length; i += batchSize) batches.push(inputs.slice(i, i + batchSize));
+  // A handful of batches at once is fine; thirty single calls was not.
+  const results = await Promise.all(batches.map((b) => scoreBatch(b)));
+  return results.flat();
 }

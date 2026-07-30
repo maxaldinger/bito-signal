@@ -48,7 +48,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const isAnchor = (body.classification || "").toUpperCase() === "ACCOUNT_ANCHOR";
+  // ROUTER is the "too senior / wrong org" case now: they redirect you rather
+  // than own the decision, so the note asks rather than pitches.
+  const isAnchor = (body.classification || "").toUpperCase() === "ROUTER";
 
   const system = `You write LinkedIn connect notes for Max, a founding AE at Bito. Bito precomputes a map of a company's code, commits, and tickets and serves it to any coding agent or IDE over MCP, so agents start already knowing the architecture instead of re-learning it every session. Bito is built for big interconnected multi-repo / microservice codebases.
 
