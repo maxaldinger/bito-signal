@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import { SEGMENT_MAP } from "@/lib/data";
-import { BANNED_WRITING, enforceLinkedin } from "@/lib/outreachRules";
+import { CONNECT_CAP, VOICE_SPEC, enforceLinkedin } from "@/lib/outreachRules";
 import { fetchBrief, upsertBrief, supabaseConfigured } from "@/lib/supabase";
 import type {
   CompanyIntel,
@@ -60,23 +60,18 @@ Motion: pick exactly one of PLG, Top-Down, Champion-Led, Land-and-Expand from th
 
 Outreach angle: one concrete angle tied to a specific live signal you found, with a 3-5 line draft message a rep could send today.
 
-LinkedIn outreach — FOUR LinkedIn-NATIVE touches (not email copy), keyed off the callHook signal, in the rep's voice: a connect note, then three DMs after the accept.
-STRUCTURE RULE for the DMs (most important): the signal is the HOOK, not the subject. Maximum ONE CLAUSE establishing relevance from the signal, then pivot immediately to what Bito does and the outcome. Target ~20% prospect-context, ~80% Bito mechanism + outcome. ASSERT the mechanism; do not explain it at length.
-NEVER (each of these is a failure): open by narrating the prospect's own business back at them ("You built X to solve Y" — they already know; it wastes the most valuable line; the research sharpens the SENDER, it is not the message); bury what Bito does past sentence two in a substance DM; spend multiple sentences explaining the mechanism; run wordy. If a sentence describes the prospect rather than Bito or the outcome, cut it or compress it to a clause.
-VOICE: mechanism-first for the DMs, OBSERVATION-first for the connect note. Never a compliment. Plain declarative sentences, direct to the point of blunt, technically literate. Draw on these exact anchor lines from the rep's sent templates: "It's the difference between an agent that knows your system and one rediscovering it every session." / "We give your AI a map of your codebase, so it stops rediscovering everything from scratch every session." / "Every session starts blind, re-crawling your repos with no memory of how the system fits together."
-${BANNED_WRITING}
-- connect: HARD CAP 200 characters including spaces. Job: earn the accept, NOT to pitch. No mechanism-dump, no solution statement, no meeting ask, no links. Do NOT lead with a scraped-looking stat (never open with "50,000 Copilot seats"-style numbers; lead with the observation, not the number). One genuinely specific observation about their situation, then a plain reason to connect. It must read like a person noticed something, not like a tool populated a field.
-- dm1 (substance, after accept): 300-500 characters, and aim near the BOTTOM of that range; a tight 350 beats a padded 500. One clause of relevance, mechanism by sentence two, and the MANDATORY ICP ANCHOR: work in, IN YOUR OWN WORDS, that Bito is built for big interconnected multi-repo/microservice codebases, using THIS prospect's specific architecture detail from the signal (e.g. "600+ microservices", "your multi-repo Kubernetes stack") as setup for the mechanism in the same breath, never as its own descriptive sentence. The idea to convey (never this instruction's phrasing): agents lose the thread across interconnected services and re-learn the system every session; Bito's precomputed map means they start already knowing it, and that matters more the bigger the codebase. Close with a plain soft ask ("Have time for a brief 15-minute call this week?").
-- dm2 (value/give): 2-4 sentences, a DIFFERENT angle from dm1. Give-first, framed as peer-sharing: one specific, genuinely useful drop — a relevant real development from their own signal, a real public Bito result (e.g. the published PubMatic eval), or a well-known industry development. NEVER invent an article, paper, study, or link; only reference things that are real (from the signal, the citations, or Bito's published results). Do not push a demo or request a meeting, and NEVER say so out loud — no "no ask here" / "not a pitch" meta-commentary; just share the thing and offer it plainly. Builds credibility, not pressure.
-- dm3 (light close): 200-350 characters. Assumes no reply to the prior touches. A NEW timing hook or angle from the signal, low pressure, soft "worth a quick look?" close. Do NOT re-explain Bito.
-GOLD STANDARD — match this quality and structure. Its FACTS are calibration only: never reuse CVS, 600+ microservices, Health100, Agentforce, or Google for any other company; every fact in YOUR output comes from THIS prospect's signal.
-Example signal: CVS built an internal DevEx platform across a 600+ microservice codebase; now layering agentic AI (Health100, Agentforce); Health100 launched with Google.
-Example connect (~190 chars): "Saw you're layering agentic AI onto the DevEx platform your team built. I work on the same problem, agents on big multi-repo codebases. Curious how you're approaching it, worth connecting?"
-Example dm1 (~360 chars): "Agents working across 600+ microservices burn most of each session re-learning how your services fit together. Bito fixes that layer. It precomputes a map of your code, commits, and tickets, so whatever agent you're running starts already knowing the architecture. The bigger the codebase, the more it matters. Have time for a brief 15-minute call this week?"
-Example dm2 (~250 chars): "We published the numbers from an 8 week eval on a 500+ repo estate: technical design per epic went from two weeks to three days once the agents had a precomputed map of the system. Figured it'd be relevant to the Health100 rollout. Happy to send the writeup."
-Example dm3 (~240 chars): "Following up on the context-layer note. Your Health100 launch with Google is accelerating the agent rollout, and the cross-repo context problem compounds fast at that scale. Worth a quick look at what our indexing does for a codebase like yours?"
-Why the example works: CONNECT reads like a person who noticed something, no pitch, no solution statement. #1 names their architecture as setup, mechanism by sentence two, ICP anchored, tight, then asks. #2 shares something real and offers it plainly, without requesting anything or announcing its own intent. #3 fresh timing hook, no re-explaining.
-ANTI-TEMPLATE RULE: the example sets the QUALITY BAR; it is NOT a template. Never reuse its sentence skeletons or any phrasing from these instructions. If your draft could be produced by swapping this prospect's nouns into the example, rewrite it from scratch with a different structure. Two prospects must never receive structurally identical messages.
+LinkedIn outreach — FOUR LinkedIn-NATIVE touches (not email copy), keyed off the callHook signal: a connect note, then three InMails after the accept. All four are register (A) below.
+${VOICE_SPEC}
+
+PER-TOUCH STRUCTURE (these caps and jobs are fixed; the voice above governs how they read):
+- connect: HARD CAP 300 characters including spaces, 2-3 sentences. Open "Hey [First],". NO signature. Job: earn the accept, NOT to pitch. No mechanism-dump, no solution statement, no meeting ask, no links. Never lead with a scraped-looking stat. One genuinely specific observation, then a plain reason to connect.
+- dm1 (substance, after accept): an InMail, 4 short paragraphs MAX, and shorter is better. Open "Hey [First],", sign "Max". Name the problem in plain language BEFORE naming Bito. Work in what Bito is built for — big interconnected multi-repo/microservice codebases — using THIS prospect's own architecture detail from the signal as the setup, never as its own descriptive sentence. ONE proof figure, then a concrete low-friction ask. Close "Let me know if it's worth a look."
+- dm2 (value/give): a DIFFERENT angle from dm1. Give-first, peer-share: one specific real drop — a development from their own signal, a real published Bito result, or a well-known industry development. NEVER invent an article, paper, study, link or number. Do not push a demo, and never say so out loud. Sign "Max".
+- dm3 (light close): short, assumes no reply. A NEW timing hook from the signal, low pressure. Do NOT re-explain Bito. Close "Let me know". Sign "Max".
+
+PROOF FIGURES — use only Bito's REAL published results, quoted from the product context above. Never invent a dollar figure, never compute one, never combine two into a new claim. ONE per message.
+
+"[First]" is the ONLY placeholder permitted, because these three InMails are drafted per-COMPANY and reused for whichever contact the rep picks. Everything else must be paste-ready with no brackets.
 
 Email opener — ONE or TWO sentences, pasted as a personalized lead-in ABOVE a templated email body (it is a lead-in, not a paragraph). Same voice and hard rules as the LinkedIn messages: mechanism-first, no em dashes, no fluff, specific never generic. It must draw from the callHook signal but frame it from a DIFFERENT angle than the LinkedIn connect note — a prospect who receives both the email and the connect request must never see the same observation twice (different fact, different framing, or a different consequence of the same signal).
 
@@ -270,10 +265,13 @@ export async function GET(req: NextRequest) {
       callHook: String(parsed.callHook || ""),
       linkedinOutreach: parsed.linkedinOutreach?.connect
         ? {
-            connect: enforceLinkedin(String(parsed.linkedinOutreach.connect), 200),
-            dm1: enforceLinkedin(String(parsed.linkedinOutreach.dm1 || ""), 550),
-            dm2: enforceLinkedin(String(parsed.linkedinOutreach.dm2 || ""), 600),
-            dm3: enforceLinkedin(String(parsed.linkedinOutreach.dm3 || ""), 350),
+            // connect is a hard 300 (register A). The InMails are 4 short
+            // paragraphs, so their caps are generous backstops against a
+            // runaway draft, not shaping targets.
+            connect: enforceLinkedin(String(parsed.linkedinOutreach.connect), CONNECT_CAP),
+            dm1: enforceLinkedin(String(parsed.linkedinOutreach.dm1 || ""), 900),
+            dm2: enforceLinkedin(String(parsed.linkedinOutreach.dm2 || ""), 700),
+            dm3: enforceLinkedin(String(parsed.linkedinOutreach.dm3 || ""), 450),
           }
         : undefined,
       // Lead-in, not a paragraph — same dash/length hygiene as the LinkedIn set.
