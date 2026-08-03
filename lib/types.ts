@@ -209,11 +209,18 @@ export interface CompanyIntel {
    * after connect / light re-surface), generated in Max's voice with hard
    * character caps. Optional — briefs cached before this field lack it. */
   linkedinOutreach?: {
-    connect: string;           // ≤200 chars — observation-led, earn the accept, no pitch/ask
-    dm1?: string;              // substance: mechanism + ICP anchor + soft ask (300-500, tight)
-    dm2?: string;              // value/give: real peer-share drop, no ask
-    dm3?: string;              // light close: new timing hook, "worth a look?" (200-350)
-    /** Legacy pre-4-touch fields (briefs generated before the restructure). */
+    /** ≤300 chars. A question about how they're handling it, no pitch, no
+     *  proof figure, no diagnosis. No signature. */
+    connect: string;
+    /** InMail and the two timed follow-ups. Each carries its own lowercase
+     *  2-4 word subject; connect requests deliberately have none. */
+    inmail?: { subject: string; body: string };
+    followup2?: { subject: string; body: string };
+    followup3?: { subject: string; body: string };
+    /** Legacy fields from briefs generated before the Aug 2026 restructure. */
+    dm1?: string;
+    dm2?: string;
+    dm3?: string;
     dm?: string;
     resurface?: string;
   };

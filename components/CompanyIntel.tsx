@@ -190,7 +190,18 @@ interface ContactTaskContext {
   callHook: string;
   /** The 4-touch LinkedIn set (connect + 3 DMs), when the brief has it.
    * dm/resurface are legacy fields from briefs generated pre-restructure. */
-  linkedin?: { connect: string; dm1?: string; dm2?: string; dm3?: string; dm?: string; resurface?: string };
+  linkedin?: {
+    connect: string;
+    inmail?: { subject: string; body: string };
+    followup2?: { subject: string; body: string };
+    followup3?: { subject: string; body: string };
+    /** Legacy pre-Aug-2026 fields. */
+    dm1?: string;
+    dm2?: string;
+    dm3?: string;
+    dm?: string;
+    resurface?: string;
+  };
   /** Signal-specific 1-2 sentence lead-in for above the templated email body. */
   emailOpener?: string;
   /** Legacy single outreach draft — fallback for briefs cached before linkedinOutreach. */
@@ -641,27 +652,45 @@ function ApolloPersonCard({
             // LinkedIn connect note so a prospect on both channels never sees
             // the same observation twice.
             `COMPANY: ${ctx.companyLine}\n` +
-            `${ctx.callHook ? `\nWHAT I SAW: ${ctx.callHook}\n` : ""}` +
-            `${ctx.emailOpener ? `\nEMAIL OPENER: ${stripEmDashes(ctx.emailOpener)}\n` : ""}` +
-            `\nPROFILE: ${linkedinHref}\n` +
-            `\nLINKEDIN OUTREACH:\n\n` +
+            // WHAT I SAW must be traceable to a real artifact. When the brief
+            // produced no signal, say so rather than letting the next section
+            // imply one existed.
+            `\nWHAT I SAW: ${ctx.callHook || "No specific signal, sourced on fit only."}\n` +
+            // PROFILE is a real profile URL or the word UNRESOLVED. Never a
+            // search URL: a search link in a task note reads as a resolved
+            // contact and is not one.
+            `\nPROFILE: ${person.linkedinUrl || "UNRESOLVED"}\n` +
+            `\n---\n\n` +
             (() => {
               const li = ctx.linkedin;
               if (!li)
-                return `${draft?.text || ctx.outreach || "—"}\n\n(Update the brief to generate the 4-touch LinkedIn set.)`;
-              // Per-person note when it generated, else the company-level one.
-              const parts = [`CONNECT: ${stripEmDashes(personalConnect || li.connect)}`];
-              if (li.dm1) {
-                parts.push(`1. ${stripEmDashes(li.dm1)}`);
+                return `${draft?.text || ctx.outreach || "—"}\n\n(Update the brief to generate the outreach set.)`;
+              // Per-person connect when it generated, else the company-level one.
+              const connect = stripEmDashes(personalConnect || li.connect);
+              const parts = [`CONNECT (${connect.length} chars):\n${connect}`];
+              const block = (
+                label: string,
+                m?: { subject: string; body: string },
+              ) => {
+                if (!m?.body) return;
+                parts.push(
+                  `${label}\n${m.subject ? `Subject: ${m.subject}\n\n` : ""}${stripEmDashes(m.body)}`,
+                );
+              };
+              block("INMAIL", li.inmail);
+              block("FOLLOW-UP 2 (send +5 business days if no reply)", li.followup2);
+              block("FOLLOW-UP 3 (send +10 business days if no reply)", li.followup3);
+              // Briefs generated before the Aug 2026 restructure have no
+              // subjects; render what they do have rather than dropping it.
+              if (!li.inmail && (li.dm1 || li.dm)) {
+                if (li.dm1) parts.push(`1. ${stripEmDashes(li.dm1)}`);
                 if (li.dm2) parts.push(`2. ${stripEmDashes(li.dm2)}`);
                 if (li.dm3) parts.push(`3. ${stripEmDashes(li.dm3)}`);
-              } else {
-                // Legacy 3-message brief (connect / dm / resurface).
                 if (li.dm) parts.push(`1. ${stripEmDashes(li.dm)}`);
                 if (li.resurface) parts.push(`2. ${stripEmDashes(li.resurface)}`);
-                parts.push(`(Update the brief to generate the 4-touch set.)`);
+                parts.push("(Update the brief to regenerate with subjects and follow-ups.)");
               }
-              return parts.join("\n\n");
+              return parts.join("\n\n---\n\n");
             })()
           }
         />

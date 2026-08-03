@@ -60,18 +60,16 @@ Motion: pick exactly one of PLG, Top-Down, Champion-Led, Land-and-Expand from th
 
 Outreach angle: one concrete angle tied to a specific live signal you found, with a 3-5 line draft message a rep could send today.
 
-LinkedIn outreach — FOUR LinkedIn-NATIVE touches (not email copy), keyed off the callHook signal: a connect note, then three InMails after the accept. All four are register (A) below.
+Outreach — a connect request, an InMail, and two timed follow-ups, keyed off the callHook signal.
 ${VOICE_SPEC}
 
-PER-TOUCH STRUCTURE (these caps and jobs are fixed; the voice above governs how they read):
-- connect: HARD CAP 300 characters including spaces, 2-3 sentences. Open "Hey [First],". NO signature. Job: earn the accept, NOT to pitch. No mechanism-dump, no solution statement, no meeting ask, no links. Never lead with a scraped-looking stat. One genuinely specific observation, then a plain reason to connect.
-- dm1 (substance, after accept): an InMail, 4 short paragraphs MAX, and shorter is better. Open "Hey [First],", sign "Max". Name the problem in plain language BEFORE naming Bito. Work in what Bito is built for — big interconnected multi-repo/microservice codebases — using THIS prospect's own architecture detail from the signal as the setup, never as its own descriptive sentence. ONE proof figure, then a concrete low-friction ask. Close "Let me know if it's worth a look."
-- dm2 (value/give): a DIFFERENT angle from dm1. Give-first, peer-share: one specific real drop — a development from their own signal, a real published Bito result, or a well-known industry development. NEVER invent an article, paper, study, link or number. Do not push a demo, and never say so out loud. Sign "Max".
-- dm3 (light close): short, assumes no reply. A NEW timing hook from the signal, low pressure. Do NOT re-explain Bito. Close "Let me know". Sign "Max".
+PER-TOUCH STRUCTURE (jobs and caps are fixed; the voice above governs how they read):
+- connect: 2-3 sentences, HARD CAP 300 characters including spaces. Open "Hey [First],". NO subject, NO signature, NO pitch, NO proof figure, NO diagnosis of their problem. A QUESTION about how they're handling it plus one line on what Max does. If nothing better fits, this template is acceptable: "Hey [First], curious how you're handling coding agents across [their specific thing]. That's what I work on at Bito. Would like to connect."
+- inmail: 4 short paragraphs MAX, with a subject. Paragraph 1: the specific hook, ONE sentence, no bio restatement. Paragraph 2: the mechanism, plainly — an agent only sees the repo it's working in, so anything crossing a service boundary is a guess followed by turns of reading code to un-guess it. Tie that to THEIR actual architecture. Paragraph 3: what Governor does plus ONE approved figure. Paragraph 4: base URL change, run it on their own work. Close "Let me know if it's worth a look." Sign "Max".
+- followup2 (send +5 business days if no reply): 3 paragraphs max, with a DIFFERENT subject. A new angle, not a restatement. Either a different approved figure or the methodology sentence. Never "circling back" or "following up".
+- followup3 (send +10 business days if no reply): 2 short paragraphs, with its own subject. Reference a genuinely new external event ONLY if one exists in the signal and is verifiable. If none exists, make it a clean permission-to-close: ask whether this sits with someone else in the org. That question gets answered more often than the pitch does.
 
-PROOF FIGURES — use only Bito's REAL published results, quoted from the product context above. Never invent a dollar figure, never compute one, never combine two into a new claim. ONE per message.
-
-"[First]" is the ONLY placeholder permitted, because these three InMails are drafted per-COMPANY and reused for whichever contact the rep picks. Everything else must be paste-ready with no brackets.
+"[First]" is the ONLY placeholder permitted, because these are drafted per-COMPANY and reused for whichever contact the rep picks. Everything else must be paste-ready with no brackets.
 
 Email opener — ONE or TWO sentences, pasted as a personalized lead-in ABOVE a templated email body (it is a lead-in, not a paragraph). Same voice and hard rules as the LinkedIn messages: mechanism-first, no em dashes, no fluff, specific never generic. It must draw from the callHook signal but frame it from a DIFFERENT angle than the LinkedIn connect note — a prospect who receives both the email and the connect request must never see the same observation twice (different fact, different framing, or a different consequence of the same signal).
 
@@ -102,7 +100,7 @@ Output ONLY one JSON object — no prose, no code fences:
   "callHook": "ONE glanceable sentence a rep can drop in a call — the single most valuable, specific signal you found (a number, event, or quote), not generic. e.g. 'Shipping 1,300+ PRs/day and accepting 20K lines of Copilot code daily — review is now the bottleneck.'",
   "motion": { "primary": "PLG|Top-Down|Champion-Led|Land-and-Expand", "firstMove": "concrete first action", "keyContactName": "the specific person the first move targets (real full name) or null if generic", "keyContactTitle": "that person's title or null" },
   "outreach": { "hook": "", "channel": "Email|LinkedIn|Engineering Community|Warm Intro", "proof": "the specific signal behind the hook", "draftMessage": "3-5 lines" },
-  "linkedinOutreach": { "connect": "observation-led connect note, HARD CAP 200 chars", "dm1": "substance DM, 400-600 chars", "dm2": "value/give DM, peer-share, no ask", "dm3": "light close, 200-350 chars" },
+  "linkedinOutreach": { "connect": "connect request, HARD CAP 300 chars, no subject, no signature, no proof figure", "inmail": { "subject": "lowercase 2-4 words", "body": "4 short paragraphs max, signed Max" }, "followup2": { "subject": "lowercase 2-4 words, different from the inmail subject", "body": "3 paragraphs max, new angle" }, "followup3": { "subject": "lowercase 2-4 words", "body": "2 short paragraphs" } },
   "emailOpener": "1-2 sentence signal-specific email lead-in, different angle than the connect note",
   "citations": [ { "title": "", "source": "publisher", "url": "https://...", "date": "YYYY-MM-DD or omit", "kind": "hiring|oss|ma|funding|ai|news|other" } ]
 }`;
@@ -118,7 +116,12 @@ interface ModelIntel {
   icp?: Partial<ICPScore>;
   summary?: string;
   callHook?: string;
-  linkedinOutreach?: { connect?: string; dm1?: string; dm2?: string; dm3?: string };
+  linkedinOutreach?: {
+    connect?: string;
+    inmail?: { subject?: string; body?: string };
+    followup2?: { subject?: string; body?: string };
+    followup3?: { subject?: string; body?: string };
+  };
   emailOpener?: string;
   whyBito?: string[];
   stakeholders?: Partial<Stakeholder>[];
@@ -146,6 +149,26 @@ const cleanName = (v: unknown): string | undefined => {
 // Scores must come from the model, not from defaults — a brief with a missing
 // or non-numeric ICP block is incomplete and gets rejected (retryable 502)
 // rather than rendered with invented midpoint values.
+/** Normalize one subject+body message. Subjects are forced lowercase and
+ *  stripped of colons/question marks in CODE, because the prompt asks for it
+ *  but a title-cased subject is the single most visible tell that the spec was
+ *  ignored. Returns undefined when there is no usable body, so a partial model
+ *  response degrades to "missing" rather than an empty labelled section. */
+function pickMessage(
+  m: { subject?: string; body?: string } | undefined,
+  cap: number,
+): { subject: string; body: string } | undefined {
+  const body = enforceLinkedin(String(m?.body || ""), cap);
+  if (!body) return undefined;
+  const subject = String(m?.subject || "")
+    .toLowerCase()
+    .replace(/[:?]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+  return { subject, body };
+}
+
 function icpComplete(icp: Partial<ICPScore> | undefined): icp is ICPScore {
   if (!icp) return false;
   return (
@@ -265,13 +288,13 @@ export async function GET(req: NextRequest) {
       callHook: String(parsed.callHook || ""),
       linkedinOutreach: parsed.linkedinOutreach?.connect
         ? {
-            // connect is a hard 300 (register A). The InMails are 4 short
-            // paragraphs, so their caps are generous backstops against a
-            // runaway draft, not shaping targets.
+            // connect is a hard 300. The InMail/follow-up caps are generous
+            // backstops against a runaway draft, not shaping targets — the
+            // paragraph limits in the prompt do the shaping.
             connect: enforceLinkedin(String(parsed.linkedinOutreach.connect), CONNECT_CAP),
-            dm1: enforceLinkedin(String(parsed.linkedinOutreach.dm1 || ""), 900),
-            dm2: enforceLinkedin(String(parsed.linkedinOutreach.dm2 || ""), 700),
-            dm3: enforceLinkedin(String(parsed.linkedinOutreach.dm3 || ""), 450),
+            inmail: pickMessage(parsed.linkedinOutreach.inmail, 1100),
+            followup2: pickMessage(parsed.linkedinOutreach.followup2, 800),
+            followup3: pickMessage(parsed.linkedinOutreach.followup3, 600),
           }
         : undefined,
       // Lead-in, not a paragraph — same dash/length hygiene as the LinkedIn set.
