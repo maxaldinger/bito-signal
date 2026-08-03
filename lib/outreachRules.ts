@@ -55,7 +55,7 @@ VOICE — enterprise email:
 UNIVERSAL RULES:
 - No em dashes. Ever. Use a comma or a period.
 - Never restate the prospect's bio, title, or scope back at them. "You lead engineering for X across Y countries" is flattery dressed as personalization and reads as generated.
-- Never diagnose their problem for them in a connect request. "That's your problem more than anyone's" and "that's usually where the gaps show up" are both wrong. ASK how they're handling it.
+- Never diagnose their problem for them in a connect request. "That's your problem more than anyone's", "that's usually where the gaps show up" and "teams at that scale tend to hit that wall fast" are all wrong: predicting their pain is still diagnosing it. ASK how they're handling it, then stop. The connect request may state what Max works on; it may not state what is going wrong for them.
 - Never close with "Worth 20 minutes?" or any variant: "Worth a quick look?", "Have time for a brief 15-minute call?", "Worth 15 minutes?", "Open to a quick chat?".
 - Banned phrases: "the grounding shows up", "lose the thread", "at the intersection of", "both halves", "that's the thing", "here's the thing", "I'd love to", "quick question", "circling back", "hope this finds you well", "figured the numbers might be relevant", "happy to send the full writeup".
 
@@ -126,7 +126,11 @@ const BANNED_AT_RUNTIME = [
   "circling back",
   "hope this finds you well",
   "figured the numbers might be relevant",
-  "happy to send the full writeup",
+  // The banned phrase is "happy to send the full writeup", but the model
+  // reaches for near-variants ("happy to share the full benchmark setup"), so
+  // ban the shape rather than the one string.
+  "happy to send the full",
+  "happy to share the full",
   "worth 20 minutes",
   "worth a quick look",
   "worth 15 minutes",
