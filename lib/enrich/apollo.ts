@@ -374,7 +374,11 @@ export async function enrichApollo(
 //     inline and report an honest note when nothing did).
 // ---------------------------------------------------------------------------
 
-export type RevealKind = "email" | "phone";
+// "profile" is NOT a reveal: people/match with no reveal_* flag consumes no
+// credit and still returns linkedin_url, the real name, the employer domain and
+// employment_history. Measured Aug 2026 — the profile URL the task notes kept
+// reporting as UNRESOLVED was free the whole time.
+export type RevealKind = "email" | "phone" | "profile";
 
 export interface ApolloPersonContact {
   configured: boolean;
@@ -448,8 +452,9 @@ export async function apolloPersonContact(opts: {
     if (opts.domain) qs.set("domain", opts.domain);
     if (opts.company) qs.set("organization_name", opts.company);
   }
+  // Only these two flags cost anything. "profile" deliberately sets neither.
   if (opts.reveal === "email") qs.set("reveal_personal_emails", "true");
-  else qs.set("reveal_phone_number", "true");
+  else if (opts.reveal === "phone") qs.set("reveal_phone_number", "true");
 
   let status: number;
   let body: unknown;
@@ -480,6 +485,16 @@ export async function apolloPersonContact(opts: {
     country: str(person.country),
     companyDomain: str(person.organization?.primary_domain),
   };
+
+  // "profile" asked for nothing behind a paywall, so `base` IS the answer:
+  // name, title, linkedin_url, country, employer domain. Also carries whatever
+  // email Apollo already unlocked for this team on a previous reveal, which is
+  // how a contact revealed before the URL was captured gets repaired for free.
+  if (opts.reveal === "profile") {
+    const already = str(person.email);
+    const usable = already && already.includes("@") && !already.startsWith("email_not_unlocked");
+    return usable ? { ...base, email: already, emailStatus: str(person.email_status) } : base;
+  }
 
   if (opts.reveal === "email") {
     const raw =

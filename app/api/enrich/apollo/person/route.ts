@@ -18,8 +18,14 @@ export async function GET(req: NextRequest) {
   if (!id && !name) {
     return NextResponse.json({ error: "Pass ?id= or ?name=" }, { status: 400 });
   }
-  if (revealParam !== "email" && revealParam !== "phone") {
-    return NextResponse.json({ error: "Pass ?reveal=email or ?reveal=phone" }, { status: 400 });
+  // "profile" is free: people/match with no reveal_* flag. It returns the real
+  // name, the LinkedIn URL and the employer domain, and it repairs contacts
+  // whose email was revealed before those fields were being captured.
+  if (revealParam !== "email" && revealParam !== "phone" && revealParam !== "profile") {
+    return NextResponse.json(
+      { error: "Pass ?reveal=email, ?reveal=phone or ?reveal=profile" },
+      { status: 400 },
+    );
   }
   const reveal = revealParam as RevealKind;
 

@@ -267,6 +267,37 @@ function ApolloPersonCard({
   const [connectGeneric, setConnectGeneric] = useState(false);
   const [connectLoading, setConnectLoading] = useState(false);
 
+  /** FREE lookup — people/match with no reveal_* flag costs no credit. Fills in
+   *  the profile URL (and the un-obfuscated name) for a contact whose email was
+   *  revealed before those fields were captured. Deliberately NOT routed
+   *  through reveal(): that function owns the paid `result` map, and a free
+   *  call has no business writing into it. */
+  const resolveProfile = async (id: string) => {
+    try {
+      const res = await fetch(`/api/enrich/apollo/person?id=${encodeURIComponent(id)}&reveal=profile`);
+      const d = (await res.json()) as {
+        ok?: boolean;
+        name?: string;
+        country?: string;
+        linkedinUrl?: string;
+      };
+      if (!d.ok) return;
+      if (d.linkedinUrl) setRevealedLinkedin(d.linkedinUrl);
+      if (d.name) setRevealedName(d.name);
+      if (d.country) setRevealedCountry(d.country);
+      // Write back so this repair happens once per contact, not once per view.
+      if (d.linkedinUrl || d.name || d.country) {
+        mergeReveal(id, {
+          ...(d.linkedinUrl ? { linkedinUrl: d.linkedinUrl } : {}),
+          ...(d.name ? { name: d.name } : {}),
+          ...(d.country ? { country: d.country } : {}),
+        });
+      }
+    } catch {
+      /* the card still works without a profile URL */
+    }
+  };
+
   const reveal = async (kind: RevealKind) => {
     if (loading) return;
     setLoading(kind);
@@ -394,7 +425,15 @@ function ApolloPersonCard({
         email: { ok: true, email: cached.email, emailStatus: cached.emailStatus, name: cached.name },
       }));
 
-    if (cached?.email !== undefined) return; // already revealed/attempted
+    if (cached?.email !== undefined) {
+      // Already revealed, so no credit is owed — but 2,696 cached entries were
+      // written before the profile URL was captured, and this early return is
+      // why they stayed "PROFILE: UNRESOLVED" forever: the reveal never re-ran,
+      // so the URL never arrived. Repair it with the FREE match (no reveal_*
+      // flag, no credit) and write it back to the cache so it happens once.
+      if (!cached.linkedinUrl) void resolveProfile(id);
+      return;
+    }
 
     const t = setTimeout(() => {
       if (!cancelled) void reveal("email");
