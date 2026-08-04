@@ -151,6 +151,8 @@ interface ApolloRevealResult {
 interface ApolloRevealPayload extends ApolloRevealResult {
   name?: string;
   country?: string;
+  /** Real profile URL from people/match. Absent from the people SEARCH. */
+  linkedinUrl?: string;
 }
 
 /** Tier badge colours. ANCHOR is the buyer, so it gets the strongest treatment;
@@ -250,11 +252,16 @@ function ApolloPersonCard({
   // them in when they arrive, since the people SEARCH is too thin to include them.
   const [revealedName, setRevealedName] = useState<string | undefined>(undefined);
   const [revealedCountry, setRevealedCountry] = useState<string | undefined>(undefined);
+  const [revealedLinkedin, setRevealedLinkedin] = useState<string | undefined>(undefined);
   // Per-person connect note. The brief's linkedinOutreach.connect is written
   // once per COMPANY, so pushing it verbatim sends the same note to everyone in
   // the org — and misattributes it when the signal was one person's podcast or
   // talk. Generated on demand for this contact; falls back to the company note.
   const [personalConnect, setPersonalConnect] = useState<string | undefined>(undefined);
+  // The generator fell back to the safe template because three drafts failed the
+  // connect checks. Marked in the note so a template is never mistaken for a
+  // personalized one.
+  const [connectGeneric, setConnectGeneric] = useState(false);
   const [connectLoading, setConnectLoading] = useState(false);
 
   const reveal = async (kind: RevealKind) => {
@@ -282,6 +289,11 @@ function ApolloPersonCard({
       if (data.ok) {
         if (data.name) setRevealedName(data.name);
         if (data.country) setRevealedCountry(data.country);
+        // people/match carries the real profile URL; the people SEARCH usually
+        // doesn't. We were throwing this away, so every task note printed
+        // "PROFILE: UNRESOLVED" for a contact whose profile we had already
+        // paid to resolve.
+        if (data.linkedinUrl) setRevealedLinkedin(data.linkedinUrl);
         // Cache by Apollo id so reopening the brief reuses it (no re-spend). Use
         // "" for an attempted-but-empty field so it reads as "tried, none found"
         // rather than "not yet tried" (which would re-reveal next time).
@@ -292,9 +304,11 @@ function ApolloPersonCard({
             emailStatus?: string;
             phone?: string;
             country?: string;
+            linkedinUrl?: string;
           } = {};
           if (data.name) patch.name = data.name;
           if (data.country) patch.country = data.country;
+          if (data.linkedinUrl) patch.linkedinUrl = data.linkedinUrl;
           if (kind === "email") {
             patch.email = data.email ?? "";
             patch.emailStatus = data.emailStatus;
@@ -338,8 +352,11 @@ function ApolloPersonCard({
         }),
       })
         .then((r) => r.json())
-        .then((d: { ok?: boolean; connect?: string }) => {
-          if (!cancelled && d.ok && d.connect) setPersonalConnect(d.connect);
+        .then((d: { ok?: boolean; connect?: string; generic?: boolean }) => {
+          if (!cancelled && d.ok && d.connect) {
+            setPersonalConnect(d.connect);
+            setConnectGeneric(!!d.generic);
+          }
         })
         .catch(() => {})
         .finally(() => {
@@ -367,6 +384,7 @@ function ApolloPersonCard({
     const cached = getReveal(id);
     if (cached?.name) setRevealedName(cached.name);
     if (cached?.country) setRevealedCountry(cached.country);
+    if (cached?.linkedinUrl) setRevealedLinkedin(cached.linkedinUrl);
     if (cached?.email !== undefined)
       setResult((r) => ({
         ...r,
@@ -445,8 +463,11 @@ function ApolloPersonCard({
   // the reveal returned (or its cache) and fall back to whatever search gave us.
   const displayCountry = revealedCountry || person.country;
   const liQuery = `${company} ${revealedName || person.title || ""}`.trim();
+  // The reveal's URL wins: it comes from people/match (exact id lookup), while
+  // the search result is usually empty for this field.
+  const profileUrl = revealedLinkedin || person.linkedinUrl;
   const linkedinHref =
-    person.linkedinUrl ||
+    profileUrl ||
     `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(liQuery)}`;
   const emailRes = result.email;
   const phoneRes = result.phone;
@@ -561,15 +582,12 @@ function ApolloPersonCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <a
-          href={
-            person.linkedinUrl ||
-            `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(liQuery)}`
-          }
+          href={linkedinHref}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-xs font-medium text-neon-400 hover:text-neon-300"
         >
-          {person.linkedinUrl ? "LinkedIn" : "Find on LinkedIn"} <ArrowUpRight className="h-3 w-3" />
+          {profileUrl ? "LinkedIn" : "Find on LinkedIn"} <ArrowUpRight className="h-3 w-3" />
         </a>
         <button
           type="button"
@@ -692,7 +710,7 @@ function ApolloPersonCard({
             // PROFILE is a real profile URL or the word UNRESOLVED. Never a
             // search URL: a search link in a task note reads as a resolved
             // contact and is not one.
-            `\nPROFILE: ${person.linkedinUrl || "UNRESOLVED"}\n` +
+            `\nPROFILE: ${profileUrl || "UNRESOLVED"}\n` +
             `\n---\n\n` +
             (() => {
               const li = ctx.linkedin;
@@ -700,7 +718,11 @@ function ApolloPersonCard({
                 return `${draft?.text || ctx.outreach || "—"}\n\n(Update the brief to generate the outreach set.)`;
               // Per-person connect when it generated, else the company-level one.
               const connect = stripEmDashes(personalConnect || li.connect);
-              const parts = [`CONNECT (${connect.length} chars):\n${connect}`];
+              const parts = [
+                `CONNECT (${connect.length} chars)${
+                  connectGeneric ? " — GENERIC TEMPLATE, the personalized drafts kept pitching" : ""
+                }:\n${connect}`,
+              ];
               const block = (
                 label: string,
                 m?: { subject: string; body: string },

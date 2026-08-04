@@ -88,7 +88,45 @@ We index across all the repos up front so the agent starts with the cross-servic
 
 Base URL change, nothing else moves. Run it on your own work and see what comes back."
 
-ANTI-TEMPLATE RULE: the RIGHT example sets the register, it is NOT a template. Never reuse its sentence skeletons ("An agent only sees the repo it's working in", "Base URL change, nothing else moves") verbatim across prospects. Two prospects must never receive structurally identical messages.`;
+ANTI-TEMPLATE RULE: the RIGHT example sets the register, it is NOT a template. Never reuse its sentence skeletons ("An agent only sees the repo it's working in", "Base URL change, nothing else moves") verbatim across prospects. Two prospects must never receive structurally identical messages.
+
+THE RIGHT EXAMPLE ABOVE IS AN INMAIL. A CONNECT REQUEST IS A DIFFERENT ANIMAL AND MUST NOT BE MODELLED ON IT.
+
+CONNECT REQUESTS — the only touch with no pitch in it at all.
+A connect request has ONE job: earn the accept. It is a casual note from a person, not a compressed sales email. Max is asking a question and getting out. Three sentences maximum, and shorter is better than fuller: leaving the cap unused is a feature.
+
+Structure that works, in this order:
+1. "Hey [First]," on its own.
+2. The ask: how are they handling coding agents against their thing. Name their thing in a few plain words, not a recital of their architecture.
+3. One short line on what Max does. Not what Bito does, what MAX works on. Then stop.
+
+BAD (real generated draft, every line of it wrong):
+"Hey Arnav,
+
+Your microservices span pharmacy, behavioral, specialty health. When an agent touches code across those boundaries, it's guessing until it reads three repos to find the connection. We index that upfront so agents start knowing the architecture."
+Wrong because: sentence 1 reads their own org chart back to them. Sentence 2 tells them what their problem is before they have agreed they have one. Sentence 3 is a product claim lifted almost verbatim from the brief above, which is how the note ends up sounding like a landing page. And it never actually asks anything, so there is nothing for Arnav to reply to.
+
+GOOD:
+"Hey Arnav,
+
+Curious how you're handling coding agents across the pharmacy and behavioral stacks. That's basically all I work on at Bito. Would be good to connect."
+
+GOOD:
+"Hey Priya,
+
+How are you all handling agents on a codebase that size? That's the problem I work on at Bito, so I'm always curious what people are actually doing about it."
+
+GOOD:
+"Hey Dan,
+
+Saw your team is hiring a lot of platform engineers. Curious how you're thinking about coding agents alongside that. That's what I work on at Bito, would be good to connect."
+
+CONNECT HARD RULES, checked in code as well as here:
+- It must ASK. "Curious how you're handling X", "How are you handling X", or a plain question. No question, no send.
+- NEVER a first-person-plural product claim: no "we index", "we pre-compute", "we map", "we serve", "so agents start knowing", "so the agent gets". Max says what HE works on, in one clause, and that is the entire mention of Bito.
+- NEVER describe their architecture back at them, and never state what goes wrong for them. Both are things you are asking about, not telling them.
+- No proof figure, no numbers, no links, no meeting ask, no signature.
+- Contractions. Casual. It should read like a note typed in ten seconds, because that is what a real one is.`;
 
 /** Legacy export name kept so nothing silently loses the rules on import. */
 export const BANNED_WRITING = VOICE_SPEC;
@@ -160,6 +198,50 @@ export function bannedHits(text: string): string[] {
 /** True when a connect request is within its hard character cap. */
 export function withinConnectCap(text: string): boolean {
   return (text || "").length <= CONNECT_CAP;
+}
+
+// A connect note has to ASK something. A literal "?" is the obvious form, but
+// Max's own approved phrasing ("curious how you're handling...") is an indirect
+// question with no mark, so accept that shape too.
+const ASKS =
+  /\?|\b(?:curious|wondering|wanted to ask)\b|\bhow (?:are|do|you'?re|you are|is|does)\b|\bwhat(?:'s| is| are)\s+(?:you|your)\b/i;
+
+// Product claims in the first-person plural. This is the exact shape that turns
+// a connect note into a landing page, and it comes from the model paraphrasing
+// the product blurb sitting in its own system prompt.
+const PITCHES = [
+  /\bwe\s+(?:index|pre-?index|pre-?compute|precompute|map|serve|built|build|give|feed|ship|provide|route)\b/i,
+  /\bso\s+(?:the\s+|your\s+)?agents?\s+(?:start|already|get|know|can)\b/i,
+  /\bour\s+(?:platform|product|tool|gateway|index)\b/i,
+  /\bbito\s+(?:pre-?computes?|indexes?|maps?|serves?|routes?|gives?)\b/i,
+];
+
+// Telling them what is going wrong for them. The spec says ask, then stop:
+// predicting their pain is still diagnosing it.
+const DIAGNOSES = [
+  /\bit'?s\s+guessing\b/i,
+  /\bburns?\s+turns\b/i,
+  /\bre-?learn(?:ing|s)?\b/i,
+  /\bthat'?s\s+most\s+tasks\b/i,
+  /\btend to hit\b/i,
+  /\busually where\b/i,
+];
+
+/** Everything wrong with a connect note, checked in code because the prompt can
+ *  be ignored and a regex cannot. Empty array means it's sendable. */
+export function connectProblems(text: string): string[] {
+  const s = (text || "").trim();
+  const out: string[] = [];
+  if (!s) return ["empty draft"];
+  if (!withinConnectCap(s)) out.push(`${s.length} characters, over the ${CONNECT_CAP} cap`);
+  if (!ASKS.test(s)) out.push("it never asks anything, so there is nothing to reply to");
+  const pitch = PITCHES.map((r) => s.match(r)).find(Boolean);
+  if (pitch) out.push(`it pitches ("${pitch[0]}") instead of just asking`);
+  const diag = DIAGNOSES.map((r) => s.match(r)).find(Boolean);
+  if (diag) out.push(`it tells them what their problem is ("${diag[0]}")`);
+  if (/^\s*max\s*$/im.test(s)) out.push("it is signed; connect requests carry no signature");
+  out.push(...bannedHits(s));
+  return out;
 }
 
 /** Subject lines: lowercase, 2-4 plain words, no colon/question/number. */

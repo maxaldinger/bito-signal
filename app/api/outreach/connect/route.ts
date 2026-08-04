@@ -15,9 +15,8 @@ import { callClaudeWithWebSearch, FAST_MODEL } from "@/lib/anthropic";
 import {
   CONNECT_CAP,
   VOICE_SPEC,
-  bannedHits,
+  connectProblems,
   enforceLinkedin,
-  withinConnectCap,
 } from "@/lib/outreachRules";
 
 export const maxDuration = 30;
@@ -51,22 +50,25 @@ export async function POST(req: NextRequest) {
   // ROUTER is the "too senior / wrong org" case now: they redirect you rather
   // than own the decision, so the note asks rather than pitches.
   const isAnchor = (body.classification || "").toUpperCase() === "ROUTER";
+  const first = (body.name || "").trim().split(/\s+/)[0] || "there";
 
-  const system = `You write LinkedIn connect notes for Max, a founding AE at Bito. Bito precomputes a map of a company's code, commits, and tickets and serves it to any coding agent or IDE over MCP, so agents start already knowing the architecture instead of re-learning it every session. Bito is built for big interconnected multi-repo / microservice codebases.
+  const system = `You write LinkedIn connect notes for Max, a founding AE at Bito.
+
+BACKGROUND, FOR YOUR UNDERSTANDING ONLY — this paragraph must NOT appear in the note in any form, paraphrased or otherwise: Bito precomputes a map of a company's code, commits and tickets and serves it to any coding agent over MCP, and it is built for big multi-repo codebases. Drafts that leak this back out ("we index that upfront so agents start knowing the architecture") are rejected. In the note, Bito is mentioned exactly once, as the thing Max works on.
 
 Write ONE connect note for ONE named person. Output the note text ONLY — no JSON, no quotes around it, no preamble.
 
-This is register (A), a CONNECT REQUEST: open "Hey ${(body.name || "").trim().split(/\s+/)[0] || "there"}," then 2-3 sentences, HARD CAP ${CONNECT_CAP} characters including spaces. NO signature — do not sign "Max" on a connect request.
+This is a CONNECT REQUEST: open "Hey ${first}," then AT MOST three short sentences, HARD CAP ${CONNECT_CAP} characters including spaces. Well under the cap is better than near it. NO signature — do not sign "Max" on a connect request.
 
-The note's only job is to earn the accept. NOT to pitch. No mechanism-dump, no solution statement, no meeting ask, no links. Never open with a scraped-looking stat. One genuinely specific observation, then a plain reason to connect. It must read like a person noticed something, not like a tool populated a field.
+The note's only job is to earn the accept. It must ASK how they are handling coding agents against their specific situation, mention in one clause that this is what Max works on, and stop. No pitch, no mechanism, no solution statement, no diagnosis of their problem, no meeting ask, no links, no numbers. It should read like a note a person typed in ten seconds, because a real one is.
 
 ATTRIBUTION RULE (the most important rule here, and the one most easily got wrong):
 The company signal you are given may describe something a DIFFERENT person at the company did — a podcast, a conference talk, a blog post, a named individual's project. You are writing to the person named below, who is probably NOT that person. NEVER write "your podcast" / "your talk" / "your post" unless the signal explicitly names THIS person as the one who did it. When the signal belongs to someone else or to no one in particular, attribute it correctly and naturally: "your team's", "the talk your DX group gave", "what your platform org is shipping", or simply drop the artifact and observe the underlying engineering situation instead. A misattributed compliment is worse than a generic note.
 
-ROLE FIT: shape the observation to what THIS person plausibly owns. ${
+ROLE FIT: shape the QUESTION to what THIS person plausibly owns. ${
     isAnchor
-      ? "This person is a senior executive (CIO/CTO/SVP scale). Pitch at their altitude: the engineering-org-wide situation, not a specific tool or pipeline. Do not imply they personally run the toolchain."
-      : "This person owns or influences developer tooling directly. It is fair to reference the concrete platform/tooling/developer-experience situation they'd actually touch day to day."
+      ? "This person is a senior executive (CIO/CTO/SVP scale). Ask at their altitude: how the engineering org is approaching it, not about a specific tool or pipeline. Do not imply they personally run the toolchain."
+      : "This person owns or influences developer tooling directly. It is fair to ask about the concrete platform/tooling/developer-experience situation they'd actually touch day to day."
   }
 
 ${VOICE_SPEC}`;
@@ -86,10 +88,13 @@ Title: ${body.title || "(unknown)"}`;
   try {
     let best = "";
     let lastProblem = "";
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // Three attempts, not two. The pitch reflex is strong enough that one
+    // rewrite often only half-fixes it, and a Haiku call is cheap next to a
+    // connect request that reads like a landing page.
+    for (let attempt = 0; attempt < 3; attempt++) {
       const res = await callClaudeWithWebSearch({
         system,
-        user: attempt === 0 ? user : `${user}\n\nYour previous draft was rejected: ${lastProblem}. Rewrite it, fixing that specifically. Do not simply shorten by deleting the last sentence; rewrite so it reads whole.`,
+        user: attempt === 0 ? user : `${user}\n\nYour previous draft was rejected because ${lastProblem}. Here is that draft:\n\n${best}\n\nRewrite it, fixing that specifically. Do not simply shorten by deleting the last sentence; rewrite so it reads whole, casual, and asks a question.`,
         model: FAST_MODEL,
         webSearch: false,
         maxTokens: 400,
@@ -97,29 +102,26 @@ Title: ${body.title || "(unknown)"}`;
       });
       const draft = res.text.replace(/^["'\s]+|["'\s]+$/g, "").trim();
       best = draft;
-      const over = !withinConnectCap(draft);
-      const hits = bannedHits(draft);
-      if (!over && hits.length === 0) {
+      const problems = connectProblems(draft);
+      if (problems.length === 0) {
         return NextResponse.json(
           { ok: true, connect: draft, chars: draft.length },
           { headers: { "Cache-Control": "no-store" } },
         );
       }
-      lastProblem = [
-        over ? `it was ${draft.length} characters, over the ${CONNECT_CAP} cap` : "",
-        hits.length ? `it contained banned phrasing (${hits.join(", ")})` : "",
-      ]
-        .filter(Boolean)
-        .join(" and ");
+      lastProblem = problems.join("; and ");
     }
-    // Second attempt still failed — trim as a last resort rather than 502, but
-    // report the character count so the caller can see it was salvaged.
-    const connect = enforceLinkedin(best, CONNECT_CAP);
-    if (!connect) {
-      return NextResponse.json({ ok: false, error: "Empty draft" }, { status: 502 });
-    }
+    // Three failures. The old behaviour was to TRIM the last draft and ship it,
+    // but trimming only fixes length — a note rejected for pitching is still
+    // pitching after a trim, and it went out labelled as if it were clean.
+    // Fall back to Max's own approved template instead: generic, but never
+    // embarrassing, and flagged so the rep knows it isn't the personalized one.
+    const connect = enforceLinkedin(
+      `Hey ${first},\n\nCurious how you're handling coding agents at ${company}. That's what I work on at Bito, would be good to connect.`,
+      CONNECT_CAP,
+    );
     return NextResponse.json(
-      { ok: true, connect, chars: connect.length, salvaged: lastProblem },
+      { ok: true, connect, chars: connect.length, generic: true, rejected: lastProblem, discarded: best },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (e) {

@@ -581,6 +581,10 @@ export type ApolloReveal = {
   emailStatus?: string;
   phone?: string;
   country?: string;
+  /** The real profile URL. people/match returns it; the people SEARCH usually
+   *  does not, which is why task notes read "PROFILE: UNRESOLVED" for people
+   *  whose email had already been revealed. */
+  linkedinUrl?: string;
 };
 const apolloReveals = makeStore<Record<string, ApolloReveal>>("bito-apollo-reveals", {});
 
