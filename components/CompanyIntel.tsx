@@ -575,7 +575,7 @@ function ApolloPersonCard({
       )}
       {!screened && emailState === "none" && (
         <div className="border-b border-red-500/40 bg-red-500/15 px-4 py-1.5 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-red-300">
-          no email found · linkedin only · do not add to a sequence
+          no email found · linkedin only
         </div>
       )}
       {emailState === "unverified" && (
