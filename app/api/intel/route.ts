@@ -207,7 +207,14 @@ export async function GET(req: NextRequest) {
       system: SYSTEM,
       user: `Research "${company}" and produce the lean Bito intel brief JSON. Today's date: ${new Date().toISOString().slice(0, 10)}.`,
       maxSearches: 6,
-      maxTokens: 5000,
+      // 5000 was set when outreach was four short strings. The Aug 2026 spec
+      // replaced those with a connect note plus THREE subject+body messages
+      // (InMail and two follow-ups), and the brief already carries stakeholders,
+      // pain points, competitors, motion, cost and citations. Research-heavy
+      // accounts (Lockheed Martin) then ran past the ceiling and 502'd with
+      // stop_reason max_tokens. Headroom is cheap; a truncated brief costs the
+      // whole research pass.
+      maxTokens: 9000,
       temperature: 0.3,
     });
 
@@ -222,7 +229,11 @@ export async function GET(req: NextRequest) {
           : "the brief came back without a complete ICP score";
       return NextResponse.json(
         {
-          error: `Live research pass incomplete — ${cause}. Try again; this is usually transient.`,
+          // Don't call a truncation transient — retrying an over-budget brief
+          // just burns another research pass. Say which failure it was.
+          error: result.truncated
+            ? `Live research pass incomplete — ${cause}. Retrying may not help: the brief is too long for the output budget.`
+            : `Live research pass incomplete — ${cause}. Try again; this is usually transient.`,
           searchCount: result.searchCount,
           searchErrors: result.searchErrors,
         },
