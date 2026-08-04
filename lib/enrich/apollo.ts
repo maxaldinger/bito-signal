@@ -7,7 +7,7 @@
 //     on lower plans). The old /mixed_people/search path 403s on most plans.
 // Auth: x-api-key header.
 
-import { classifyProfiles } from "../icpClassifier";
+import { accountExcluded, classifyProfiles, hardExclude } from "../icpClassifier";
 import type { ApolloData, EnrichContact, ProviderResult } from "./types";
 import { pickAiDevTools } from "./types";
 import type { RegionId } from "../data";
@@ -589,6 +589,13 @@ export interface ApolloPeopleResult {
   hasMore?: boolean;
   /** A specific person looked up by name (the motion's first-move contact). */
   pinned?: EnrichContact;
+  /** STAGE 1: the whole account was excluded, so no contacts were pulled. */
+  accountExcluded?: { reason: string; code: string };
+  /** STAGE 2: how many surfaced titles were dropped, by reason code. Excluded
+   *  is not the same as silent — the UI states the count and the rule. */
+  excludedCounts?: Record<string, number>;
+  /** How many people the search returned before title exclusion. */
+  surfaced?: number;
 }
 
 /**
@@ -604,7 +611,10 @@ export async function apolloPeopleByTitle(
   pinName?: string,
   /** The brief's "what I saw" signal, so the ICP classifier can judge this
    *  specific account instead of paraphrasing job titles. */
-  signal?: string
+  signal?: string,
+  /** Set when deliberately targeting a SOFTWARE DIVISION of a hardware parent.
+   *  The spec allows those, scoped to the division. */
+  division?: string
 ): Promise<ApolloPeopleResult> {
   const fail = (configured: boolean, error: string): ApolloPeopleResult => ({
     configured,
@@ -612,6 +622,20 @@ export async function apolloPeopleByTitle(
     error,
     people: [],
   });
+
+  // STAGE 1 — account-level exclusion, BEFORE any Apollo call. A hardware-primary
+  // account costs one string comparison here instead of two searches, a
+  // classifier pass and a page of cards that each want a reveal credit.
+  const acct = accountExcluded(company, signal, division);
+  if (acct) {
+    return {
+      configured: true,
+      ok: true,
+      people: [],
+      hasMore: false,
+      accountExcluded: { reason: acct.reason, code: acct.code },
+    };
+  }
 
   const key = process.env.APOLLO_API_KEY;
   if (!key) return fail(false, "APOLLO_API_KEY not set — add it to .env.local / Vercel env");
@@ -748,7 +772,19 @@ export async function apolloPeopleByTitle(
     const hasMore =
       (titleRes.status === 200 && peopleOf(titleRes).length >= perPage) ||
       (dmRes.status === 200 && peopleOf(dmRes).length >= perPage);
-    const contacts = merged.map(toContact).filter((c): c is EnrichContact => c !== undefined);
+    const allContacts = merged.map(toContact).filter((c): c is EnrichContact => c !== undefined);
+    // STAGE 2 — title exclusion, applied HERE at the search layer rather than at
+    // display. The spec is explicit that an excluded contact must never be
+    // pulled, enriched or displayed, and every rendered card is a potential
+    // reveal credit. Counts are kept so the UI can say what was dropped and
+    // under which rule: excluded is not the same as silent.
+    const excludedCounts: Record<string, number> = {};
+    const contacts = allContacts.filter((c) => {
+      const v = hardExclude(c.title);
+      if (!v) return true;
+      excludedCounts[v.reasonCode] = (excludedCounts[v.reasonCode] ?? 0) + 1;
+      return false;
+    });
     // ICP persona pass — decides who reaches the review queue. Runs on the whole
     // page BEFORE any card renders, because each rendered card auto-reveals an
     // email (a credit); classifying first means we never spend one on a REJECT.
@@ -786,13 +822,15 @@ export async function apolloPeopleByTitle(
         ok: true,
         orgName,
         people: [],
+        excludedCounts,
+        surfaced: allContacts.length,
         // Carry the REAL value: a full raw page that kept nobody still has more
         // pages behind it. Hardcoding false here permanently ended pagination
         // the first time one page happened to hold no engineering leaders.
         hasMore,
         pinned,
       };
-    return { configured: true, ok: true, orgName, people, hasMore, pinned };
+    return { configured: true, ok: true, orgName, people, hasMore, pinned, excludedCounts, surfaced: allContacts.length };
   } catch (e) {
     return fail(true, isTimeout(e) ? "Apollo people search timed out" : "Apollo people search failed");
   }

@@ -36,28 +36,14 @@ export interface EnrichContact {
   department?: string;
   /** Country the person is based in, when the provider returns it. */
   country?: string;
-  /** ICP persona verdict (lib/icpClassifier). Set server-side before the
-   *  contact reaches the UI; absent when the classifier is unconfigured. */
-  icp?: {
-    /** ANCHOR owns the tooling decision, TARGET is adjacent to it, ROUTER can
-     *  redirect you internally, PASS is unrelated, UNSCORED means the profile
-     *  did not support a confident call. */
-    classification: "ANCHOR" | "TARGET" | "ROUTER" | "PASS" | "UNSCORED";
-    confidence: "high" | "medium" | "low";
-    ownsDevTooling: boolean;
-    reason: string;
-    recommendedAction: string;
-    /** Fixed-vocabulary code behind the tier (lib/icpClassifier ICPReasonCode).
-     *  Typed loosely here to keep this module free of a runtime import; the
-     *  UI narrows it through REASON_LABEL. Absent on contacts scored before
-     *  Aug 2026. */
-    reasonCode?: import("../icpClassifier").ICPReasonCode;
-    /** The tier came from the deterministic title filter, not the model. */
-    hardFiltered?: boolean;
-    /** The classifier call failed — `classification` is a placeholder, not a
-     *  judgement. Consumers must fall back rather than treat it as REJECT. */
-    failed?: boolean;
-  };
+  /** Classification verdict (lib/icpClassifier). Set server-side before the
+   *  contact reaches the UI; absent when the classifier is unconfigured.
+   *
+   *  Type-only import so this module stays free of a runtime dependency — it is
+   *  imported by client components that must not pull in the Anthropic client.
+   *  Verdicts cached before Aug 4 2026 carry the old ANCHOR/TARGET/PASS
+   *  vocabulary; run them through normalizeClass() on read. */
+  icp?: import("../icpClassifier").ICPVerdict;
 }
 
 // --------- Apollo.io ---------

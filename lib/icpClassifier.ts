@@ -1,64 +1,77 @@
-// Contact tiering — scores each surfaced profile by what they actually own,
-// before they reach the review queue.
+// Contact pull & classification — Max Aldinger's spec, Aug 4 2026.
 //
-// This replaces title regexes as the qualification gate. A regex can't tell
-// "Senior Director, Engineering and Asset Optimization" (a plant job) from
-// "Director of Engineering Platform" (the buyer). Titles are natural language;
-// score them with a model.
+// The problem this fixes, in his words: the pull returned eight CIOs per
+// enterprise account with identical boilerplate rationale, badged everyone
+// TARGET or ROUTER so the badge carried no information, and spent enrichment
+// and email-verification credits on people who would never be worked.
 //
-// Contacts are scored A PAGE AT A TIME, not one call each. Two reasons: the
-// spec requires a distinct rationale per contact ("if two contacts would
-// receive the same rationale, you have not evaluated them"), which is
-// impossible when each call is blind to the others; and a page used to fire ~30
-// concurrent Haiku calls, which is exactly the burst shape that draws a 429 and
-// made an outage look like a screening decision.
+// So exclusion happens BEFORE enrichment, deterministically, by title and by
+// account. What survives gets one of three states, and UNRESOLVED is expected
+// to be the common answer — the tool has to be willing to say it does not know.
 //
-// Runs on FAST_MODEL (Haiku) with web_search OFF — pure reasoning over text the
-// caller already has, so it bills tokens only, no search fees.
+// Scoring runs a page at a time on FAST_MODEL (Haiku) with web_search OFF: the
+// spec forbids identical rationales across contacts, which is impossible when
+// each call is blind to the others, and a page of ~30 concurrent calls is the
+// burst shape that draws a 429.
 
 import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "./anthropic";
 
-export type ICPClass = "ANCHOR" | "TARGET" | "ROUTER" | "PASS" | "UNSCORED";
+/** STAGE 4. Three live states plus the excluded bucket. Deliberately NOT a
+ *  seniority ladder: QUALIFIED requires a named function or product surface,
+ *  not a big title. */
+export type ICPClass = "QUALIFIED" | "UNRESOLVED" | "ROUTER" | "EXCLUDED";
 export type ICPConfidence = "high" | "medium" | "low";
 
-/** Fixed vocabulary for WHY a contact landed where it did. Free prose was
- *  unauditable: two contacts could be dropped for the same reason described two
- *  different ways, and a tier with no vocabulary behind it is decoration. Every
- *  verdict carries one of these. */
-export type ICPReasonCode =
-  // Exclusions — deterministic, decided by title before the model is consulted.
-  | "DEVOPS_SRE"
-  | "CUSTOMER_FACING"
-  | "CIO_CISO_ORG"
-  | "SECURITY_RISK_COMPLIANCE"
-  | "ENTERPRISE_ARCHITECTURE"
-  | "PRODUCT_MANAGEMENT"
-  | "NETWORK_EMBEDDED"
-  | "DATA_ML_AI"
-  | "NOT_ENGINEERING"
-  // Inclusions — assigned by the scorer.
-  | "OWNS_DEV_PLATFORM"
-  | "ENG_LEADER_NAMED_SURFACE"
-  | "ENG_LEADER_ADJACENT"
-  | "CAN_REDIRECT"
-  | "UNKNOWN";
+/** Verdicts stored before Aug 4 2026 used the ANCHOR/TARGET/PASS vocabulary.
+ *  Map them rather than leave cached briefs rendering blank badges.
+ *  TARGET becomes UNRESOLVED, not QUALIFIED: "adjacent to the decision" is
+ *  precisely the ambiguity the new spec wants stated out loud. */
+const LEGACY_CLASS: Record<string, ICPClass> = {
+  ANCHOR: "QUALIFIED",
+  TARGET: "UNRESOLVED",
+  ROUTER: "ROUTER",
+  PASS: "EXCLUDED",
+  UNSCORED: "UNRESOLVED",
+};
 
-/** Human-readable label for a reason code, used on the card. */
+export function normalizeClass(v: unknown): ICPClass {
+  const s = String(v ?? "").toUpperCase();
+  if (s === "QUALIFIED" || s === "UNRESOLVED" || s === "ROUTER" || s === "EXCLUDED") return s;
+  return LEGACY_CLASS[s] ?? "UNRESOLVED";
+}
+
+/** Fixed vocabulary for WHY a contact landed where it did. Free prose is
+ *  unauditable: two contacts get dropped for the same reason described two
+ *  different ways, and a badge with no vocabulary behind it is decoration. */
+export type ICPReasonCode =
+  // STAGE 2 exclusions — deterministic, by title, before the model is consulted.
+  | "EXEC_IT_SECURITY"
+  | "INFRA_OPS"
+  | "FIELD_CUSTOMER"
+  | "DATA_ML_RESEARCH"
+  | "PRODUCT_PROGRAM"
+  | "NOT_ENGINEERING"
+  // STAGE 1 exclusion — the whole account.
+  | "HARDWARE_ACCOUNT"
+  // Live states, assigned by the scorer.
+  | "OWNS_APP_ENGINEERING"
+  | "OWNS_DEV_PLATFORM"
+  | "AMBIGUOUS_TITLE"
+  | "NAMED_ROUTE"
+  ;
+
 export const REASON_LABEL: Record<ICPReasonCode, string> = {
-  DEVOPS_SRE: "devops / sre",
-  CUSTOMER_FACING: "customer-facing",
-  CIO_CISO_ORG: "cio / ciso org",
-  SECURITY_RISK_COMPLIANCE: "security / risk / compliance",
-  ENTERPRISE_ARCHITECTURE: "enterprise architecture",
-  PRODUCT_MANAGEMENT: "product management",
-  NETWORK_EMBEDDED: "network / embedded",
-  DATA_ML_AI: "data / ml / ai",
+  EXEC_IT_SECURITY: "exec IT / security org",
+  INFRA_OPS: "infrastructure / operations",
+  FIELD_CUSTOMER: "field / customer-facing",
+  DATA_ML_RESEARCH: "data / ml / research",
+  PRODUCT_PROGRAM: "product / program",
   NOT_ENGINEERING: "not engineering",
-  OWNS_DEV_PLATFORM: "owns dev platform",
-  ENG_LEADER_NAMED_SURFACE: "eng leader, named surface",
-  ENG_LEADER_ADJACENT: "eng leadership, adjacent",
-  CAN_REDIRECT: "can redirect internally",
-  UNKNOWN: "insufficient signal",
+  HARDWARE_ACCOUNT: "hardware-primary account",
+  OWNS_APP_ENGINEERING: "owns application engineering",
+  OWNS_DEV_PLATFORM: "owns developer platform",
+  AMBIGUOUS_TITLE: "ambiguous title",
+  NAMED_ROUTE: "named route to the buyer",
 };
 
 export interface ICPVerdict {
@@ -67,105 +80,199 @@ export interface ICPVerdict {
   ownsDevTooling: boolean;
   reason: string;
   recommendedAction: string;
-  /** Fixed-vocabulary code behind the tier. */
   reasonCode: ICPReasonCode;
-  /** True when the tier came from the deterministic title filter rather than
-   *  the model — these are policy, not judgement, and cost no tokens. */
+  /** STAGE 4 ROUTER requirement: who they would route you to, and why. A ROUTER
+   *  without this is the lazy fallback the spec bans. */
+  routesTo?: string;
+  /** Tier came from the deterministic filter, not the model. */
   hardFiltered?: boolean;
-  /** The call failed or returned something unparseable. The classification
-   *  field is a placeholder, NOT a judgement — never count it as "screened
-   *  out", and fall back to the seniority heuristic instead. */
+  /** The call failed. `classification` is a placeholder, NOT a judgement. */
   failed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// HARD EXCLUSIONS
+// STAGE 1 — ACCOUNT-LEVEL EXCLUSION
 //
-// Max's rule, Aug 2026: these are filters, not judgement calls. A model asked
-// to weigh "Director, Network DevOps" will sometimes find a reason to keep it;
-// a regex will not. Applied BEFORE the scorer, so excluded contacts cost no
-// tokens either.
+// Hardware-primary means revenue comes from physical product and software is a
+// supporting function. Checked before any contact is pulled, so an excluded
+// account costs one string comparison instead of a page of Apollo results and a
+// classifier pass.
 //
-// Ordered: the first match wins, so put the compound cases (network devops,
-// office of the CIO) ahead of the general ones.
+// A hardware parent with a real software estate (a cloud services division) is
+// pullable for that division only — hence `divisionOverride`.
 // ---------------------------------------------------------------------------
+
+/** Named in the spec. Matched on the account name, loosely. */
+const HARDWARE_ACCOUNTS = [
+  "honeywell",
+  "ametek",
+  "synopsys",
+  "netapp",
+  "logitech",
+];
+
+/** Build everything internally; procurement is a wall. Spec calls these out
+ *  separately from hardware — same outcome, different reason. */
+const BUILDS_INTERNALLY = ["meta", "facebook", "google", "alphabet", "amazon"];
+
+/** Category words that make an account hardware-primary. Applied to the
+ *  account's own industry/segment text, not to a person's title. */
+const HARDWARE_CATEGORY =
+  /\b(?:semiconductor|semis?|foundry|wafer|photonic|optoelectronic|rf\b|radio frequency|sensor|capital equipment|process technology|industrial control|instrumentation|aerospace|defen[cs]e|avionics|munition|medical device|diagnostics? equipment|automotive|automaker|vehicle manufactur|networking hardware|storage hardware|electronic manufactur|contract manufactur|industrial conglomerate)\b/i;
+
+export interface AccountExclusion {
+  excluded: boolean;
+  reason: string;
+  code: "HARDWARE_ACCOUNT";
+}
+
+/**
+ * STAGE 1. Decide whether to pull contacts for this account at all.
+ * @param company  Account name.
+ * @param context  Industry / segment / description text, when known.
+ * @param division Set when the caller is deliberately targeting a software
+ *   division of a hardware parent — that is pullable, for that division only.
+ */
+export function accountExcluded(
+  company: string,
+  context?: string,
+  division?: string,
+): AccountExclusion | undefined {
+  const name = (company || "").toLowerCase();
+  if (!name) return undefined;
+  // A named software division overrides the parent's category. The spec allows
+  // pulling those, scoped to the division.
+  if (division && division.trim()) return undefined;
+
+  const hit = HARDWARE_ACCOUNTS.find((h) => name.includes(h));
+  if (hit) {
+    return {
+      excluded: true,
+      code: "HARDWARE_ACCOUNT",
+      reason: `${company} is hardware-primary: revenue comes from physical product and software is a supporting function.`,
+    };
+  }
+  const internal = BUILDS_INTERNALLY.find((h) => new RegExp(`\\b${h}\\b`).test(name));
+  if (internal) {
+    return {
+      excluded: true,
+      code: "HARDWARE_ACCOUNT",
+      reason: `${company} builds its developer tooling internally and procurement is a wall.`,
+    };
+  }
+  const cat = (context || "").match(HARDWARE_CATEGORY);
+  if (cat) {
+    return {
+      excluded: true,
+      code: "HARDWARE_ACCOUNT",
+      reason: `${company} is hardware-primary (${cat[0].toLowerCase()}): software is a supporting function, not the product.`,
+    };
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// STAGE 2 — TITLE EXCLUSION
+//
+// "Never pull, enrich, or display anyone whose title matches these. No
+// exceptions, no 'but this one might be different.'" Applied before the model,
+// so an excluded contact costs nothing.
+//
+// Order matters: the first match wins, so the compound cases (Network DevOps,
+// Cloud Operations vs Cloud Platform Engineering) sit ahead of the general ones.
+// ---------------------------------------------------------------------------
+
+// Explicitly ALLOWED even though a nearby phrase is excluded. Checked first.
+// Cloud Platform Engineering is a buyer; Cloud Operations is not.
+const TITLE_ALLOWLIST =
+  /\bcloud\s+platform\s+engineering\b|\bplatform\s+engineering\b|\bdeveloper\s+(?:experience|productivity|platform|tools?)\b|\bengineering\s+productivity\b|\bapplication\s+engineering\b|\bsoftware\s+engineering\b/i;
+
 const HARD_EXCLUSIONS: Array<{ code: ICPReasonCode; re: RegExp; why: string }> = [
   {
-    // Network + DevOps is infrastructure twice over. Checked first so it is
-    // reported as the network case rather than the generic devops one.
-    code: "NETWORK_EMBEDDED",
-    re: /\bnetwork\s+(?:dev\s*ops|devops|sre|reliability|engineering)\b/i,
-    why: "Network engineering, not application engineering. Infrastructure on both axes.",
+    // Compound first: Network DevOps is infrastructure on both axes.
+    code: "INFRA_OPS",
+    re: /\bnetwork\s+(?:dev\s*ops|devops|sre|reliability|engineering|operations)\b/i,
+    why: "Network engineering, not application engineering.",
   },
   {
-    code: "DEVOPS_SRE",
-    re: /\bdev\s*ops\b|\bdevsecops\b|\bsre\b|\bsite\s+reliability\b|\bbuild\s*(?:&|and)\s*release\b|\brelease\s+engineering\b|\bci\s*\/?\s*cd\b|\bobservability\b/i,
-    why: "DevOps/SRE tooling budget is CI/CD, observability and deployment pipelines. They buy Datadog and Harness, not coding agents.",
+    // Cloud OPERATIONS is excluded; Cloud PLATFORM ENGINEERING is allowed and
+    // is caught by the allowlist above before this rule is reached.
+    code: "INFRA_OPS",
+    re: /\bcloud\s+(?:operations|ops)\b/i,
+    why: "Cloud operations runs the estate; it does not own how code is written.",
   },
   {
-    code: "CUSTOMER_FACING",
-    re: /\bfield\b|\bcustomer\b|\bclient\b|\bsolutions?\s+(?:architect|engineer|consult)|\bsolution\s+architect|\bprofessional\s+services\b|\bsales\s+engineer|\bpre-?sales\b|\bsupport\b|\bservices?\s+delivery\b|\bcustomer\s+success\b/i,
-    why: "Customer-facing or pre-sales. Advisory work against someone else's codebase, or a small isolated stack.",
+    code: "EXEC_IT_SECURITY",
+    re: /\bc[ei]o\b|\bchief\s+information\s+officer\b|\bdeputy\s+cio\b|\boffice\s+of\s+the\s+cio\b|\bvp\s*(?:&|and)\s*cio\b/i,
+    why: "CIO org owns internal IT, corporate systems and vendor management, not the product codebase.",
   },
   {
-    code: "CIO_CISO_ORG",
-    re: /\boffice\s+of\s+the\s+(?:cio|ciso|cto)\b|\bchief\s+of\s+staff\b|\bcorporate\s+(?:it|systems|technology)\b|\b(?:internal|enterprise)\s+it\b|\bit\s+operations\b/i,
-    why: "CIO org owns internal IT, corporate systems and vendor management, not the product engineering codebase.",
+    code: "EXEC_IT_SECURITY",
+    re: /\bciso\b|\bchief\s+(?:information\s+)?security\s+officer\b|\bchief\s+security\b|\binformation\s+security\b|\bcyber\b|\bsecurity\s+(?:engineering|architect|operations|leadership)\b/i,
+    why: "Security owns posture and appears in the deal as a blocker, never as the buyer.",
   },
   {
-    code: "SECURITY_RISK_COMPLIANCE",
-    re: /\bciso\b|\binformation\s+security\b|\bcyber\b|\bsecurity\s+(?:engineering|architect|operations|officer)\b|\bgrc\b|\bcompliance\b|\brisk\b|\bgovernance\b|\baudit\b|\bprivacy\b/i,
-    why: "Security and risk own posture and will only ever appear as a blocker in the deal, never a buyer.",
+    code: "EXEC_IT_SECURITY",
+    re: /\bchief\s+(?:digital|data|analytics|ai)\s+officer\b|\bcaio\b|\bchief\s+actuary\b/i,
+    why: "Strategy seat, not a codebase owner.",
   },
   {
-    code: "ENTERPRISE_ARCHITECTURE",
-    re: /\benterprise\s+architect/i,
-    why: "Enterprise Architecture sets standards and advises. It does not own the engineering tooling budget.",
+    code: "EXEC_IT_SECURITY",
+    re: /\benterprise\s+architect|\bgrc\b|\bcompliance\b|\brisk\b|\baudit\b|\bgovernance\b|\bprivacy\b/i,
+    why: "Standards, governance and advisory. No engineering tooling budget.",
   },
   {
-    code: "PRODUCT_MANAGEMENT",
-    re: /\bproduct\s+(?:owner|manage|management|manager)\b|\btechnical\s+product\b|\bprogram\s+manage|\bscrum\b|\bagile\s+coach\b/i,
-    why: "Product owns process and roadmap, not repos.",
+    code: "INFRA_OPS",
+    re: /\bdev\s*ops\b|\bdevsecops\b|\bsre\b|\bsite\s+reliability\b|\bproduction\s+engineering\b|\bbuild\s*(?:&|and)\s*release\b|\brelease\s+engineering\b|\bci\s*\/?\s*cd\b|\bobservability\b/i,
+    why: "DevOps/SRE budget is CI/CD, observability and deployment pipelines. They buy Datadog and Harness.",
   },
   {
-    code: "NETWORK_EMBEDDED",
-    re: /\bnetwork\b|\bwireless\b|\brf\b|\bradio\b|\bbroadband\b|\baccess\s+(?:network|engineering|technolog)|\bfiber\b|\bembedded\b|\bfirmware\b|\bhardware\b|\bsilicon\b|\bdevice\s+engineering\b/i,
-    why: "Network / RF / embedded systems work, not application code an agent writes against.",
+    code: "INFRA_OPS",
+    re: /\bnetwork\b|\bwireless\b|\brf\b|\bradio\b|\bbroadband\b|\baccess\s+(?:network|engineering|technolog)|\btelecom\b|\bfiber\b|\bembedded\b|\bfirmware\b|\bhardware\b|\bsilicon\b/i,
+    why: "Network / RF / embedded work, not application code an agent writes against.",
   },
   {
-    code: "DATA_ML_AI",
-    re: /\bdata\s+(?:science|scientist|engineering|analytics|platform|warehouse)\b|\banalytics\b|\bbusiness\s+intelligence\b|\bmachine\s+learning\b|\b(?:ml|mlops)\b|\bai\s+research\b|\bresearch\s+scien/i,
-    why: "Data / ML / AI research is a different budget and a different codebase from application engineering.",
+    code: "INFRA_OPS",
+    re: /\bit\s+operations\b|\bservice\s+delivery\b|\binfrastructure\s+operations\b|\bdata\s*cent(?:er|re)\b|\bit\s+infrastructure\b/i,
+    why: "Runs the estate. Not the application engineering org.",
+  },
+  {
+    code: "FIELD_CUSTOMER",
+    re: /\bsolutions?\s+(?:architect|engineer|consult)|\bsolution\s+architect|\bsales\s+engineer|\bpre-?sales\b|\bfield\s+(?:engineer|experience|technolog|operations)|\bfield\b|\bcustomer\s+(?:engineer|success|experience)|\bclient\s+(?:engineer|partner)|\bprofessional\s+services\b|\btechnical\s+account\s+manage|\bsupport\s+engineer|\bsupport\b/i,
+    why: "Customer-facing or pre-sales. Advisory against someone else's codebase.",
+  },
+  {
+    code: "DATA_ML_RESEARCH",
+    re: /\bdata\s+(?:engineering|platform|science|scientist|warehouse|governance)\b|\banalytics\b|\bbusiness\s+intelligence\b|\bmachine\s+learning\b|\b(?:ml|mlops)\b|\bml\s+platform\b|\bai\s+research\b|\bapplied\s+science\b|\bresearch\s+scien|\bactuarial\b|\bmodel\s+risk\b|\bquantitative\b|\bquant\b/i,
+    why: "Different budget and a different codebase from application engineering.",
+  },
+  {
+    code: "PRODUCT_PROGRAM",
+    re: /\bproduct\s+(?:owner|manage|management|manager)\b|\btechnical\s+product\b|\bprogram\s+manage|\bscrum\b|\bagile\s+coach\b|\bgeneral\s+manager\b|\bbusiness\s+development\b|\bstrategy\b/i,
+    why: "Owns process, roadmap or the P&L. Not repos.",
   },
 ];
 
-// Anything technical at all. A title matching NONE of this is not an
-// engineering contact — Finance, HR, Legal, Merchandising, Wealth Management.
-// The seniority sweep returns those in bulk at a large enterprise.
-//
-// This test used to live in lib/enrich/apollo.ts, where it DELETED those people
-// from the search result server-side. Same test, opposite handling: they are
-// now labelled and rendered like any other exclusion. The token saving is
-// unchanged, since this still runs before the model.
-//
-// Two groups on purpose: acronyms need BOTH word boundaries or "ai" matches
-// "Aircraft"; stems need only a leading one.
+// Anything technical at all. A title matching none of this is Finance, HR,
+// Legal, Merchandising — the bulk a seniority sweep returns at a large
+// enterprise. Two groups on purpose: acronyms need BOTH word boundaries or
+// "ai" matches "Aircraft"; stems need only a leading one.
 const TECHNICAL =
-  /\b(?:c[ti]o|ctpo|cdo|sre|ml|ai)\b|\b(?:engineer|technolog|technical|information|software|platform|infrastructur|infra|devops|reliab|architect|develop|data|machine\s*learning|cloud|digital|security)/i;
+  /\b(?:cto|ctpo)\b|\b(?:engineer|technolog|technical|software|platform|develop|architect|application|digital)/i;
 
-/** Deterministic exclusion by title. Returns the verdict when the contact is
- *  hard-excluded, otherwise undefined. Never consults a model.
+/**
+ * STAGE 2. Deterministic exclusion by TITLE. Never consults a model.
  *
- *  TITLE ONLY, deliberately. A headline usually carries the employer ("VP
- *  Engineering at Juniper Networks"), and /\bnetwork\b/ against that would
- *  screen out every contact at Juniper, F5, Arista and Palo Alto — companies
- *  that sit in the Signal 2000. The job is in the title; the company is not our
- *  business here. */
+ * Title only, deliberately. A headline usually carries the employer ("VP
+ * Engineering at Juniper Networks"), and /\bnetwork\b/ against that would screen
+ * out every contact at Juniper, F5, Arista and Palo Alto.
+ */
 export function hardExclude(titles?: string): ICPVerdict | undefined {
   const t = (titles || "").trim();
   if (!t) return undefined;
+
   const pass = (code: ICPReasonCode, why: string): ICPVerdict => ({
-    classification: "PASS",
+    classification: "EXCLUDED",
     confidence: "high",
     ownsDevTooling: false,
     reason: why,
@@ -173,19 +280,243 @@ export function hardExclude(titles?: string): ICPVerdict | undefined {
     reasonCode: code,
     hardFiltered: true,
   });
+
+  // The allowlist wins. "Director, Cloud Platform Engineering" contains
+  // "cloud" and would otherwise be caught by the infra rules.
+  if (TITLE_ALLOWLIST.test(t)) {
+    // ...unless it ALSO carries an unambiguous disqualifier. "Director of Data
+    // Platform Engineering" is a data job wearing a platform label.
+    const disqualified = HARD_EXCLUSIONS.find(
+      (r) => (r.code === "DATA_ML_RESEARCH" || r.code === "FIELD_CUSTOMER") && r.re.test(t),
+    );
+    if (!disqualified) return undefined;
+    return pass(disqualified.code, disqualified.why);
+  }
+
   for (const rule of HARD_EXCLUSIONS) {
     if (rule.re.test(t)) return pass(rule.code, rule.why);
   }
-  // Last, and inverted: no technical token anywhere in the title. Checked after
-  // the specific rules so a Network or Product title reports as ITSELF rather
-  // than as the catch-all.
   if (!TECHNICAL.test(t)) {
     return pass(
       "NOT_ENGINEERING",
-      "No technical scope in the title. A seniority sweep at a large enterprise returns Finance, HR, Legal and business leadership in bulk; this is one of those.",
+      "No technical scope in the title. A seniority sweep at a large enterprise returns Finance, HR, Legal and business leadership in bulk.",
     );
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// STAGE 3 — RANK CORRECTION
+// ---------------------------------------------------------------------------
+
+/** Firms where "Vice President" is a rank near senior IC / first-line manager,
+ *  not an executive. Meaningful ranks there: Managing Director, Executive
+ *  Director, Head of [named function]. */
+const VP_IS_A_RANK =
+  /\b(?:blackrock|goldman|jpmorgan|jp morgan|morgan stanley|citi(?:group|bank)?|wells fargo|barclays|deutsche bank|ubs|credit suisse|hsbc|bank of america|merrill|nomura|jefferies|state street|bny mellon)\b/i;
+
+export function vpIsARank(company?: string): boolean {
+  return VP_IS_A_RANK.test(company || "");
+}
+
+// ---------------------------------------------------------------------------
+// Queue + ordering
+// ---------------------------------------------------------------------------
+
+/** Everything that is not EXCLUDED reaches the review queue. */
+export const QUEUE_CLASSES: ICPClass[] = ["QUALIFIED", "UNRESOLVED", "ROUTER"];
+
+export const TIER_RANK: Record<ICPClass, number> = {
+  QUALIFIED: 0,
+  ROUTER: 1,
+  UNRESOLVED: 2,
+  EXCLUDED: 3,
+};
+
+/** Badge styling per state. Lives here so every surface shows the same one. */
+export const TIER_STYLE: Record<ICPClass, string> = {
+  QUALIFIED: "border border-neon-600/50 bg-neon-500/20 text-neon-200",
+  ROUTER: "border border-amber-500/40 bg-amber-500/15 text-amber-300",
+  UNRESOLVED: "border border-ink-700 bg-ink-800 text-ink-400",
+  EXCLUDED: "border border-ink-700 bg-ink-800 text-ink-500",
+};
+
+export function isQueueWorthy(v?: ICPVerdict | null): boolean {
+  return !!v && QUEUE_CLASSES.includes(v.classification);
+}
+
+// ---------------------------------------------------------------------------
+// STAGE 6 — ACTION GATING
+// ---------------------------------------------------------------------------
+
+export interface AllowedActions {
+  linkedin: boolean;
+  draftEmail: boolean;
+  hubspotTask: boolean;
+  /** ROUTER gets "Who owns this?" in place of Draft email. */
+  whoOwnsThis: boolean;
+  /** UNRESOLVED must not show an address at all — the rationale says we do not
+   *  know this is a buyer, so surfacing a verified address invites a send. */
+  showEmail: boolean;
+}
+
+export function allowedActions(cls: ICPClass): AllowedActions {
+  switch (cls) {
+    case "QUALIFIED":
+      return { linkedin: true, draftEmail: true, hubspotTask: true, whoOwnsThis: false, showEmail: true };
+    case "ROUTER":
+      return { linkedin: true, draftEmail: false, hubspotTask: true, whoOwnsThis: true, showEmail: false };
+    case "UNRESOLVED":
+      return { linkedin: true, draftEmail: false, hubspotTask: false, whoOwnsThis: false, showEmail: false };
+    default:
+      return { linkedin: false, draftEmail: false, hubspotTask: false, whoOwnsThis: false, showEmail: false };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// STAGE 5 — RATIONALE RULES, enforced in code
+// ---------------------------------------------------------------------------
+
+/** Hedges dressed as analysis. Banned by name in the spec. */
+const HEDGES = [
+  /title alone does not\b/i,
+  /title does not (?:confirm|establish)\b/i,
+  /\blikely (?:influences|owns|reports)\b/i,
+  /\bsuggests? (?:leadership|ownership|influence)\b/i,
+  /\bmay report into\b/i,
+  /\bcould (?:be|own|influence)\b/i,
+  /\bappears? to (?:own|lead|influence)\b/i,
+];
+
+export const NO_EVIDENCE = "No evidence beyond title. Needs profile review.";
+
+/** Replace a hedged rationale with the honest one. */
+function deHedge(reason: string): string {
+  const r = (reason || "").trim();
+  if (!r) return NO_EVIDENCE;
+  return HEDGES.some((h) => h.test(r)) ? NO_EVIDENCE : r;
+}
+
+/** Spec: "identical rationale text across two or more contacts" means the model
+ *  is generating boilerplate. Every duplicate after the first is replaced. */
+function dedupeRationales(verdicts: ICPVerdict[]): ICPVerdict[] {
+  const seen = new Set<string>();
+  return verdicts.map((v) => {
+    const key = v.reason.trim().toLowerCase();
+    if (!key || v.hardFiltered) return v;
+    if (seen.has(key)) return { ...v, reason: NO_EVIDENCE };
+    seen.add(key);
+    return v;
+  });
+}
+
+const SYSTEM = `You classify contacts at a target account for Bito, which sells AI coding infrastructure (a cross-repo context layer and a model gateway) bought out of an ENGINEERING TOOLING budget.
+
+Contacts that match the hard exclusion list have already been removed before you see them. Do not re-litigate exclusions. Your job is the three live states.
+
+THE THREE STATES. Every contact gets exactly one.
+
+QUALIFIED — The title EXPLICITLY names ownership of application engineering, a developer platform, or developer productivity. It requires a named function or product surface, not seniority.
+Qualifying examples: VP of Software Engineering. Director of Developer Productivity. Head of Platform Engineering. SVP Engineering, Payments. Director of Application Engineering.
+A big title with no named surface is NOT qualified.
+
+UNRESOLVED — The title is ambiguous and cannot be settled from the string alone. THIS IS THE CORRECT ANSWER MOST OF THE TIME and you must be willing to say it. Do not upgrade an ambiguous title to QUALIFIED to seem useful.
+Examples that are UNRESOLVED, not QUALIFIED: "Technical Director" (a hands-on engine owner in games, a program authority in aerospace, a delivery lead in consulting). "Head of Engineering" at a company you do not recognise. "Engineering Manager". "Director of Engineering" with no domain. "VP Technology".
+
+ROUTER — Genuinely useful as a path to the buyer, for a SPECIFIC stated reason. Not a fallback. You MUST name who they would route to and why, in the routes_to field. If you cannot name that, it is UNRESOLVED, not ROUTER.
+
+DISTRIBUTION. A healthy account pull is MOSTLY UNRESOLVED, a few QUALIFIED, AT MOST ONE ROUTER. If you are about to give every contact the same state, you have not evaluated them. More than one ROUTER on an account means you are being lazy.
+
+RANK CORRECTION. At BlackRock, Goldman Sachs, JPMorgan, Morgan Stanley, Citi, Wells Fargo and comparable financial institutions, "Vice President" is a rank roughly equivalent to senior IC or first-line manager, NOT an executive. Do not read it as seniority. The meaningful ranks there are Managing Director, Executive Director, and Head of [named function].
+
+RATIONALE. Cite evidence. If the only input you have is a title string, say exactly that.
+Allowed shapes:
+  "No evidence beyond title. Needs profile review."
+  "About section names ownership of [X] across [Y] repos."
+  "Public post [date] describes [specific thing]."
+BANNED, and rejected in code: "title alone does not confirm", "title does not establish", "likely influences", "suggests leadership of", "may report into". These are hedges dressed as analysis. If that is all you have, write "No evidence beyond title. Needs profile review." instead.
+BANNED: the same rationale sentence on two contacts. Duplicates are replaced with "No evidence beyond title" automatically, so writing them wastes your output.
+
+REASON CODE, one per contact, from this list and no other:
+  OWNS_APP_ENGINEERING  owns application engineering for a named surface (QUALIFIED)
+  OWNS_DEV_PLATFORM     owns developer platform / productivity / experience (QUALIFIED)
+  AMBIGUOUS_TITLE       cannot be settled from the title (UNRESOLVED)
+  NAMED_ROUTE           can route you to a named owner (ROUTER)
+
+OUTPUT FORMAT
+You are given a numbered list. Respond with ONLY a JSON array, no fences, one object per contact IN ORDER:
+[
+  {
+    "n": 1,
+    "state": "QUALIFIED" | "UNRESOLVED" | "ROUTER",
+    "reason_code": "<one code from the list above>",
+    "confidence": "high" | "medium" | "low",
+    "owns_dev_tooling": true | false,
+    "rationale": "<one or two sentences, evidence only, no hedges>",
+    "routes_to": "<ROUTER only: who they route to and why, max 15 words. Omit otherwise>",
+    "next_step": "<max 12 words>"
+  }
+]
+Return exactly one object for every contact you were given.`;
+
+interface RawVerdict {
+  n?: unknown;
+  state?: unknown;
+  tier?: unknown;
+  reason_code?: unknown;
+  confidence?: unknown;
+  owns_dev_tooling?: unknown;
+  rationale?: unknown;
+  routes_to?: unknown;
+  next_step?: unknown;
+}
+
+const SCORER_CODES: ICPReasonCode[] = [
+  "OWNS_APP_ENGINEERING",
+  "OWNS_DEV_PLATFORM",
+  "AMBIGUOUS_TITLE",
+  "NAMED_ROUTE",
+];
+
+function codeForState(cls: ICPClass): ICPReasonCode {
+  if (cls === "QUALIFIED") return "OWNS_APP_ENGINEERING";
+  if (cls === "ROUTER") return "NAMED_ROUTE";
+  return "AMBIGUOUS_TITLE";
+}
+
+function toVerdict(raw: RawVerdict | undefined): ICPVerdict {
+  const rawState = raw?.state ?? raw?.tier;
+  if (rawState === undefined || rawState === null || String(rawState).trim() === "") {
+    return failedVerdict("Scorer returned no usable state for this contact");
+  }
+  const cls = normalizeClass(rawState);
+  const conf = String(raw?.confidence ?? "").toLowerCase() as ICPConfidence;
+  const rawCode = String(raw?.reason_code ?? "").toUpperCase() as ICPReasonCode;
+  const routesTo = String(raw?.routes_to ?? "").trim().slice(0, 140) || undefined;
+  // A ROUTER that cannot name where it routes is the lazy fallback the spec
+  // bans. Demote rather than display it.
+  const state: ICPClass = cls === "ROUTER" && !routesTo ? "UNRESOLVED" : cls;
+  return {
+    classification: state,
+    confidence: ["high", "medium", "low"].includes(conf) ? conf : "low",
+    ownsDevTooling: raw?.owns_dev_tooling === true,
+    reason: deHedge(String(raw?.rationale ?? "")).slice(0, 300),
+    recommendedAction: String(raw?.next_step ?? "").slice(0, 120),
+    reasonCode: SCORER_CODES.includes(rawCode) ? rawCode : codeForState(state),
+    routesTo: state === "ROUTER" ? routesTo : undefined,
+  };
+}
+
+function failedVerdict(why: string): ICPVerdict {
+  return {
+    classification: "UNRESOLVED",
+    confidence: "low",
+    ownsDevTooling: false,
+    reason: why,
+    recommendedAction: "retry",
+    reasonCode: "AMBIGUOUS_TITLE",
+    failed: true,
+  };
 }
 
 export interface ICPProfileInput {
@@ -193,183 +524,29 @@ export interface ICPProfileInput {
   headline?: string;
   titles?: string;
   description?: string;
-  /** Company-level signals (eng headcount, the account's live signal). Lets the
-   *  rationale reference what is happening at THIS account rather than
-   *  paraphrasing the job title. */
   companySignals?: string;
-}
-
-/** Tiers that belong in the main review queue, best first. ROUTER is included:
- *  the spec says they are worth one message asking who owns developer tooling.
- *  UNSCORED is included deliberately — "we could not tell" must not silently
- *  behave like a rejection. Only PASS is screened out. */
-export const QUEUE_CLASSES: ICPClass[] = ["ANCHOR", "TARGET", "ROUTER", "UNSCORED"];
-
-/** Badge styling per tier. Lives here rather than in one component so every
- *  surface that shows a tier shows the same one. ANCHOR is the buyer and gets
- *  the strongest treatment; ROUTER is amber because it means "ask them who owns
- *  this", not "pitch them". */
-export const TIER_STYLE: Record<ICPClass, string> = {
-  ANCHOR: "border border-neon-600/50 bg-neon-500/20 text-neon-200",
-  TARGET: "border border-sky-500/40 bg-sky-500/15 text-sky-300",
-  ROUTER: "border border-amber-500/40 bg-amber-500/15 text-amber-300",
-  UNSCORED: "border border-ink-700 bg-ink-800 text-ink-400",
-  PASS: "border border-ink-700 bg-ink-800 text-ink-500",
-};
-
-/** Sort weight, lower is better. */
-export const TIER_RANK: Record<ICPClass, number> = {
-  ANCHOR: 0,
-  TARGET: 1,
-  ROUTER: 2,
-  UNSCORED: 3,
-  PASS: 4,
-};
-
-export function isQueueWorthy(v?: ICPVerdict | null): boolean {
-  return !!v && QUEUE_CLASSES.includes(v.classification);
-}
-
-const SYSTEM = `You are scoring individual contacts at a target account for Bito, which sells AI coding infrastructure (a context layer and model gateway) that is purchased out of engineering tooling budget.
-
-For each contact, output a tier and a rationale.
-
-Tiers
-
-ANCHOR — Owns developer tooling, platform, or engineering infrastructure decisions for a large engineering population. Their scope statement must contain concrete evidence of this: platform engineering, developer productivity, developer experience, engineering productivity, application engineering, internal developer tooling, or direct ownership of a large software engineering org. Title alone never qualifies someone as ANCHOR.
-
-NOTE: SRE, DevOps and build/release used to count as ANCHOR evidence here. They no longer do, and contacts with those titles never reach you — they are filtered out before scoring. Their tooling budget is CI/CD, observability and deployment pipelines, which is a different purchase.
-
-TARGET — Senior engineering leadership adjacent to the tooling decision. Influences it, uses it, or can bring the anchor into the room, but does not set the toolchain themselves.
-
-ROUTER — Senior enough to redirect you internally but does not own the budget or the decision. Generic CIOs, business-unit CIOs, product executives, and corporate IT leaders belong here. They are worth one message asking who owns developer tooling, not a pitch.
-
-PASS — No plausible connection to how code gets written or what it costs to run agents against it. Hardware-primary engineering, business or GM titles wearing technical labels, individual contributors with no scope.
-
-WHAT SHOULD SURVIVE AS ANCHOR OR TARGET
-VP or Director of Software Engineering, Platform Engineering, Developer Experience, Developer Productivity, Engineering Productivity, Application Engineering, or a general Engineering leader with a NAMED PRODUCT SURFACE. "VP Engineering, Checkout" is real. "VP Engineering" with no stated surface and no stated scope is UNSCORED, not TARGET.
-
-Rules
-
-Judge scope, not title. "Chief Information Officer" at a large enterprise usually means corporate IT, security, and vendor management, and at banks and other large firms there are often several divisional CIOs with no authority over product engineering toolchains. Default a bare CIO to ROUTER. Promote only when the profile shows explicit ownership of engineering platform or developer tooling. A combined CIO/CTO title is worth evaluating individually rather than defaulting.
-
-Write a distinct rationale for every contact, grounded in that specific person's scope, title language, or stated responsibilities. Never reuse phrasing across contacts. If two contacts would receive the same rationale, that is a signal you have not actually evaluated them and you should re-read their profiles.
-
-If the available information does not support a confident tier, output UNSCORED with a one-line statement of what is missing. Do not fill the gap with a generic account-level claim about the company.
-
-Do not assert what a contact controls unless the source text supports it. "Dev tooling decisions terminate here" is a claim about a specific person's authority and requires evidence.
-
-Output per contact
-
-Tier, then two sentences maximum: what this person actually owns, and why that does or does not put them near the purchase.
-
-REASON CODE — every verdict carries one, from this fixed vocabulary and no other:
-  OWNS_DEV_PLATFORM         they own developer tooling / platform / dev productivity (ANCHOR)
-  ENG_LEADER_NAMED_SURFACE  engineering leader with a named product surface (ANCHOR or TARGET)
-  ENG_LEADER_ADJACENT       senior engineering leadership near the decision (TARGET)
-  CAN_REDIRECT              senior enough to route you, does not own it (ROUTER)
-  CIO_CISO_ORG              corporate IT / CIO org (ROUTER or PASS)
-  ENTERPRISE_ARCHITECTURE   standards and advisory, no budget (PASS)
-  PRODUCT_MANAGEMENT        process and roadmap, not repos (PASS)
-  NOT_ENGINEERING           business, GM, or a technical label over a non-technical job (PASS)
-  UNKNOWN                   not enough information to tier (UNSCORED)
-
-OUTPUT FORMAT
-You will be given a numbered list of contacts. Respond with ONLY a JSON array, no markdown fences, one object per contact IN THE SAME ORDER:
-[
-  {
-    "n": 1,
-    "tier": "ANCHOR" | "TARGET" | "ROUTER" | "PASS" | "UNSCORED",
-    "reason_code": "<one code from the vocabulary above>",
-    "confidence": "high" | "medium" | "low",
-    "owns_dev_tooling": true | false,
-    "rationale": "<two sentences maximum>",
-    "next_step": "<max 12 words>"
-  }
-]
-Return exactly one object for every contact you were given. For UNSCORED, the rationale is the one-line statement of what is missing.`;
-
-const CLASSES: ICPClass[] = ["ANCHOR", "TARGET", "ROUTER", "PASS", "UNSCORED"];
-
-interface RawVerdict {
-  n?: unknown;
-  tier?: unknown;
-  reason_code?: unknown;
-  confidence?: unknown;
-  owns_dev_tooling?: unknown;
-  rationale?: unknown;
-  next_step?: unknown;
-}
-
-/** Codes the SCORER may return. The exclusion-only codes are reserved for the
- *  deterministic filter, so a model can't quietly relabel a hard exclusion. */
-const SCORER_CODES: ICPReasonCode[] = [
-  "OWNS_DEV_PLATFORM",
-  "ENG_LEADER_NAMED_SURFACE",
-  "ENG_LEADER_ADJACENT",
-  "CAN_REDIRECT",
-  "CIO_CISO_ORG",
-  "ENTERPRISE_ARCHITECTURE",
-  "PRODUCT_MANAGEMENT",
-  "NOT_ENGINEERING",
-  "UNKNOWN",
-];
-
-/** Fall back to a code implied by the tier when the model omits or invents one,
- *  so the vocabulary is never empty on a card. */
-function codeForTier(tier: ICPClass): ICPReasonCode {
-  if (tier === "ANCHOR") return "OWNS_DEV_PLATFORM";
-  if (tier === "TARGET") return "ENG_LEADER_ADJACENT";
-  if (tier === "ROUTER") return "CAN_REDIRECT";
-  if (tier === "PASS") return "NOT_ENGINEERING";
-  return "UNKNOWN";
-}
-
-function toVerdict(raw: RawVerdict | undefined): ICPVerdict {
-  const tier = String(raw?.tier ?? "").toUpperCase() as ICPClass;
-  const conf = String(raw?.confidence ?? "").toLowerCase() as ICPConfidence;
-  if (!CLASSES.includes(tier)) {
-    return failedVerdict("Scorer returned no usable tier for this contact");
-  }
-  const rawCode = String(raw?.reason_code ?? "").toUpperCase() as ICPReasonCode;
-  return {
-    classification: tier,
-    confidence: ["high", "medium", "low"].includes(conf) ? conf : "low",
-    ownsDevTooling: raw?.owns_dev_tooling === true,
-    reason: String(raw?.rationale ?? "").slice(0, 300),
-    recommendedAction: String(raw?.next_step ?? "").slice(0, 120),
-    reasonCode: SCORER_CODES.includes(rawCode) ? rawCode : codeForTier(tier),
-  };
-}
-
-function failedVerdict(why: string): ICPVerdict {
-  return {
-    classification: "UNSCORED",
-    confidence: "low",
-    ownsDevTooling: false,
-    reason: why,
-    recommendedAction: "retry",
-    reasonCode: "UNKNOWN",
-    failed: true,
-  };
 }
 
 function renderProfile(p: ICPProfileInput, n: number): string {
   return [
     `${n}. Company: ${p.company || "(unknown)"}`,
-    `   Headline: ${p.headline || "(none)"}`,
     `   Current title(s): ${p.titles || "(none)"}`,
     `   Scope / role description: ${p.description || "(none)"}`,
-  ].join("\n");
+    vpIsARank(p.company)
+      ? "   NOTE: at this firm 'Vice President' is a rank near senior IC, not an executive."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-/** Score one page of contacts in a single call, so the model can differentiate
- *  their rationales against each other. Never throws. */
+/** Score one page in a single call, so rationales are written against each
+ *  other rather than in isolation. Never throws. */
 async function scoreBatch(items: ICPProfileInput[]): Promise<ICPVerdict[]> {
   const context = items.find((i) => i.companySignals)?.companySignals;
   const user = [
     context ? `Account context (applies to all contacts below):\n${context}\n` : "",
-    `Score these ${items.length} contact${items.length === 1 ? "" : "s"}. Return exactly ${items.length} object${items.length === 1 ? "" : "s"} in order.\n`,
+    `Classify these ${items.length} contact${items.length === 1 ? "" : "s"}. Return exactly ${items.length} object${items.length === 1 ? "" : "s"} in order. Remember: mostly UNRESOLVED, a few QUALIFIED, at most one ROUTER.\n`,
     items.map((p, i) => renderProfile(p, i + 1)).join("\n\n"),
   ].join("\n");
 
@@ -380,23 +557,23 @@ async function scoreBatch(items: ICPProfileInput[]): Promise<ICPVerdict[]> {
         system: SYSTEM,
         user,
         model: FAST_MODEL,
-        webSearch: false, // pure reasoning over supplied text — no search fees
-        maxTokens: Math.min(4000, 260 * items.length + 400),
+        webSearch: false,
+        maxTokens: Math.min(4000, 280 * items.length + 400),
         temperature: 0,
       });
       const arr = extractJSON<RawVerdict[]>(res.text);
       if (Array.isArray(arr) && arr.length > 0) {
-        // Map by the model's own `n`. Positional fallback ONLY when the array
-        // is exactly the right length — otherwise a short array shifts every
-        // later verdict onto the wrong person, which is worse than admitting
-        // we did not get one for them.
+        // Map by the model's own `n`. Positional fallback ONLY when the array is
+        // exactly the right length — a short array would otherwise shift every
+        // later verdict onto the wrong person.
         const aligned = arr.length === items.length;
-        return items.map((_, i) => {
+        const mapped = items.map((_, i) => {
           const byN = arr.find((r) => Number(r?.n) === i + 1);
           if (byN) return toVerdict(byN);
           if (aligned) return toVerdict(arr[i]);
           return failedVerdict("Scorer omitted this contact from its response");
         });
+        return dedupeRationales(mapped);
       }
       lastError = "scorer returned no JSON array";
     } catch (e) {
@@ -407,15 +584,13 @@ async function scoreBatch(items: ICPProfileInput[]): Promise<ICPVerdict[]> {
   return items.map(() => failedVerdict(`Scorer unavailable (${lastError.slice(0, 80)})`));
 }
 
-/** Score a single contact (kept for callers that have exactly one). */
 export async function classifyProfile(p: ICPProfileInput): Promise<ICPVerdict> {
-  const [v] = await scoreBatch([p]);
+  const [v] = await classifyProfiles([p], (x) => x);
   return v ?? failedVerdict("Scorer returned nothing");
 }
 
-/** Score many contacts. Batched so rationales are written against each other
- *  rather than in isolation, and so a page is a couple of calls instead of
- *  thirty concurrent ones. */
+/** Classify many contacts. Hard exclusions run first and never reach the model,
+ *  so an account full of DevOps and Network titles costs almost nothing. */
 export async function classifyProfiles<T>(
   items: T[],
   toInput: (item: T) => ICPProfileInput,
@@ -424,29 +599,24 @@ export async function classifyProfiles<T>(
   if (items.length === 0) return [];
   const inputs = items.map(toInput);
 
-  // Hard exclusions first. These are policy, not judgement, so they never reach
-  // the model — which also means an org full of DevOps and Network titles costs
-  // almost nothing to score. Survivors keep their original index so the returned
-  // array still lines up with `items`.
   const excluded = inputs.map((p) => hardExclude(p.titles));
   const survivors: { i: number; p: ICPProfileInput }[] = [];
   inputs.forEach((p, i) => {
     if (!excluded[i]) survivors.push({ i, p });
   });
 
-  const out: ICPVerdict[] = excluded.map(
-    (v) => v ?? failedVerdict("Not scored"), // placeholder, overwritten below
-  );
+  const out: ICPVerdict[] = excluded.map((v) => v ?? failedVerdict("Not classified"));
   if (survivors.length === 0) return out;
 
   const batches: { i: number; p: ICPProfileInput }[][] = [];
   for (let i = 0; i < survivors.length; i += batchSize) batches.push(survivors.slice(i, i + batchSize));
-  // A handful of batches at once is fine; thirty single calls was not.
   const results = await Promise.all(batches.map((b) => scoreBatch(b.map((s) => s.p))));
   batches.forEach((batch, bi) => {
     batch.forEach((s, si) => {
       out[s.i] = results[bi][si] ?? failedVerdict("Scorer returned nothing for this contact");
     });
   });
-  return out;
+  // Dedupe across the WHOLE page, not just within a batch — two batches can
+  // independently produce the same sentence.
+  return dedupeRationales(out);
 }

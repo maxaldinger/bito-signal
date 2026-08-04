@@ -51,6 +51,11 @@ export interface HsSearchResult {
   /** Set when full-text hits were discarded as name mismatches — surfaced so a
    *  silently-empty result is distinguishable from "HubSpot had nothing". */
   note?: string;
+  /** STAGE 7. "exact" = matched on email (contact) or domain (company), which
+   *  is a confirmed match. "name" = full-text name hit, which is a CANDIDATE
+   *  and must be confirmed by a human before anything is written to it.
+   *  "none" = no match. */
+  matchedBy?: HsMatchedBy;
 }
 
 export interface HsTaskResult {
@@ -360,16 +365,25 @@ export async function hubspotSearch(
     rejected = all.length - records.length;
   }
 
+  // STAGE 7 — report HOW we matched, not just whether. An email/domain hit is a
+  // confirmed match; a full-text name hit is a CANDIDATE and must never render
+  // as a confirmed badge. This is the distinction that produced the "Rich
+  // Sauser" -> "Sarah Rich" collision: HubSpot OR-matches tokens across
+  // properties, so a first- or last-name overlap looked like the same person.
+  const matchedBy: HsMatchedBy = records.length === 0 ? "none" : fullTextQuery ? "name" : "exact";
   return {
     configured: true,
     ok: true,
     found: records.length > 0,
+    matchedBy,
     records,
     ...(rejected > 0
       ? { note: `${rejected} full-text hit${rejected === 1 ? "" : "s"} discarded as name mismatches` }
       : {}),
   };
 }
+
+export type HsMatchedBy = "exact" | "name" | "none";
 
 // HubSpot default association: Contact → Company (primary).
 const CONTACT_TO_COMPANY = 279;

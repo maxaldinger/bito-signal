@@ -35,6 +35,9 @@ interface SearchResp {
   records: HsRecord[];
   /** Present when full-text hits were discarded as name mismatches. */
   note?: string;
+  /** STAGE 7: "exact" = matched on email/domain (confirmed). "name" = full-text
+   *  name hit, a CANDIDATE only. "none" = no match. */
+  matchedBy?: "exact" | "name" | "none";
 }
 interface TaskResp {
   ok: boolean;
@@ -198,69 +201,98 @@ export function HubSpotActions({
 
   return (
     <>
+      {/* STAGE 7 — EXACTLY ONE HubSpot state per card. The old row showed a
+          confirmed "In HubSpot" badge NEXT TO a "Check in HubSpot" button and a
+          "Not in HubSpot yet" line, which is three contradictory claims at once.
+          Now the state decides which single control is offered:
+            exact match → the record, linked. Nothing to check, nothing to create.
+            name match  → "Possible match" + Confirm. Never a green badge; this
+                          is the Rich Sauser -> Sarah Rich collision.
+            no match    → "Not in HubSpot" + Create. */}
       <div className={`flex flex-wrap items-center gap-2 ${compact ? "" : ""}`}>
-        <button
-          type="button"
-          onClick={runCheck}
-          disabled={checking}
-          title={`Check if this ${kind} already exists in your HubSpot CRM`}
-          className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
-        >
-          {checking ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
-          Check in HubSpot
-        </button>
-        <button
-          type="button"
-          onClick={() => setModalOpen(true)}
-          disabled={blockContact}
-          title={
-            domainMismatch
-              ? `${email} isn't on the company domain — pushing would mis-associate this contact`
-              : noCompanyEmail
-                ? `No email found — the contact is created by name`
-                : `Create a HubSpot task for this ${kind} with the signal context`
-          }
-          className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
-        >
-          <CalendarPlus className="h-3 w-3" />
-          HubSpot task
-        </button>
+        {checking ? (
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-500">
+            <Loader2 className="h-3 w-3 animate-spin" /> checking HubSpot…
+          </span>
+        ) : check?.error ? (
+          <span className="inline-flex items-center gap-1.5 font-mono text-[11px]">
+            <span className="break-words text-amber-400/90">{check.error}</span>
+            <button type="button" onClick={runCheck} className={`${btn} hover:border-orange-500/40`}>
+              <Search className="h-3 w-3" /> Retry
+            </button>
+          </span>
+        ) : check?.found && check.matchedBy === "exact" ? (
+          <a
+            href={check.records[0]?.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px] text-neon-300 hover:text-neon-200"
+          >
+            <CircleCheck className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              In HubSpot: {check.records[0]?.name || check.records[0]?.detail || "record"}
+            </span>
+            <ArrowUpRight className="h-3 w-3 shrink-0" />
+          </a>
+        ) : check?.found && check.matchedBy === "name" ? (
+          <>
+            <a
+              href={check.records[0]?.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Matched on NAME only. HubSpot OR-matches tokens across properties, so this may be a different person."
+              className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px] text-amber-300 hover:text-amber-200"
+            >
+              <CircleX className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                Possible match: {check.records[0]?.name || check.records[0]?.detail || "record"}
+              </span>
+              <ArrowUpRight className="h-3 w-3 shrink-0" />
+            </a>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              disabled={blockContact}
+              title="Confirm this is the same person and attach the task to that record"
+              className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
+            >
+              <CalendarPlus className="h-3 w-3" /> Confirm &amp; add task
+            </button>
+          </>
+        ) : check ? (
+          <>
+            <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-400">
+              <CircleX className="h-3.5 w-3.5" /> Not in HubSpot
+              {check.note && <span className="text-ink-500"> (no name match)</span>}
+            </span>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              disabled={blockContact}
+              title={
+                domainMismatch
+                  ? `${email} isn't on the company domain — pushing would mis-associate this contact`
+                  : `Create this ${kind} in HubSpot with a task`
+              }
+              className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
+            >
+              <CalendarPlus className="h-3 w-3" /> Create + task
+            </button>
+          </>
+        ) : (
+          // Never checked (auto-check off). One control, and it does the check.
+          <button
+            type="button"
+            onClick={runCheck}
+            className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
+          >
+            <Search className="h-3 w-3" /> Check in HubSpot
+          </button>
+        )}
 
         {domainMismatch && (
           <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-400/90">
             email domain ≠ company
-          </span>
-        )}
-
-        {check && (
-          <span className="inline-flex min-w-0 max-w-full items-center gap-1 font-mono text-[11px]">
-            {check.error ? (
-              <span className="break-words text-amber-400/90">{check.error}</span>
-            ) : check.found ? (
-              <a
-                href={check.records[0]?.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-w-0 items-center gap-1 text-neon-300 hover:text-neon-200"
-              >
-                <CircleCheck className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">
-                  In HubSpot: {check.records[0]?.name || check.records[0]?.detail || "record"}
-                </span>
-                <ArrowUpRight className="h-3 w-3 shrink-0" />
-              </a>
-            ) : (
-              <span
-                className="inline-flex items-center gap-1 text-ink-400"
-                // When full-text hits were rejected as name mismatches, say so:
-                // "not in HubSpot" and "HubSpot returned only wrong people" are
-                // different facts, and the rep should be able to tell them apart.
-                title={check?.note ? `${check.note} — searched "${name}"` : undefined}
-              >
-                <CircleX className="h-3.5 w-3.5" /> Not in HubSpot yet
-                {check?.note && <span className="text-ink-500"> (no name match)</span>}
-              </span>
-            )}
           </span>
         )}
       </div>

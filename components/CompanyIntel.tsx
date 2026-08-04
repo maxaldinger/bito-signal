@@ -25,8 +25,22 @@ import {
 
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
-import { emailStatusLabel, isSendableEmail, unsendableReason } from "@/lib/enrich/emailTrust";
-import { REASON_LABEL, TIER_RANK, TIER_STYLE, type ICPClass } from "@/lib/icpClassifier";
+import {
+  emailStatusLabel,
+  isSendableEmail,
+  provenanceIsWeak,
+  provenanceLabel,
+  unsendableReason,
+} from "@/lib/enrich/emailTrust";
+import {
+  REASON_LABEL,
+  TIER_RANK,
+  TIER_STYLE,
+  allowedActions,
+  normalizeClass,
+  type ICPClass,
+  type ICPReasonCode,
+} from "@/lib/icpClassifier";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
@@ -214,9 +228,8 @@ function ApolloPersonCard({
   ctx,
   autoCheckDelayMs,
   hideWithoutEmail = true,
-  showIcpBadge = true,
   unconfirmed = false,
-  screened = false,
+  state = "UNRESOLVED",
 }: {
   person: EnrichContact;
   company: string;
@@ -231,19 +244,13 @@ function ApolloPersonCard({
    *  (default). The pinned first-move contact opts out — it's named in the
    *  motion, so it stays visible and is worked via LinkedIn instead. */
   hideWithoutEmail?: boolean;
-  /** Suppressed when every visible contact shares one classification — a badge
-   *  that never varies is decoration, not information. */
-  showIcpBadge?: boolean;
   /** No provider record backs this person (the name came from the brief's
    *  generated motion). Blocks the HubSpot push: creating a CRM record for an
    *  unverified name would write a possibly-fictional person into the CRM. */
   unconfirmed?: boolean;
-  /** Tiered PASS. The card still renders, with its tier and the rule that
-   *  screened it, because a list that silently shrinks explains nothing. What
-   *  it does NOT do is spend: no email reveal (an Apollo credit), no HubSpot
-   *  search, no connect-note generation. Cost was the only real argument for
-   *  hiding these, and this removes it. */
-  screened?: boolean;
+  /** STAGE 4 classification. Drives STAGE 6 action gating: what this card is
+   *  allowed to do, and whether it may show an address at all. */
+  state?: ICPClass;
 }) {
   // One in-flight reveal kind at a time, per card.
   const [loading, setLoading] = useState<RevealKind | null>(null);
@@ -266,6 +273,15 @@ function ApolloPersonCard({
   // personalized one.
   const [connectGeneric, setConnectGeneric] = useState(false);
   const [connectLoading, setConnectLoading] = useState(false);
+
+  // STAGE 6 — the available actions must match the classification.
+  //   QUALIFIED  → LinkedIn, Draft email, HubSpot task, address shown
+  //   ROUTER     → LinkedIn, HubSpot task, "Who owns this?" instead of Draft
+  //   UNRESOLVED → LinkedIn only. No draft, no task, NO ADDRESS.
+  // "Do not surface a verified email address for anyone the rationale says is
+  // not a buyer" — so an UNRESOLVED card never spends a reveal credit either.
+  const gate = allowedActions(state);
+  const screened = state === "EXCLUDED";
 
   /** FREE lookup — people/match with no reveal_* flag costs no credit. Fills in
    *  the profile URL (and the un-obfuscated name) for a contact whose email was
@@ -369,7 +385,7 @@ function ApolloPersonCard({
   // the reveal so a page of cards doesn't burst. Failure is silent — the
   // company-level note is a fine fallback.
   useEffect(() => {
-    if (!ctx.callHook || !ctx.linkedin || screened) return; // no copy for a PASS
+    if (!ctx.callHook || !ctx.linkedin || !gate.draftEmail) return; // no copy for a non-buyer
     let cancelled = false;
     const t = setTimeout(() => {
       setConnectLoading(true);
@@ -413,7 +429,7 @@ function ApolloPersonCard({
   // CRM. Cached per Apollo id (reopening reuses it) and staggered for rate limits.
   useEffect(() => {
     const id = person.apolloId;
-    if (!id || screened) return; // screened cards never spend a reveal credit
+    if (!id || !gate.showEmail) return; // only a QUALIFIED card spends a reveal credit
     let cancelled = false;
     const cached = getReveal(id);
     if (cached?.name) setRevealedName(cached.name);
@@ -598,16 +614,17 @@ function ApolloPersonCard({
               In HubSpot
             </span>
           )}
-          {person.icp && showIcpBadge && (
-            <span
-              title={`${person.icp.reason}${person.icp.recommendedAction ? ` · ${person.icp.recommendedAction}` : ""} (confidence: ${person.icp.confidence})`}
-              className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${
-                TIER_STYLE[person.icp.classification] ?? TIER_STYLE.UNSCORED
-              }`}
-            >
-              {person.icp.classification.toLowerCase()}
-            </span>
-          )}
+          {/* STAGE 4. Always rendered: three states that are actually used mean
+              the badge carries information, and UNRESOLVED is the honest common
+              case rather than a gap. */}
+          <span
+            title={`${person.icp?.reason ?? ""}${person.icp?.recommendedAction ? ` · ${person.icp.recommendedAction}` : ""}${person.icp ? ` (confidence: ${person.icp.confidence})` : ""}`}
+            className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${
+              TIER_STYLE[state] ?? TIER_STYLE.UNRESOLVED
+            }`}
+          >
+            {state.toLowerCase()}
+          </span>
           {person.seniority && (
             <span className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-ink-300">
               {person.seniority.replace(/_/g, " ")}
@@ -632,6 +649,9 @@ function ApolloPersonCard({
             </span>
           )}
           {person.icp.reason}
+          {state === "ROUTER" && person.icp.routesTo && (
+            <span className="ml-1 text-amber-300/90">Routes to: {person.icp.routesTo}</span>
+          )}
           {person.icp.confidence === "low" && (
             <span className="ml-1 text-amber-400/80">(low confidence)</span>
           )}
@@ -647,16 +667,39 @@ function ApolloPersonCard({
         >
           {profileUrl ? "LinkedIn" : "Find on LinkedIn"} <ArrowUpRight className="h-3 w-3" />
         </a>
-        <button
-          type="button"
-          onClick={draftEmail}
-          disabled={drafting}
-          title="Draft a personalized cold outreach email for this person (AI)"
-          className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-300 disabled:opacity-50"
-        >
-          {drafting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-          Draft email
-        </button>
+        {/* STAGE 6. Draft email is QUALIFIED-only. A ROUTER gets the routing
+            question instead, and UNRESOLVED gets neither — drafting outreach
+            for a contact we have said we cannot identify is the exact thing
+            the spec forbids. */}
+        {gate.draftEmail && (
+          <button
+            type="button"
+            onClick={draftEmail}
+            disabled={drafting}
+            title="Draft a personalized cold outreach email for this person (AI)"
+            className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-300 disabled:opacity-50"
+          >
+            {drafting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+            Draft email
+          </button>
+        )}
+        {gate.whoOwnsThis && (
+          <button
+            type="button"
+            onClick={draftEmail}
+            disabled={drafting}
+            title="Draft a short note asking who owns developer tooling"
+            className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 disabled:opacity-50"
+          >
+            {drafting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Compass className="h-3 w-3" />}
+            Who owns this?
+          </button>
+        )}
+        {state === "UNRESOLVED" && (
+          <span className="font-mono text-[11px] text-ink-600">
+            unresolved · review the profile before working this contact
+          </span>
+        )}
       </div>
 
       {draft && (
@@ -683,7 +726,7 @@ function ApolloPersonCard({
       {/* Contact email — only a COMPANY-domain address is shown/usable; if Apollo
           only has a personal/off-domain one (or none), say so plainly rather than
           surface an address that would mis-associate the contact. */}
-      {(companyEmail || unverifiedEmail || emailChecked || (phoneRes?.ok && phoneRes.phone)) && (
+      {gate.showEmail && (companyEmail || unverifiedEmail || emailChecked || (phoneRes?.ok && phoneRes.phone)) && (
         <div className="mt-2 space-y-1 font-mono text-[11px]">
           {companyEmail ? (
             <p className="flex items-center gap-1.5 text-ink-200">
@@ -691,7 +734,15 @@ function ApolloPersonCard({
               <a href={`mailto:${companyEmail}`} className="break-all hover:text-sky-300">
                 {companyEmail}
               </a>
-              <span className="text-[10px] text-neon-400">(verified)</span>
+              {/* STAGE 8. Never a bare "(verified)": the label states WHERE the
+                  address came from, because a bare verified badge invites sends
+                  and two Apollo-"verified" addresses already hard-bounced. */}
+              <span
+                title="Apollo reports a mailbox check for this address. Apollo-verified addresses have still bounced (550 5.7.367, 550 5.2.1) — treat as strong, not certain."
+                className={`text-[10px] ${provenanceIsWeak(emailRes?.emailStatus) ? "text-ink-500" : "text-neon-400"}`}
+              >
+                {provenanceLabel(emailRes?.emailStatus)}
+              </span>
             </p>
           ) : unverifiedEmail ? (
             // Deliberately NOT a mailto: an unverified address is research
@@ -704,7 +755,7 @@ function ApolloPersonCard({
                 title={unsendableReason(emailRes?.emailStatus)}
                 className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300"
               >
-                {emailStatusLabel(emailRes?.emailStatus)} — do not send
+                {provenanceLabel(emailRes?.emailStatus)} {emailStatusLabel(emailRes?.emailStatus)} — do not send
               </span>
             </p>
           ) : emailChecked ? (
@@ -712,8 +763,8 @@ function ApolloPersonCard({
             // bar at the top of the card says it too — this repeats it next to
             // where an address would otherwise sit, so a quick scan can't miss it.
             <p className="flex items-center gap-1.5 font-semibold text-red-400">
-              <Mail className="h-3 w-3" /> No company email · Apollo has no verified
-              address for this person
+              <Mail className="h-3 w-3" /> No company email · Apollo has no checked
+              mailbox for this person
             </p>
           ) : null}
           {phoneRes?.ok && phoneRes.phone && (
@@ -728,7 +779,15 @@ function ApolloPersonCard({
       )}
 
       <div className="mt-3 border-t border-ink-800 pt-3">
-        {unconfirmed ? (
+        {!gate.hubspotTask ? (
+          // STAGE 6 — UNRESOLVED gets LinkedIn only. Creating a CRM record and a
+          // task for someone we have just said we cannot identify is how the
+          // pipeline fills with people who will never be worked.
+          <p className="font-mono text-[11px] leading-snug text-ink-500">
+            HubSpot push disabled while this contact is UNRESOLVED. Review the profile; if they own
+            application engineering or a developer platform, they qualify.
+          </p>
+        ) : unconfirmed ? (
           // Pushing here would CREATE a HubSpot contact from a name only the
           // brief's model has asserted. Verify the person exists first; the
           // grid cards below are provider-backed and push normally.
@@ -826,6 +885,11 @@ interface ApolloPeopleResponse {
   people: EnrichContact[];
   hasMore?: boolean;
   pinned?: EnrichContact;
+  /** STAGE 1: the whole account was excluded before any contact was pulled. */
+  accountExcluded?: { reason: string; code: string };
+  /** STAGE 2: how many surfaced titles the search layer dropped, by rule. */
+  excludedCounts?: Record<string, number>;
+  surfaced?: number;
 }
 
 // How many to show per column, and how many more each "pull more" adds. 4 per
@@ -857,6 +921,9 @@ function ApolloStakeholders({
   const [perColumn, setPerColumn] = useState(PER_COLUMN_STEP);
   const [pageFetched, setPageFetched] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [excludedCounts, setExcludedCounts] = useState<Record<string, number>>({});
+  const [surfaced, setSurfaced] = useState(0);
+  const [accountBlock, setAccountBlock] = useState<{ reason: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -892,7 +959,12 @@ function ApolloStakeholders({
         const seen = new Set(prev.map((x) => x.apolloId || x.name));
         return [...prev, ...fresh.filter((x) => !seen.has(x.apolloId || x.name))];
       });
-      if (!append) setPinned((body as ApolloPeopleResponse).pinned ?? null);
+      if (!append) {
+        setPinned((body as ApolloPeopleResponse).pinned ?? null);
+        setAccountBlock((body as ApolloPeopleResponse).accountExcluded ?? null);
+      }
+      setExcludedCounts((body as ApolloPeopleResponse).excludedCounts ?? {});
+      setSurfaced((body as ApolloPeopleResponse).surfaced ?? 0);
       setHasMore(Boolean((body as ApolloPeopleResponse).hasMore));
       setPageFetched(p);
     },
@@ -954,8 +1026,41 @@ function ApolloStakeholders({
    *  the brief's generated motion and was never corroborated. */
   const pinnedUnconfirmed = !pinned && !fromResults && !!pinnedContact;
 
+  /** STAGE 2 accounting, in words: what the search layer dropped and why. */
+  const excludedNote = (() => {
+    const entries = Object.entries(excludedCounts).filter(([, n]) => n > 0);
+    if (entries.length === 0) return "";
+    const total = entries.reduce((a, [, n]) => a + n, 0);
+    const parts = entries
+      .sort((a, b) => b[1] - a[1])
+      .map(([code, n]) => `${n} ${REASON_LABEL[code as ICPReasonCode] ?? code.toLowerCase()}`);
+    return `Excluded ${total} of ${surfaced || total} surfaced titles at search: ${parts.join(", ")}.`;
+  })();
+
+  // STAGE 1 — the account itself is excluded, so no contacts were pulled at all.
+  // Said plainly, with the reason, because "no contacts" and "we deliberately
+  // did not look" are different facts.
+  if (accountBlock) {
+    return (
+      <div className="rounded-lg border border-ink-700 bg-ink-950/50 p-4">
+        <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-ink-400">
+          account excluded · hardware-primary
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-ink-500">{accountBlock.reason}</p>
+        <p className="mt-1.5 text-[11px] text-ink-600">
+          No contacts were pulled and no credits were spent. If a software division here has its
+          own engineering org, prospect that division directly.
+        </p>
+      </div>
+    );
+  }
   if (people.length === 0 && !pinnedContact) {
-    return <p className="text-xs text-ink-500">No engineering stakeholders surfaced from Apollo.</p>;
+    return (
+      <div className="space-y-1.5">
+        <p className="text-xs text-ink-500">No engineering stakeholders surfaced from Apollo.</p>
+        {excludedNote && <p className="font-mono text-[11px] text-ink-600">{excludedNote}</p>}
+      </div>
+    );
   }
   const isPinned = (p: EnrichContact) =>
     !!pinnedContact &&
@@ -986,58 +1091,48 @@ function ApolloStakeholders({
   // 36 of 36" and rendered an empty section — an outage indistinguishable from
   // a deliberate screening.
   const graded = (p: EnrichContact) => (p.icp && !p.icp.failed ? p.icp : undefined);
-  /** The tier this contact actually displays under, heuristic included. */
+  /** The state this contact displays under. Legacy verdicts (ANCHOR/TARGET/
+   *  PASS, cached before Aug 4 2026) are mapped by normalizeClass. */
   const tierOf = (p: EnrichContact): ICPClass => {
     const v = graded(p);
-    if (v) return v.classification;
-    return isDecisionMaker(p) ? "UNSCORED" : "PASS";
+    if (v) return normalizeClass(v.classification);
+    // No usable verdict. UNRESOLVED is the honest answer; the spec is explicit
+    // that the tool must be willing to say it does not know.
+    return "UNRESOLVED";
   };
-  /** Screened out: shown and labelled, but never auto-spent on. */
-  const screened = (p: EnrichContact) => tierOf(p) === "PASS";
-  const decisionMakers = rest.filter((p) => !screened(p));
-  // Counted from the VISIBLE slice, not the whole pool. It used to count every
-  // ROUTER the scorer passed, including ones whose cards had deleted
-  // themselves, so the line could read "11 of these are ROUTERs" above an empty
-  // grid. Nothing is hidden now, but the count should still describe what is
-  // actually on screen rather than what was scored.
-  const routersVisible = (shown: EnrichContact[]) =>
-    shown.filter((p) => tierOf(p) === "ROUTER").length;
-  const rejected = rest.filter(screened);
+  // STAGE 2/6 — EXCLUDED contacts are dropped at the search layer and never
+  // reach this component. Anything still here that reads EXCLUDED came from a
+  // legacy PASS verdict on a cached brief, so filter it for the same reason.
+  const shownPool = rest.filter((p) => tierOf(p) !== "EXCLUDED");
+  const legacyExcluded = rest.length - shownPool.length;
+  const countOf = (list: EnrichContact[], cls: ICPClass) =>
+    list.filter((p) => tierOf(p) === cls).length;
   /** Profiles the classifier could not judge at all — surfaced separately so a
    *  classifier outage never masquerades as a screening decision. */
   const unclassified = rest.filter((p) => p.icp?.failed).length;
 
-  // ORDERING. There was none — the list arrived in Apollo's raw return order,
-  // so a contact you cannot reach could sit above one you can.
-  //
-  // What is knowable HERE is limited: the email is revealed per-card after
-  // mount, so deliverability is not available at sort time. Sorting on it
-  // later would make cards jump under the cursor as reveals land. So we rank
-  // on what the search itself returns, and let the verified-email gate hide
-  // the unreachable rather than merely demote them.
+  // ORDERING. QUALIFIED first, then ROUTER (at most one per account), then the
+  // UNRESOLVED bulk. Reachability breaks ties inside a state.
   const rank = (p: EnrichContact) => {
-    // Tier dominates: ANCHOR owns the decision, TARGET is adjacent, ROUTER only
-    // redirects, UNSCORED is unknown, PASS sinks to the bottom. Reachability
-    // breaks ties within a tier.
-    let s = (TIER_RANK[tierOf(p)] ?? 3) * 100;
+    let s = (TIER_RANK[tierOf(p)] ?? 2) * 100;
     if (p.apolloId) s -= 10; // no id means no email can ever be revealed
     if (p.linkedinUrl) s -= 5; // a resolved profile beats a name search
     if (p.icp?.confidence === "high") s -= 2;
     return s;
   };
-  // Everyone, PASS included, ranked so the buyers sit at the top and the
-  // screened-out sink to the bottom where they read as an audit trail.
-  const ordered = [...rest].sort((a, b) => rank(a) - rank(b));
+  const ordered = [...shownPool].sort((a, b) => rank(a) - rank(b));
   const dmShown = ordered.slice(0, perColumn * 2);
+  const decisionMakers = shownPool;
 
-  // BADGE. This used to hide itself when every visible card shared a tier, on
-  // the theory that a constant label is decoration. That reasoning was
-  // backwards: the label is only decoration when you cannot see what the other
-  // tiers would have been. PASS renders in the same grid now, so
-  // ANCHOR/TARGET/ROUTER mean something by contrast, and the badge always shows.
-  const badgeDiscriminates = true;
+  // STAGE 4 distribution check, surfaced rather than silently re-run: if every
+  // visible contact carries the same state the classifier has failed, and the
+  // rep should know that rather than trust a uniform badge.
+  const distinctStates = new Set(dmShown.map(tierOf)).size;
+  const uniformBadge = dmShown.length > 2 && distinctStates === 1;
+  const routerCount = countOf(dmShown, "ROUTER");
 
-  const poolHasMore = rest.length > perColumn * 2;
+
+  const poolHasMore = shownPool.length > perColumn * 2;
   const canPullMore = poolHasMore || hasMore;
 
   const pullMore = async () => {
@@ -1100,13 +1195,26 @@ function ApolloStakeholders({
         <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
           signs / gates the deal
         </p>
-        {(decisionMakers.length === 0 || unclassified > 0) && (
+        {/* STAGE 1/2 — excluded is not the same as silent. The cards are gone,
+            the accounting is not. */}
+        {(decisionMakers.length === 0 || unclassified > 0 || excludedNote || uniformBadge) && (
           <p className="mb-3 text-xs text-ink-500">
             {decisionMakers.length === 0 &&
-              `No engineering leaders surfaced. All ${rest.length} profile${rest.length === 1 ? "" : "s"} below were screened out; each card says under which rule.`}
+              `No contacts survived the title filter${surfaced ? ` — all ${surfaced} surfaced titles were excluded` : ""}. `}
+            {excludedNote && <span>{excludedNote} </span>}
+            {legacyExcluded > 0 && (
+              <span>
+                {legacyExcluded} more excluded from this cached brief&apos;s older scoring.{" "}
+              </span>
+            )}
+            {uniformBadge && (
+              <span className="text-amber-400/90">
+                Every visible contact carries the same state, which means the classifier did not
+                differentiate them — treat these as unreviewed.{" "}
+              </span>
+            )}
             {unclassified > 0 && (
               <span className="text-amber-400/90">
-                {" "}
                 {unclassified} profile{unclassified === 1 ? "" : "s"} could not be scored (the
                 scorer errored, not a screening decision) — reload to retry.
               </span>
@@ -1122,25 +1230,20 @@ function ApolloStakeholders({
               accountKey={accountKey}
               domain={domain}
               ctx={ctx}
-              // Stagger only the cards that actually call out. A screened card
-              // makes no HubSpot check, so it needs no slot in the queue.
               autoCheckDelayMs={i * 300}
-              showIcpBadge={badgeDiscriminates}
-              screened={screened(p)}
+              state={tierOf(p)}
             />
           ))}
         </div>
       </div>
 
-      {/* ROUTERs used to live in a separate collapsed "account map". They now
-          render as normal cards in the grid, ranked below ANCHOR and TARGET
-          and badged amber, because the spec makes them actionable: worth one
-          message asking who owns developer tooling. */}
-      {routersVisible(dmShown) > 0 && (
+      {/* STAGE 4: at most one ROUTER per account is expected. More than that
+          means the classifier reached for it as a fallback. */}
+      {routerCount > 0 && (
         <p className="font-mono text-[11px] text-ink-500">
-          {routersVisible(dmShown)} of these {routersVisible(dmShown) === 1 ? "is a" : "are"} ROUTER
-          {routersVisible(dmShown) === 1 ? "" : "s"}, ask who owns developer tooling rather than
-          pitching.
+          {routerCount === 1
+            ? "One ROUTER here — ask who owns developer tooling rather than pitching."
+            : `${routerCount} ROUTERs here. The spec expects at most one per account, so treat the extras as unclassified rather than as routes.`}
         </p>
       )}
 

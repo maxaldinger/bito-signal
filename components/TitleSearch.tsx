@@ -24,9 +24,15 @@ import {
   Search,
   Users,
 } from "lucide-react";
-import { REASON_LABEL, TIER_STYLE, type ICPClass } from "@/lib/icpClassifier";
+import {
+  REASON_LABEL,
+  TIER_STYLE,
+  allowedActions,
+  normalizeClass,
+  type ICPClass,
+} from "@/lib/icpClassifier";
 import type { TitleSearchPerson } from "@/lib/enrich/apollo";
-import { isSendableEmail } from "@/lib/enrich/emailTrust";
+import { isSendableEmail, provenanceIsWeak, provenanceLabel } from "@/lib/enrich/emailTrust";
 import { fmtNum } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 
@@ -379,8 +385,11 @@ function PersonCard({
   onReveal: () => void;
   autoCheckDelayMs: number;
 }) {
-  const tier = (person.icp?.classification ?? "UNSCORED") as ICPClass;
-  const screened = tier === "PASS";
+  const tier: ICPClass = normalizeClass(person.icp?.classification);
+  // STAGE 6 — action gating. A title search is exactly where an ungated card
+  // would burn credits: the pool is unbounded, so only QUALIFIED may reveal.
+  const gate = allowedActions(tier);
+  const screened = tier === "EXCLUDED";
   // The search returns "Romain Hu***t"; the reveal returns the real name.
   const displayName = reveal?.name || person.name;
 
@@ -429,7 +438,7 @@ function PersonCard({
           <span
             title={person.icp?.reason}
             className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${
-              TIER_STYLE[tier] ?? TIER_STYLE.UNSCORED
+              TIER_STYLE[tier] ?? TIER_STYLE.UNRESOLVED
             }`}
           >
             {tier.toLowerCase()}
@@ -474,7 +483,11 @@ function PersonCard({
             {profileUrl ? "LinkedIn" : "Find on LinkedIn"}
             <ArrowUpRight className="h-3 w-3" />
           </a>
-          {noEmailOnFile ? (
+          {!gate.showEmail ? (
+            <span className="font-mono text-[11px] text-ink-600">
+              {tier.toLowerCase()} · no address until the profile is reviewed
+            </span>
+          ) : noEmailOnFile ? (
             <span className="inline-flex items-center gap-1 rounded border border-ink-800 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-500">
               <Mail className="h-3 w-3" /> no email on file · linkedin only
             </span>
@@ -496,7 +509,7 @@ function PersonCard({
           ) : null}
         </div>
 
-        {reveal?.done && (
+        {gate.showEmail && reveal?.done && (
           <div className="mt-2 font-mono text-[11px]">
             {email ? (
               <p className="flex items-center gap-1.5 text-ink-200">
@@ -504,7 +517,11 @@ function PersonCard({
                 <a href={`mailto:${email}`} className="break-all hover:text-sky-300">
                   {email}
                 </a>
-                <span className="text-[10px] text-neon-400">(verified)</span>
+                <span
+                  className={`text-[10px] ${provenanceIsWeak(reveal?.status) ? "text-ink-500" : "text-neon-400"}`}
+                >
+                  {provenanceLabel(reveal?.status)}
+                </span>
               </p>
             ) : reveal.email ? (
               <p className="flex flex-wrap items-center gap-1.5 text-amber-300/90">
