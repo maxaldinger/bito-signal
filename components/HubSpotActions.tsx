@@ -83,6 +83,7 @@ export function HubSpotActions({
   companyName,
   companyDomain,
   companyKey,
+  companyAliases,
   defaultSubject,
   defaultBody,
   compact = false,
@@ -109,6 +110,13 @@ export function HubSpotActions({
    *  called "Anthem". Keying the mark off the brief's name wrote it somewhere
    *  the feed card could never read, so pushing a contact left the card grey. */
   companyKey?: string;
+  /** EVERY name this account is known by. One company reaches this component
+   *  under several spellings: the feed row ("Tesla Motors"), the brief's
+   *  researched name ("Tesla, Inc."), and in the Signal 2000 a SECOND row for
+   *  the same business ("Tesla Inc.", key "tesla"). Marking one spelling leaves
+   *  the others grey, which is exactly what "some records don't go orange"
+   *  looks like from the feed. The mark is written under all of them. */
+  companyAliases?: string[];
   defaultSubject: string;
   defaultBody: string;
   /** Smaller styling for use inside a contact card. */
@@ -269,6 +277,7 @@ export function HubSpotActions({
           companyName={companyName}
           companyDomain={companyDomain}
           companyKey={companyKey}
+          companyAliases={companyAliases}
           objectId={matchedId}
           defaultSubject={defaultSubject}
           defaultBody={defaultBody}
@@ -290,6 +299,7 @@ function TaskModal({
   companyName,
   companyDomain,
   companyKey,
+  companyAliases,
   objectId,
   defaultSubject,
   defaultBody,
@@ -305,6 +315,7 @@ function TaskModal({
   companyName?: string;
   companyDomain?: string;
   companyKey?: string;
+  companyAliases?: string[];
   objectId?: string;
   defaultSubject: string;
   defaultBody: string;
@@ -371,7 +382,10 @@ function TaskModal({
       if (data.ok) {
         const acct = companyKey || (kind === "contact" ? companyName : name);
         markProspected(kind, kind === "contact" ? apolloId || name : acct || name);
-        if (kind === "contact" && acct) markProspected("company", acct);
+        // Mark the company under every spelling we know, not just the one this
+        // card happened to be opened under.
+        const aliases = [acct, companyKey, kind === "contact" ? companyName : name, ...(companyAliases ?? [])];
+        for (const a of aliases) if (a && a.trim()) markProspected("company", a);
       }
     } catch (e) {
       setResult({ ok: false, error: e instanceof Error ? e.message : String(e) });

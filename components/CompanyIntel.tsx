@@ -747,6 +747,9 @@ function ApolloPersonCard({
           companyName={company}
           companyDomain={domain}
           companyKey={accountKey}
+          // Both names in scope here already: accountKey is the feed's, company
+          // is the brief's. Mark under both.
+          companyAliases={[accountKey, company].filter(Boolean) as string[]}
           compact
           // A screened contact still has working buttons if you disagree with
           // the call, but nothing fires on its own.
@@ -1183,6 +1186,11 @@ export function CompanyIntel({
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const acctKey = accountKey?.trim() || intel.name;
+  // Both names this account answers to. The feed row and the brief disagree far
+  // more often than you'd think ("Tesla Motors" vs "Tesla, Inc.", "Anthem" vs
+  // "Elevance Health"), and the Signal 2000 sometimes carries a separate row
+  // per spelling. Marking only one leaves the other grey.
+  const companyAliases = [acctKey, intel.name];
   const companyProspected = useIsProspected("company", acctKey);
   const companyProspectedAt = useProspectedAt("company", acctKey);
 
@@ -1328,6 +1336,7 @@ export function CompanyIntel({
         kind="company"
         name={intel.name}
         companyKey={acctKey}
+        companyAliases={companyAliases}
         domain={intel.domain}
         autoCheck
         defaultSubject={`SIGNAL DASH - ${intel.name}`}

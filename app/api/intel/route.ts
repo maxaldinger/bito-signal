@@ -16,7 +16,19 @@ import type {
 // Live Intel Brief: claude-sonnet-4 researches the company on the open web,
 // then emits the full CompanyIntel JSON. Nothing is templated or canned —
 // the model must ground every section in what it actually found.
-export const maxDuration = 300;
+/** First couple of sentences of the model's own explanation, markdown stripped,
+ *  so the reason shows up in the error banner instead of "usually transient". */
+function summarizeRefusal(text: string): string {
+  const plain = text
+    .replace(/\*\*/g, "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentences = plain.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
+  return sentences.length > 320 ? `${sentences.slice(0, 317)}...` : sentences;
+}
+
+export const maxDuration =300;
 
 const VALID_SEGMENTS: SegmentId[] = [
   "saas",
@@ -76,6 +88,11 @@ Email opener — ONE or TWO sentences, pasted as a personalized lead-in ABOVE a 
 Citations: list every distinct source you actually used.
 
 Never include <cite> tags or any citation markup inside JSON string values — write plain prose; sources belong only in the "citations" array.
+
+DEFUNCT, RENAMED, ACQUIRED OR AMBIGUOUS TARGETS. The company you are given comes from a stock-index list that is years out of date in places, so some of them no longer exist under that name. Do NOT answer in prose when this happens, and do NOT ask which company was meant — that reply is discarded by the caller and the whole research pass is wasted. Always return the JSON object:
+- Acquired or renamed (e.g. "Twenty-First Century Fox", acquired by Disney in 2019): research the SUCCESSOR that inherited the engineering organisation, set "name" to the successor's current legal name, and open "summary" by stating the succession plainly, e.g. "Twenty-First Century Fox no longer exists; its studio and streaming assets went to The Walt Disney Company in March 2019, so this brief covers Disney." Score the successor.
+- Split into several entities: pick the one that carries the software organisation, name it, and say in "summary" which parts went where.
+- Genuinely nothing there, or too ambiguous to resolve: still return the object, with "name" set to the string you were given, every icp sub-score 0, and "summary" explaining in one or two sentences what you found and what the rep should search for instead.
 
 Output ONLY one JSON object — no prose, no code fences:
 {
@@ -231,13 +248,34 @@ export async function GET(req: NextRequest) {
           `searches=${result.searchCount} textLen=${result.text.length} ` +
           `head=${JSON.stringify(result.text.slice(0, 200))} tail=${JSON.stringify(result.text.slice(-200))}`,
       );
+      // THE MODEL ANSWERED IN PROSE. Not a parse failure and emphatically not
+      // transient: it researched the company, concluded it could not write the
+      // brief, and explained why in English. Observed on Twenty-First Century
+      // Fox — "a defunct entity, acquired by Disney, effective March 20 2019",
+      // offering Fox Corporation or Disney instead. Reporting that as "try
+      // again, usually transient" sends the rep to burn another research pass
+      // on a company that no longer exists.
+      //
+      // The explanation is the most useful thing the call produced, so it is
+      // what gets shown.
+      const prose = !result.truncated && !parsed && result.text.trim().length > 0;
+      if (prose) {
+        return NextResponse.json(
+          {
+            error: `No brief for "${company}" — the research came back with an explanation instead. ${summarizeRefusal(result.text)}`,
+            modelNote: result.text.slice(0, 1200),
+            retryable: false,
+            searchCount: result.searchCount,
+            searchErrors: result.searchErrors,
+          },
+          { status: 422, headers: { "Cache-Control": "no-store" } },
+        );
+      }
       const cause = result.truncated
         ? `the response was cut off (stop_reason: ${result.stopReason})`
         : !result.text.trim()
           ? "the model returned no text at all (only search calls)"
-          : !parsed || !parsed.name
-            ? "no parseable brief came back"
-            : "the brief came back without a complete ICP score";
+          : "the brief came back without a complete ICP score";
       return NextResponse.json(
         {
           // Don't call a truncation transient — retrying an over-budget brief
