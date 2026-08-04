@@ -470,19 +470,44 @@ function ApolloPersonCard({
   const unverifiedEmail = onCompanyDomain && !emailSendable ? revealedEmail : undefined;
   const emailChecked = emailRes !== undefined; // reveal finished (found or not)
 
-  // Hide only when Apollo surfaced NO usable address at all. A contact whose
-  // address exists but is not verified stays visible: they are still workable
-  // by LinkedIn, and hiding them was gutting the list (BlackRock showed 3 of
-  // ~60 engineering leaders). The email itself is still withheld from outreach
-  // — see `unverifiedEmail` above, which renders amber and never as a mailto.
-  if (hideWithoutEmail && emailChecked && !companyEmail && !unverifiedEmail) return null;
+  // NOBODY is hidden any more. Cards used to delete themselves once the reveal
+  // came back empty, which is why a list would populate and then visibly gut
+  // itself — and the reveal credit was already spent, so we lost both the money
+  // and the contact. They stay, loudly marked instead.
+  //
+  //   verified   → green, mailto live, pushable
+  //   unverified → amber, address shown for research, never a mailto
+  //   none       → RED bar, LinkedIn-only
+  const emailState: "pending" | "verified" | "unverified" | "none" = !emailChecked
+    ? "pending"
+    : companyEmail
+      ? "verified"
+      : unverifiedEmail
+        ? "unverified"
+        : "none";
+  void hideWithoutEmail; // kept in the signature; suppression is retired
 
   return (
     <div
-      className={`rounded-lg border bg-ink-950/50 p-4 ${
-        contactProspected ? "border-orange-500/50 ring-1 ring-orange-500/30" : "border-ink-700"
+      className={`overflow-hidden rounded-lg border bg-ink-950/50 ${
+        emailState === "none"
+          ? "border-red-500/60 ring-1 ring-red-500/25"
+          : contactProspected
+            ? "border-orange-500/50 ring-1 ring-orange-500/30"
+            : "border-ink-700"
       }`}
     >
+      {emailState === "none" && (
+        <div className="border-b border-red-500/40 bg-red-500/15 px-4 py-1.5 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-red-300">
+          no email found · linkedin only · do not add to a sequence
+        </div>
+      )}
+      {emailState === "unverified" && (
+        <div className="border-b border-amber-500/40 bg-amber-500/15 px-4 py-1.5 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-amber-300">
+          email unverified · do not send · risk of hard bounce
+        </div>
+      )}
+      <div className="p-4">
       <div className="flex items-center justify-between gap-2">
         <h4 className="min-w-0 truncate text-sm font-semibold text-ink-100">{displayName}</h4>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -603,9 +628,12 @@ function ApolloPersonCard({
               </span>
             </p>
           ) : emailChecked ? (
-            // Red: no email is a dead end for this contact, not a footnote.
+            // No email is a dead end for this contact, not a footnote. The red
+            // bar at the top of the card says it too — this repeats it next to
+            // where an address would otherwise sit, so a quick scan can't miss it.
             <p className="flex items-center gap-1.5 font-semibold text-red-400">
-              <Mail className="h-3 w-3" /> No company email surfaced
+              <Mail className="h-3 w-3" /> No company email · Apollo has no verified
+              address for this person
             </p>
           ) : null}
           {phoneRes?.ok && phoneRes.phone && (
@@ -695,6 +723,7 @@ function ApolloPersonCard({
           }
         />
         )}
+      </div>
       </div>
     </div>
   );
@@ -856,7 +885,13 @@ function ApolloStakeholders({
     const v = graded(p);
     return v ? v.classification !== "PASS" : isDecisionMaker(p);
   });
-  const routers = rest.filter((p) => graded(p)?.classification === "ROUTER");
+  // Counted from the VISIBLE slice, not the whole pool. It used to count every
+  // ROUTER the scorer passed, including ones whose cards had deleted
+  // themselves, so the line could read "11 of these are ROUTERs" above an empty
+  // grid. Nothing is hidden now, but the count should still describe what is
+  // actually on screen rather than what was scored.
+  const routersVisible = (shown: EnrichContact[]) =>
+    shown.filter((p) => graded(p)?.classification === "ROUTER").length;
   const rejected = rest.filter((p) => graded(p)?.classification === "PASS");
   /** Profiles the classifier could not judge at all — surfaced separately so a
    *  classifier outage never masquerades as a screening decision. */
@@ -983,10 +1018,11 @@ function ApolloStakeholders({
           render as normal cards in the grid, ranked below ANCHOR and TARGET
           and badged amber, because the spec makes them actionable: worth one
           message asking who owns developer tooling. */}
-      {routers.length > 0 && (
+      {routersVisible(dmShown) > 0 && (
         <p className="font-mono text-[11px] text-ink-500">
-          {routers.length} of these {routers.length === 1 ? "is a" : "are"} ROUTER
-          {routers.length === 1 ? "" : "s"} — ask who owns developer tooling, don&rsquo;t pitch.
+          {routersVisible(dmShown)} of these {routersVisible(dmShown) === 1 ? "is a" : "are"} ROUTER
+          {routersVisible(dmShown) === 1 ? "" : "s"}, ask who owns developer tooling rather than
+          pitching.
         </p>
       )}
 
