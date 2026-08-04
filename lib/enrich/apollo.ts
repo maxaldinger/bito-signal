@@ -49,6 +49,16 @@ interface ApolloPerson {
   seniority?: string | null;
   departments?: string[] | null;
   country?: string | null;
+  city?: string | null;
+  state?: string | null;
+  /** Search tells you WHETHER a field exists without giving you the value.
+   *  has_email is the useful one: it lets a card refuse to spend a reveal
+   *  credit on someone Apollo has no address for. */
+  has_email?: boolean | null;
+  /** Present on search results. The company-scoped searches ignore it (the org
+   *  is already known); the cross-company title search needs it, because there
+   *  a person without an employer is unusable. */
+  organization?: ApolloOrg | null;
 }
 
 // Engineering people we want on the stakeholder map — leaders (who sign/gate a
@@ -125,14 +135,12 @@ const ENG_LEADER_TITLES = [
   "chief information officer",
   "architecture",
 ];
-// Two groups on purpose. Acronyms need BOTH boundaries or "ai" matches
-// "Aircraft"; word STEMS need only a leading one. The previous single-group
-// form closed with \b, so `technolog`, `infrastructur`, `reliab` and `develop`
-// could never match the words they were written for — "Chief Technology
-// Officer" was rejected outright. That stayed hidden while the ENG_TITLES query
-// (which bypassed this filter) also fed the map; it is now the only gate.
-const TECH_LEADER_RE =
-  /\b(?:c[ti]o|ctpo|cdo|sre|ml|ai)\b|\b(?:engineer|technolog|technical|information|software|platform|infrastructur|infra|devops|reliab|architect|develop|data|machine\s*learning|cloud|digital|security)/i;
+// TECH_LEADER_RE moved to lib/icpClassifier as NON_TECHNICAL (Aug 2026). It was
+// used here to DELETE non-technical people from the search result; it now
+// labels them PASS / NOT_ENGINEERING instead, at the same zero token cost. The
+// regex itself is unchanged, including the two-group split — acronyms need BOTH
+// word boundaries or "ai" matches "Aircraft", while stems need only a leading
+// one, which is what once made it reject "Chief Technology Officer" outright.
 
 function apiHeaders(key: string): Record<string, string> {
   return {
@@ -382,6 +390,10 @@ export interface ApolloPersonContact {
   linkedinUrl?: string;
   /** Person's country, from the richer match response (search is often thin). */
   country?: string;
+  /** Employer domain from the match response. The title SEARCH does not return
+   *  it, so without this the on-domain check downstream could never pass and a
+   *  perfectly good revealed address would read as "off company domain". */
+  companyDomain?: string;
 }
 
 interface ApolloPhoneNumber {
@@ -393,7 +405,9 @@ interface ApolloPhoneNumber {
 interface ApolloMatchPerson extends ApolloPerson {
   personal_emails?: string[] | null;
   phone_numbers?: ApolloPhoneNumber[] | null;
-  organization?: { phone?: string | null } | null;
+  /** The match response carries the org too, plus a switchboard number the
+   *  search response has no reason to return. */
+  organization?: (ApolloOrg & { phone?: string | null }) | null;
 }
 
 /**
@@ -464,6 +478,7 @@ export async function apolloPersonContact(opts: {
     title: str(person.title),
     linkedinUrl: str(person.linkedin_url),
     country: str(person.country),
+    companyDomain: str(person.organization?.primary_domain),
   };
 
   if (opts.reveal === "email") {
@@ -684,16 +699,24 @@ export async function apolloPeopleByTitle(
       const b = r.body as { people?: ApolloPerson[]; contacts?: ApolloPerson[] } | undefined;
       return [...(b?.people ?? []), ...(b?.contacts ?? [])];
     };
-    // Cheap pre-filter only. The seniority facet returns every department, so
-    // this drops the obvious Finance/HR/Legal bulk before we spend classifier
-    // tokens. It is deliberately PERMISSIVE — the ICP classifier below makes
-    // the real call, because a regex cannot tell "Engineering and Asset
-    // Optimization" (a plant job) from "Engineering Platform" (the buyer).
+    // NOTHING IS DROPPED HERE ANY MORE.
+    //
+    // This line used to be `.filter(p => TECH_LEADER_RE.test(p.title))`, which
+    // deleted every non-technical title on the server, before the client saw a
+    // thing and before any tier was assigned. It was the last silent
+    // suppression in the pipeline and it survived three rounds of "stop hiding
+    // contacts" fixes, because all three were in the UI and this is not.
+    //
+    // The saving it bought was real — no classifier tokens on Finance/HR/Legal
+    // — so it is kept, as a LABEL instead of a delete: the same test now lives
+    // in the hard-exclusion table as NOT_ENGINEERING, runs before the model
+    // (so it still costs nothing), and arrives as a screened card that says
+    // why. See lib/icpClassifier NON_TECHNICAL.
     // Title-query hits lead, since they are already engineering-scoped.
     const dmRaw = [
       ...(titleRes.status === 200 ? peopleOf(titleRes) : []),
       ...(dmRes.status === 200 ? peopleOf(dmRes) : []),
-    ].filter((p) => TECH_LEADER_RE.test(str(p.title) ?? ""));
+    ];
 
     const seen = new Set<string>();
     const merged: ApolloPerson[] = [];
@@ -953,4 +976,174 @@ export async function apolloIcpSweep(page = 1, region: RegionId = "us"): Promise
       orgs: [],
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// TITLE SEARCH — people by job title, across all companies.
+//
+// Every other people search here is org-scoped: pick a company, then find its
+// engineering leaders. This inverts it. "Pull anyone in developer experience"
+// is a different prospecting motion, and Apollo supports it directly:
+// person_titles[] with no organization filter.
+//
+// Search consumes no Apollo credits. Emails are NOT revealed here — a query
+// like "developer experience" can match tens of thousands of people, and
+// auto-revealing a page of them is real money. Reveal is per-card and manual.
+// ---------------------------------------------------------------------------
+
+export interface TitleSearchPerson extends EnrichContact {
+  /** Employer, resolved from the search result's organization block. A person
+   *  with no employer is dropped: unusable for outreach and for HubSpot. */
+  company: string;
+  companyDomain?: string;
+  companyEmployees?: number;
+  companyIndustry?: string;
+  location?: string;
+  /** Apollo's own `has_email` flag. The search returns no address, but it does
+   *  say whether one exists — so a card can refuse to spend a credit on someone
+   *  Apollo has nothing for, instead of finding out afterwards. */
+  hasEmail?: boolean;
+}
+
+export interface TitleSearchResult {
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  people: TitleSearchPerson[];
+  page: number;
+  hasMore: boolean;
+  /** Apollo's own total for the query, so the UI can say how deep the pool is. */
+  total?: number;
+}
+
+interface ApolloPagination {
+  page?: number;
+  per_page?: number;
+  total_entries?: number;
+  total_pages?: number;
+}
+
+// What mixed_people/api_search ACTUALLY returns per person (measured Aug 2026):
+//   id, first_name, last_name_obfuscated, title, last_refreshed_at,
+//   has_email, has_city, has_state, has_country, has_direct_phone,
+//   organization: { name, has_industry, has_phone, has_city, has_state,
+//                   has_country, has_zip_code, has_revenue, has_employee_count }
+// Note what is NOT there: full name, linkedin_url, seniority, departments, the
+// org's primary_domain, and every actual value behind those has_* booleans. The
+// filters still apply server-side (an employee-range query does narrow the
+// pool) — Apollo just won't tell you the number without a credit.
+//
+// So: the optional company fields below stay in the type because the org-scoped
+// callers can fill them, but on this path they are simply absent, and the UI
+// must not imply otherwise.
+function toTitleSearchPerson(p: ApolloPerson): TitleSearchPerson | undefined {
+  const base = toContact(p);
+  if (!base) return undefined;
+  const org = p.organization;
+  const company = str(org?.name);
+  if (!company) return undefined; // no employer, no prospect
+  return {
+    ...base,
+    company,
+    companyDomain: str(org?.primary_domain),
+    companyEmployees: num(org?.estimated_num_employees),
+    companyIndustry: str(org?.industry),
+    location: [str(p.city), str(p.state) ?? str(p.country)].filter(Boolean).join(", ") || undefined,
+    hasEmail: typeof p.has_email === "boolean" ? p.has_email : undefined,
+  };
+}
+
+/**
+ * Find people by title across all companies.
+ * @param opts.titles      Apollo ORs these and matches loosely.
+ * @param opts.seniorities Apollo seniority facet (director/vp/c_suite/...).
+ * @param opts.employeeRanges "min,max" bands, e.g. "1001,5000".
+ * @param opts.locations   Person locations, e.g. "United States".
+ */
+export async function apolloTitleSearch(opts: {
+  titles: string[];
+  seniorities?: string[];
+  employeeRanges?: string[];
+  locations?: string[];
+  page?: number;
+  perPage?: number;
+  /** Company-level context handed to the scorer alongside each title. */
+  signal?: string;
+}): Promise<TitleSearchResult> {
+  const empty = (configured: boolean, error?: string): TitleSearchResult => ({
+    configured,
+    ok: !error,
+    error,
+    people: [],
+    page: opts.page ?? 1,
+    hasMore: false,
+  });
+
+  const key = process.env.APOLLO_API_KEY;
+  if (!key) return empty(false, "APOLLO_API_KEY not set — add it to .env.local / Vercel env");
+  const titles = opts.titles.map((t) => t.trim()).filter(Boolean);
+  if (titles.length === 0) return empty(true, "Enter at least one title to search for");
+
+  const page = Math.max(1, Math.min(100, opts.page ?? 1));
+  const perPage = Math.max(1, Math.min(50, opts.perPage ?? 25));
+  const qs = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+  for (const t of titles) qs.append("person_titles[]", t);
+  for (const s of opts.seniorities ?? []) qs.append("person_seniorities[]", s);
+  for (const r of opts.employeeRanges ?? []) qs.append("organization_num_employees_ranges[]", r);
+  for (const l of opts.locations ?? []) qs.append("person_locations[]", l);
+
+  let status: number;
+  let body: unknown;
+  try {
+    ({ status, body } = await apolloJson(`${BASE}/mixed_people/api_search?${qs}`, key, "POST"));
+  } catch (e) {
+    return empty(true, isTimeout(e) ? "Apollo title search timed out after 15s" : "Apollo title search failed");
+  }
+  if (status !== 200) return empty(true, statusError(status, "title search"));
+
+  const b = body as
+    | {
+        people?: ApolloPerson[];
+        contacts?: ApolloPerson[];
+        /** Measured: this endpoint returns total_entries at the TOP level and
+         *  no `pagination` object at all. Both are read, top level first. */
+        total_entries?: number;
+        pagination?: ApolloPagination;
+      }
+    | undefined;
+  const raw = [...(b?.people ?? []), ...(b?.contacts ?? [])];
+  const people = raw
+    .map(toTitleSearchPerson)
+    .filter((p): p is TitleSearchPerson => p !== undefined);
+
+  // Tier them. The hard exclusions run first and cost nothing, which matters
+  // here more than anywhere else: a loose title query pulls in a lot of
+  // "Customer Experience" and "Field Engineering" that never reaches the model.
+  const verdicts = await classifyProfiles(people, (p) => ({
+    company: p.company,
+    titles: p.title,
+    headline: p.title,
+    description: [
+      p.seniority && `seniority: ${p.seniority}`,
+      p.department && `department: ${p.department}`,
+      p.companyEmployees && `employer has ~${p.companyEmployees.toLocaleString()} employees`,
+      p.companyIndustry && `industry: ${p.companyIndustry}`,
+    ]
+      .filter(Boolean)
+      .join("; "),
+    companySignals: opts.signal,
+  }));
+
+  const total = num(b?.total_entries) ?? num(b?.pagination?.total_entries);
+  const totalPages = num(b?.pagination?.total_pages);
+  return {
+    configured: true,
+    ok: true,
+    people: people.map((p, i) => ({ ...p, icp: verdicts[i] })),
+    page,
+    // Trust Apollo's own page count when it gives one; otherwise infer from a
+    // full page, which is the only other honest signal that more exist.
+    hasMore: typeof totalPages === "number" ? page < totalPages : raw.length >= perPage,
+    total,
+  };
 }

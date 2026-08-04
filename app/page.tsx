@@ -7,6 +7,7 @@ import { SignalFeed, type FeedSort } from "@/components/SignalFeed";
 import { FavoritesView } from "@/components/FavoritesView";
 import { DirectoryView } from "@/components/DirectoryView";
 import { GitHubProspecting } from "@/components/GitHubProspecting";
+import { TitleSearch } from "@/components/TitleSearch";
 import { SalesAssist } from "@/components/SalesAssist";
 import { PullControls } from "@/components/PullControls";
 import {
@@ -660,6 +661,8 @@ export default function Page() {
               />
             ) : tab === "github" ? (
               <GitHubProspecting />
+            ) : tab === "titles" ? (
+              <TitleSearch />
             ) : tab === "favorites" ? (
               <FavoritesView
                 signals={signals}

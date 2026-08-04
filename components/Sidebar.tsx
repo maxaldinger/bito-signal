@@ -5,6 +5,7 @@ import {
   Radio,
   Sparkles,
   Star,
+  UserSearch,
   Check,
   SlidersHorizontal,
   ChevronDown,
@@ -20,12 +21,13 @@ import type { SegmentId, SignalTypeId } from "@/lib/types";
 import { useFavorites, useProspectedCount, clearAllProspected } from "@/lib/clientStore";
 import { SegmentIcon } from "./SegmentIcon";
 
-export type TabId = "feed" | "directory" | "github" | "favorites" | "assist";
+export type TabId = "feed" | "directory" | "github" | "titles" | "favorites" | "assist";
 
 const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "feed", label: "Signal Feed", icon: Radio },
   { id: "directory", label: "Signal 2000", icon: Building2 },
   { id: "github", label: "GitHub Prospecting", icon: Github },
+  { id: "titles", label: "Title Search", icon: UserSearch },
   { id: "favorites", label: "Signal favorites", icon: Star },
   { id: "assist", label: "Sales Assist", icon: Sparkles },
 ];

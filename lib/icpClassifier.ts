@@ -139,6 +139,20 @@ const HARD_EXCLUSIONS: Array<{ code: ICPReasonCode; re: RegExp; why: string }> =
   },
 ];
 
+// Anything technical at all. A title matching NONE of this is not an
+// engineering contact — Finance, HR, Legal, Merchandising, Wealth Management.
+// The seniority sweep returns those in bulk at a large enterprise.
+//
+// This test used to live in lib/enrich/apollo.ts, where it DELETED those people
+// from the search result server-side. Same test, opposite handling: they are
+// now labelled and rendered like any other exclusion. The token saving is
+// unchanged, since this still runs before the model.
+//
+// Two groups on purpose: acronyms need BOTH word boundaries or "ai" matches
+// "Aircraft"; stems need only a leading one.
+const TECHNICAL =
+  /\b(?:c[ti]o|ctpo|cdo|sre|ml|ai)\b|\b(?:engineer|technolog|technical|information|software|platform|infrastructur|infra|devops|reliab|architect|develop|data|machine\s*learning|cloud|digital|security)/i;
+
 /** Deterministic exclusion by title. Returns the verdict when the contact is
  *  hard-excluded, otherwise undefined. Never consults a model.
  *
@@ -150,18 +164,26 @@ const HARD_EXCLUSIONS: Array<{ code: ICPReasonCode; re: RegExp; why: string }> =
 export function hardExclude(titles?: string): ICPVerdict | undefined {
   const t = (titles || "").trim();
   if (!t) return undefined;
+  const pass = (code: ICPReasonCode, why: string): ICPVerdict => ({
+    classification: "PASS",
+    confidence: "high",
+    ownsDevTooling: false,
+    reason: why,
+    recommendedAction: "skip",
+    reasonCode: code,
+    hardFiltered: true,
+  });
   for (const rule of HARD_EXCLUSIONS) {
-    if (rule.re.test(t)) {
-      return {
-        classification: "PASS",
-        confidence: "high",
-        ownsDevTooling: false,
-        reason: rule.why,
-        recommendedAction: "skip",
-        reasonCode: rule.code,
-        hardFiltered: true,
-      };
-    }
+    if (rule.re.test(t)) return pass(rule.code, rule.why);
+  }
+  // Last, and inverted: no technical token anywhere in the title. Checked after
+  // the specific rules so a Network or Product title reports as ITSELF rather
+  // than as the catch-all.
+  if (!TECHNICAL.test(t)) {
+    return pass(
+      "NOT_ENGINEERING",
+      "No technical scope in the title. A seniority sweep at a large enterprise returns Finance, HR, Legal and business leadership in bulk; this is one of those.",
+    );
   }
   return undefined;
 }
@@ -182,6 +204,18 @@ export interface ICPProfileInput {
  *  UNSCORED is included deliberately — "we could not tell" must not silently
  *  behave like a rejection. Only PASS is screened out. */
 export const QUEUE_CLASSES: ICPClass[] = ["ANCHOR", "TARGET", "ROUTER", "UNSCORED"];
+
+/** Badge styling per tier. Lives here rather than in one component so every
+ *  surface that shows a tier shows the same one. ANCHOR is the buyer and gets
+ *  the strongest treatment; ROUTER is amber because it means "ask them who owns
+ *  this", not "pitch them". */
+export const TIER_STYLE: Record<ICPClass, string> = {
+  ANCHOR: "border border-neon-600/50 bg-neon-500/20 text-neon-200",
+  TARGET: "border border-sky-500/40 bg-sky-500/15 text-sky-300",
+  ROUTER: "border border-amber-500/40 bg-amber-500/15 text-amber-300",
+  UNSCORED: "border border-ink-700 bg-ink-800 text-ink-400",
+  PASS: "border border-ink-700 bg-ink-800 text-ink-500",
+};
 
 /** Sort weight, lower is better. */
 export const TIER_RANK: Record<ICPClass, number> = {

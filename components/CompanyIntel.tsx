@@ -26,7 +26,7 @@ import {
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { emailStatusLabel, isSendableEmail, unsendableReason } from "@/lib/enrich/emailTrust";
-import { REASON_LABEL, TIER_RANK, type ICPClass } from "@/lib/icpClassifier";
+import { REASON_LABEL, TIER_RANK, TIER_STYLE, type ICPClass } from "@/lib/icpClassifier";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
@@ -157,13 +157,9 @@ interface ApolloRevealPayload extends ApolloRevealResult {
 
 /** Tier badge colours. ANCHOR is the buyer, so it gets the strongest treatment;
  *  ROUTER is amber because it means "ask them who owns this", not "pitch them". */
-const TIER_STYLE: Record<string, string> = {
-  ANCHOR: "border border-neon-600/50 bg-neon-500/20 text-neon-200",
-  TARGET: "border border-sky-500/40 bg-sky-500/15 text-sky-300",
-  ROUTER: "border border-amber-500/40 bg-amber-500/15 text-amber-300",
-  UNSCORED: "border border-ink-700 bg-ink-800 text-ink-400",
-  PASS: "border border-ink-700 bg-ink-800 text-ink-500",
-};
+// Re-exported from lib so the title-search cards badge identically. A tier that
+// looks different in two places is two vocabularies, not one.
+export { TIER_STYLE };
 
 // Apollo's `seniority` (or title, as a fallback) splits real contacts into the
 // two columns the deep dive already uses: economic buyers vs. practitioners.
