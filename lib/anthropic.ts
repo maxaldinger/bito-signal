@@ -65,33 +65,70 @@ export function stripCiteMarkup(s: string): string {
     .replace(/ {2,}/g, " ");
 }
 
-/** Strip ```json … ``` fences and trim, then attempt to extract the first JSON object. */
+/** Every balanced {…} or […] span in `s`, outermost only, largest first.
+ *
+ *  Brace matching is string-aware: a `{` inside a JSON string value (a company
+ *  blurb, a rationale, an outreach line) must not open a nesting level, and an
+ *  escaped quote must not close the string.
+ *
+ *  This exists because first-`{`-to-last-`}` is wrong whenever the model says
+ *  anything at all around its JSON. With web_search on, it usually does: the
+ *  response is a run of text blocks, joined here, where the earlier ones are
+ *  research commentary and only the last is the brief. One stray brace in that
+ *  commentary and the slice spans from prose into the object, parses as
+ *  nothing, and the whole research pass is reported as "no parseable brief". */
+function balancedSpans(s: string): string[] {
+  const spans: { text: string; len: number }[] = [];
+  const pairs: Record<string, string> = { "{": "}", "[": "]" };
+  for (let i = 0; i < s.length; i++) {
+    const open = s[i];
+    if (open !== "{" && open !== "[") continue;
+    const close = pairs[open];
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let j = i; j < s.length; j++) {
+      const ch = s[j];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === "\\") esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === open) depth++;
+      else if (ch === close) {
+        depth--;
+        if (depth === 0) {
+          spans.push({ text: s.slice(i, j + 1), len: j + 1 - i });
+          i = j; // outermost only — don't re-scan the nested objects
+          break;
+        }
+      }
+    }
+  }
+  return spans.sort((a, b) => b.len - a.len).map((x) => x.text);
+}
+
+/** Pull the model's JSON out of a response that may carry prose around it.
+ *  Tries the whole string, then every balanced span largest-first. */
 export function extractJSON<T = unknown>(text: string): T | null {
   if (!text) return null;
-  let candidate = text.trim();
-  candidate = candidate.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const candidate = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
   try {
     return JSON.parse(candidate) as T;
   } catch {
     /* fall through */
   }
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start !== -1 && end > start) {
+  for (const span of balancedSpans(candidate)) {
     try {
-      return JSON.parse(candidate.slice(start, end + 1)) as T;
+      return JSON.parse(span) as T;
     } catch {
-      /* swallow */
-    }
-  }
-  // Last resort: try to find a top-level array.
-  const aStart = candidate.indexOf("[");
-  const aEnd = candidate.lastIndexOf("]");
-  if (aStart !== -1 && aEnd > aStart) {
-    try {
-      return JSON.parse(candidate.slice(aStart, aEnd + 1)) as T;
-    } catch {
-      /* swallow */
+      /* try the next span */
     }
   }
   return null;

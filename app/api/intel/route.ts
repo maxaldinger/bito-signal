@@ -222,11 +222,22 @@ export async function GET(req: NextRequest) {
     // The lean brief no longer generates onboarding (it's an on-demand expand),
     // so only require a name + a complete ICP block.
     if (!parsed || !parsed.name || !icpComplete(parsed.icp)) {
+      // Log enough to diagnose the next one instead of guessing. "No parseable
+      // brief" has several distinct causes (the model answered in prose, it
+      // returned only tool blocks, it emitted JSON we mis-sliced) and the
+      // message alone can't tell them apart.
+      console.error(
+        `[intel] ${company} unparseable: stop=${result.stopReason} truncated=${result.truncated} ` +
+          `searches=${result.searchCount} textLen=${result.text.length} ` +
+          `head=${JSON.stringify(result.text.slice(0, 200))} tail=${JSON.stringify(result.text.slice(-200))}`,
+      );
       const cause = result.truncated
         ? `the response was cut off (stop_reason: ${result.stopReason})`
-        : !parsed || !parsed.name
-          ? "no parseable brief came back"
-          : "the brief came back without a complete ICP score";
+        : !result.text.trim()
+          ? "the model returned no text at all (only search calls)"
+          : !parsed || !parsed.name
+            ? "no parseable brief came back"
+            : "the brief came back without a complete ICP score";
       return NextResponse.json(
         {
           // Don't call a truncation transient — retrying an over-budget brief
