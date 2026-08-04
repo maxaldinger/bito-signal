@@ -87,6 +87,11 @@ export function IntelExpander({
             <>
               <CompanyIntel
                 intel={intel}
+                // The feed's name for this account. Every prospected/score mark
+                // is keyed off it, so the card that opened the brief can read
+                // back what the brief wrote — even when the research renames the
+                // company ("Anthem" → "Elevance Health (formerly Anthem, Inc.)").
+                accountKey={company}
                 onBack={close}
                 onRefresh={onRefresh}
                 // Collapse the whole record to its slim row (card-attached briefs

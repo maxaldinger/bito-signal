@@ -82,6 +82,7 @@ export function HubSpotActions({
   apolloId,
   companyName,
   companyDomain,
+  companyKey,
   defaultSubject,
   defaultBody,
   compact = false,
@@ -100,6 +101,14 @@ export function HubSpotActions({
   /** Parent company for a contact (so the contact + task link to it). */
   companyName?: string;
   companyDomain?: string;
+  /** The FEED's name for this account, used only as the client-store key for
+   *  prospected marks and HubSpot presence. Never sent to HubSpot.
+   *
+   *  A brief renames the account to whatever the research turned up ("Elevance
+   *  Health (formerly Anthem, Inc.)") while the card that opened it is still
+   *  called "Anthem". Keying the mark off the brief's name wrote it somewhere
+   *  the feed card could never read, so pushing a contact left the card grey. */
+  companyKey?: string;
   defaultSubject: string;
   defaultBody: string;
   /** Smaller styling for use inside a contact card. */
@@ -157,7 +166,7 @@ export function HubSpotActions({
       // line + presence sort — NOT the orange "Prospected" badge, which is
       // reserved for records THIS app created a task for. (Records can exist in
       // HubSpot from other reps/imports; those aren't "prospected by me".)
-      if (kind === "company" && data.ok) setHubspotPresence(name, data.found);
+      if (kind === "company" && data.ok) setHubspotPresence(companyKey || name, data.found);
     } catch (e) {
       setCheck({ ok: false, found: false, records: [], error: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -259,6 +268,7 @@ export function HubSpotActions({
           apolloId={apolloId}
           companyName={companyName}
           companyDomain={companyDomain}
+          companyKey={companyKey}
           objectId={matchedId}
           defaultSubject={defaultSubject}
           defaultBody={defaultBody}
@@ -279,6 +289,7 @@ function TaskModal({
   apolloId,
   companyName,
   companyDomain,
+  companyKey,
   objectId,
   defaultSubject,
   defaultBody,
@@ -293,6 +304,7 @@ function TaskModal({
   apolloId?: string;
   companyName?: string;
   companyDomain?: string;
+  companyKey?: string;
   objectId?: string;
   defaultSubject: string;
   defaultBody: string;
@@ -352,9 +364,14 @@ function TaskModal({
       setResult(data);
       // Mark prospected so the company/contact is badged across the UI. A
       // contact task also prospects its parent company.
+      //
+      // The company mark uses companyKey (the FEED's name for the account) when
+      // the caller supplies one. `name`/`companyName` are the brief's names,
+      // which the feed card cannot look itself up by.
       if (data.ok) {
-        markProspected(kind, kind === "contact" ? apolloId || name : name);
-        if (kind === "contact" && companyName) markProspected("company", companyName);
+        const acct = companyKey || (kind === "contact" ? companyName : name);
+        markProspected(kind, kind === "contact" ? apolloId || name : acct || name);
+        if (kind === "contact" && acct) markProspected("company", acct);
       }
     } catch (e) {
       setResult({ ok: false, error: e instanceof Error ? e.message : String(e) });

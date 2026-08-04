@@ -211,6 +211,7 @@ interface ContactTaskContext {
 function ApolloPersonCard({
   person,
   company,
+  accountKey,
   domain,
   ctx,
   autoCheckDelayMs,
@@ -220,6 +221,9 @@ function ApolloPersonCard({
 }: {
   person: EnrichContact;
   company: string;
+  /** Store key for the parent account — pushing this contact also marks the
+   *  company prospected, and the feed card must be able to read that mark. */
+  accountKey?: string;
   domain?: string;
   ctx: ContactTaskContext;
   /** Stagger this card's auto HubSpot check (HubSpot search caps ~4 req/s). */
@@ -666,6 +670,7 @@ function ApolloPersonCard({
           jobtitle={person.title}
           companyName={company}
           companyDomain={domain}
+          companyKey={accountKey}
           compact
           autoCheck
           autoCheckDelayMs={autoCheckDelayMs}
@@ -747,11 +752,16 @@ const PER_COLUMN_STEP = 4;
 // set and lets the rep pull more (next Apollo page) on demand.
 function ApolloStakeholders({
   company,
+  accountKey,
   domain,
   ctx,
   keyContact,
 }: {
   company: string;
+  /** Store key for the parent account (see CompanyIntel's `accountKey`).
+   *  Separate from `company`, which is the Apollo/HubSpot SEARCH term and must
+   *  stay the brief's name so results don't change. */
+  accountKey?: string;
   domain?: string;
   ctx: ContactTaskContext;
   /** Person named in the suggested motion — pinned at the top of the list. */
@@ -971,6 +981,7 @@ function ApolloStakeholders({
           <ApolloPersonCard
             person={pinnedContact}
             company={company}
+            accountKey={accountKey}
             domain={domain}
             ctx={ctx}
             autoCheckDelayMs={0}
@@ -1004,6 +1015,7 @@ function ApolloStakeholders({
                 key={p.apolloId || `dm-${i}`}
                 person={p}
                 company={company}
+                accountKey={accountKey}
                 domain={domain}
                 ctx={ctx}
                 autoCheckDelayMs={i * 300}
@@ -1044,11 +1056,21 @@ function ApolloStakeholders({
 
 export function CompanyIntel({
   intel,
+  accountKey,
   onBack,
   onRefresh,
   onCollapse,
 }: {
   intel: Intel;
+  /** The name the FEED knows this account by — the key every client store is
+   *  read under (prospected marks, deep-dive score, HubSpot presence).
+   *
+   *  `intel.name` is model output and drifts from the card that opened the
+   *  brief: "Anthem" comes back as "Elevance Health (formerly Anthem, Inc.)",
+   *  "General Electric" as "GE Aerospace". Marks written under the brief's name
+   *  were unreadable from the feed, so a pushed account stayed grey. 18 of 170
+   *  briefs drift; 12 had marks stranded that way. */
+  accountKey?: string;
   onBack: () => void;
   /** Force-regenerate this brief (bypasses the cache). */
   onRefresh?: () => void;
@@ -1057,8 +1079,9 @@ export function CompanyIntel({
 }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
-  const companyProspected = useIsProspected("company", intel.name);
-  const companyProspectedAt = useProspectedAt("company", intel.name);
+  const acctKey = accountKey?.trim() || intel.name;
+  const companyProspected = useIsProspected("company", acctKey);
+  const companyProspectedAt = useProspectedAt("company", acctKey);
 
   // On-demand sections: the brief now generates lean (summary / ICP / people /
   // motion + outreach). These heavier sections are pulled only when expanded.
@@ -1078,8 +1101,8 @@ export function CompanyIntel({
   // Cache this brief's authoritative ICP total so the signal cards can show it
   // instead of their rougher per-signal estimate.
   useEffect(() => {
-    setDeepDiveScore(intel.name, intel.icp.total);
-  }, [intel.name, intel.icp.total]);
+    setDeepDiveScore(acctKey, intel.icp.total);
+  }, [acctKey, intel.icp.total]);
 
   // Company-level context woven into each contact's HubSpot task.
   const contactCtx: ContactTaskContext = {
@@ -1201,6 +1224,7 @@ export function CompanyIntel({
       <HubSpotActions
         kind="company"
         name={intel.name}
+        companyKey={acctKey}
         domain={intel.domain}
         autoCheck
         defaultSubject={`SIGNAL DASH - ${intel.name}`}
@@ -1283,6 +1307,7 @@ export function CompanyIntel({
       >
         <ApolloStakeholders
           company={intel.name}
+          accountKey={acctKey}
           domain={intel.domain}
           ctx={contactCtx}
           keyContact={
