@@ -21,16 +21,149 @@ import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "./anthropic";
 export type ICPClass = "ANCHOR" | "TARGET" | "ROUTER" | "PASS" | "UNSCORED";
 export type ICPConfidence = "high" | "medium" | "low";
 
+/** Fixed vocabulary for WHY a contact landed where it did. Free prose was
+ *  unauditable: two contacts could be dropped for the same reason described two
+ *  different ways, and a tier with no vocabulary behind it is decoration. Every
+ *  verdict carries one of these. */
+export type ICPReasonCode =
+  // Exclusions — deterministic, decided by title before the model is consulted.
+  | "DEVOPS_SRE"
+  | "CUSTOMER_FACING"
+  | "CIO_CISO_ORG"
+  | "SECURITY_RISK_COMPLIANCE"
+  | "ENTERPRISE_ARCHITECTURE"
+  | "PRODUCT_MANAGEMENT"
+  | "NETWORK_EMBEDDED"
+  | "DATA_ML_AI"
+  | "NOT_ENGINEERING"
+  // Inclusions — assigned by the scorer.
+  | "OWNS_DEV_PLATFORM"
+  | "ENG_LEADER_NAMED_SURFACE"
+  | "ENG_LEADER_ADJACENT"
+  | "CAN_REDIRECT"
+  | "UNKNOWN";
+
+/** Human-readable label for a reason code, used on the card. */
+export const REASON_LABEL: Record<ICPReasonCode, string> = {
+  DEVOPS_SRE: "devops / sre",
+  CUSTOMER_FACING: "customer-facing",
+  CIO_CISO_ORG: "cio / ciso org",
+  SECURITY_RISK_COMPLIANCE: "security / risk / compliance",
+  ENTERPRISE_ARCHITECTURE: "enterprise architecture",
+  PRODUCT_MANAGEMENT: "product management",
+  NETWORK_EMBEDDED: "network / embedded",
+  DATA_ML_AI: "data / ml / ai",
+  NOT_ENGINEERING: "not engineering",
+  OWNS_DEV_PLATFORM: "owns dev platform",
+  ENG_LEADER_NAMED_SURFACE: "eng leader, named surface",
+  ENG_LEADER_ADJACENT: "eng leadership, adjacent",
+  CAN_REDIRECT: "can redirect internally",
+  UNKNOWN: "insufficient signal",
+};
+
 export interface ICPVerdict {
   classification: ICPClass;
   confidence: ICPConfidence;
   ownsDevTooling: boolean;
   reason: string;
   recommendedAction: string;
+  /** Fixed-vocabulary code behind the tier. */
+  reasonCode: ICPReasonCode;
+  /** True when the tier came from the deterministic title filter rather than
+   *  the model — these are policy, not judgement, and cost no tokens. */
+  hardFiltered?: boolean;
   /** The call failed or returned something unparseable. The classification
    *  field is a placeholder, NOT a judgement — never count it as "screened
    *  out", and fall back to the seniority heuristic instead. */
   failed?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// HARD EXCLUSIONS
+//
+// Max's rule, Aug 2026: these are filters, not judgement calls. A model asked
+// to weigh "Director, Network DevOps" will sometimes find a reason to keep it;
+// a regex will not. Applied BEFORE the scorer, so excluded contacts cost no
+// tokens either.
+//
+// Ordered: the first match wins, so put the compound cases (network devops,
+// office of the CIO) ahead of the general ones.
+// ---------------------------------------------------------------------------
+const HARD_EXCLUSIONS: Array<{ code: ICPReasonCode; re: RegExp; why: string }> = [
+  {
+    // Network + DevOps is infrastructure twice over. Checked first so it is
+    // reported as the network case rather than the generic devops one.
+    code: "NETWORK_EMBEDDED",
+    re: /\bnetwork\s+(?:dev\s*ops|devops|sre|reliability|engineering)\b/i,
+    why: "Network engineering, not application engineering. Infrastructure on both axes.",
+  },
+  {
+    code: "DEVOPS_SRE",
+    re: /\bdev\s*ops\b|\bdevsecops\b|\bsre\b|\bsite\s+reliability\b|\bbuild\s*(?:&|and)\s*release\b|\brelease\s+engineering\b|\bci\s*\/?\s*cd\b|\bobservability\b/i,
+    why: "DevOps/SRE tooling budget is CI/CD, observability and deployment pipelines. They buy Datadog and Harness, not coding agents.",
+  },
+  {
+    code: "CUSTOMER_FACING",
+    re: /\bfield\b|\bcustomer\b|\bclient\b|\bsolutions?\s+(?:architect|engineer|consult)|\bsolution\s+architect|\bprofessional\s+services\b|\bsales\s+engineer|\bpre-?sales\b|\bsupport\b|\bservices?\s+delivery\b|\bcustomer\s+success\b/i,
+    why: "Customer-facing or pre-sales. Advisory work against someone else's codebase, or a small isolated stack.",
+  },
+  {
+    code: "CIO_CISO_ORG",
+    re: /\boffice\s+of\s+the\s+(?:cio|ciso|cto)\b|\bchief\s+of\s+staff\b|\bcorporate\s+(?:it|systems|technology)\b|\b(?:internal|enterprise)\s+it\b|\bit\s+operations\b/i,
+    why: "CIO org owns internal IT, corporate systems and vendor management, not the product engineering codebase.",
+  },
+  {
+    code: "SECURITY_RISK_COMPLIANCE",
+    re: /\bciso\b|\binformation\s+security\b|\bcyber\b|\bsecurity\s+(?:engineering|architect|operations|officer)\b|\bgrc\b|\bcompliance\b|\brisk\b|\bgovernance\b|\baudit\b|\bprivacy\b/i,
+    why: "Security and risk own posture and will only ever appear as a blocker in the deal, never a buyer.",
+  },
+  {
+    code: "ENTERPRISE_ARCHITECTURE",
+    re: /\benterprise\s+architect/i,
+    why: "Enterprise Architecture sets standards and advises. It does not own the engineering tooling budget.",
+  },
+  {
+    code: "PRODUCT_MANAGEMENT",
+    re: /\bproduct\s+(?:owner|manage|management|manager)\b|\btechnical\s+product\b|\bprogram\s+manage|\bscrum\b|\bagile\s+coach\b/i,
+    why: "Product owns process and roadmap, not repos.",
+  },
+  {
+    code: "NETWORK_EMBEDDED",
+    re: /\bnetwork\b|\bwireless\b|\brf\b|\bradio\b|\bbroadband\b|\baccess\s+(?:network|engineering|technolog)|\bfiber\b|\bembedded\b|\bfirmware\b|\bhardware\b|\bsilicon\b|\bdevice\s+engineering\b/i,
+    why: "Network / RF / embedded systems work, not application code an agent writes against.",
+  },
+  {
+    code: "DATA_ML_AI",
+    re: /\bdata\s+(?:science|scientist|engineering|analytics|platform|warehouse)\b|\banalytics\b|\bbusiness\s+intelligence\b|\bmachine\s+learning\b|\b(?:ml|mlops)\b|\bai\s+research\b|\bresearch\s+scien/i,
+    why: "Data / ML / AI research is a different budget and a different codebase from application engineering.",
+  },
+];
+
+/** Deterministic exclusion by title. Returns the verdict when the contact is
+ *  hard-excluded, otherwise undefined. Never consults a model.
+ *
+ *  TITLE ONLY, deliberately. A headline usually carries the employer ("VP
+ *  Engineering at Juniper Networks"), and /\bnetwork\b/ against that would
+ *  screen out every contact at Juniper, F5, Arista and Palo Alto — companies
+ *  that sit in the Signal 2000. The job is in the title; the company is not our
+ *  business here. */
+export function hardExclude(titles?: string): ICPVerdict | undefined {
+  const t = (titles || "").trim();
+  if (!t) return undefined;
+  for (const rule of HARD_EXCLUSIONS) {
+    if (rule.re.test(t)) {
+      return {
+        classification: "PASS",
+        confidence: "high",
+        ownsDevTooling: false,
+        reason: rule.why,
+        recommendedAction: "skip",
+        reasonCode: rule.code,
+        hardFiltered: true,
+      };
+    }
+  }
+  return undefined;
 }
 
 export interface ICPProfileInput {
@@ -69,13 +202,18 @@ For each contact, output a tier and a rationale.
 
 Tiers
 
-ANCHOR — Owns developer tooling, platform, or engineering infrastructure decisions for a large engineering population. Their scope statement must contain concrete evidence of this: platform engineering, developer productivity, developer experience, engineering technology, SRE, DevOps, build and release, internal tooling, or direct ownership of a large application engineering org. Title alone never qualifies someone as ANCHOR.
+ANCHOR — Owns developer tooling, platform, or engineering infrastructure decisions for a large engineering population. Their scope statement must contain concrete evidence of this: platform engineering, developer productivity, developer experience, engineering productivity, application engineering, internal developer tooling, or direct ownership of a large software engineering org. Title alone never qualifies someone as ANCHOR.
+
+NOTE: SRE, DevOps and build/release used to count as ANCHOR evidence here. They no longer do, and contacts with those titles never reach you — they are filtered out before scoring. Their tooling budget is CI/CD, observability and deployment pipelines, which is a different purchase.
 
 TARGET — Senior engineering leadership adjacent to the tooling decision. Influences it, uses it, or can bring the anchor into the room, but does not set the toolchain themselves.
 
 ROUTER — Senior enough to redirect you internally but does not own the budget or the decision. Generic CIOs, business-unit CIOs, product executives, and corporate IT leaders belong here. They are worth one message asking who owns developer tooling, not a pitch.
 
 PASS — No plausible connection to how code gets written or what it costs to run agents against it. Hardware-primary engineering, business or GM titles wearing technical labels, individual contributors with no scope.
+
+WHAT SHOULD SURVIVE AS ANCHOR OR TARGET
+VP or Director of Software Engineering, Platform Engineering, Developer Experience, Developer Productivity, Engineering Productivity, Application Engineering, or a general Engineering leader with a NAMED PRODUCT SURFACE. "VP Engineering, Checkout" is real. "VP Engineering" with no stated surface and no stated scope is UNSCORED, not TARGET.
 
 Rules
 
@@ -91,12 +229,24 @@ Output per contact
 
 Tier, then two sentences maximum: what this person actually owns, and why that does or does not put them near the purchase.
 
+REASON CODE — every verdict carries one, from this fixed vocabulary and no other:
+  OWNS_DEV_PLATFORM         they own developer tooling / platform / dev productivity (ANCHOR)
+  ENG_LEADER_NAMED_SURFACE  engineering leader with a named product surface (ANCHOR or TARGET)
+  ENG_LEADER_ADJACENT       senior engineering leadership near the decision (TARGET)
+  CAN_REDIRECT              senior enough to route you, does not own it (ROUTER)
+  CIO_CISO_ORG              corporate IT / CIO org (ROUTER or PASS)
+  ENTERPRISE_ARCHITECTURE   standards and advisory, no budget (PASS)
+  PRODUCT_MANAGEMENT        process and roadmap, not repos (PASS)
+  NOT_ENGINEERING           business, GM, or a technical label over a non-technical job (PASS)
+  UNKNOWN                   not enough information to tier (UNSCORED)
+
 OUTPUT FORMAT
 You will be given a numbered list of contacts. Respond with ONLY a JSON array, no markdown fences, one object per contact IN THE SAME ORDER:
 [
   {
     "n": 1,
     "tier": "ANCHOR" | "TARGET" | "ROUTER" | "PASS" | "UNSCORED",
+    "reason_code": "<one code from the vocabulary above>",
     "confidence": "high" | "medium" | "low",
     "owns_dev_tooling": true | false,
     "rationale": "<two sentences maximum>",
@@ -110,31 +260,51 @@ const CLASSES: ICPClass[] = ["ANCHOR", "TARGET", "ROUTER", "PASS", "UNSCORED"];
 interface RawVerdict {
   n?: unknown;
   tier?: unknown;
+  reason_code?: unknown;
   confidence?: unknown;
   owns_dev_tooling?: unknown;
   rationale?: unknown;
   next_step?: unknown;
 }
 
+/** Codes the SCORER may return. The exclusion-only codes are reserved for the
+ *  deterministic filter, so a model can't quietly relabel a hard exclusion. */
+const SCORER_CODES: ICPReasonCode[] = [
+  "OWNS_DEV_PLATFORM",
+  "ENG_LEADER_NAMED_SURFACE",
+  "ENG_LEADER_ADJACENT",
+  "CAN_REDIRECT",
+  "CIO_CISO_ORG",
+  "ENTERPRISE_ARCHITECTURE",
+  "PRODUCT_MANAGEMENT",
+  "NOT_ENGINEERING",
+  "UNKNOWN",
+];
+
+/** Fall back to a code implied by the tier when the model omits or invents one,
+ *  so the vocabulary is never empty on a card. */
+function codeForTier(tier: ICPClass): ICPReasonCode {
+  if (tier === "ANCHOR") return "OWNS_DEV_PLATFORM";
+  if (tier === "TARGET") return "ENG_LEADER_ADJACENT";
+  if (tier === "ROUTER") return "CAN_REDIRECT";
+  if (tier === "PASS") return "NOT_ENGINEERING";
+  return "UNKNOWN";
+}
+
 function toVerdict(raw: RawVerdict | undefined): ICPVerdict {
   const tier = String(raw?.tier ?? "").toUpperCase() as ICPClass;
   const conf = String(raw?.confidence ?? "").toLowerCase() as ICPConfidence;
   if (!CLASSES.includes(tier)) {
-    return {
-      classification: "UNSCORED",
-      confidence: "low",
-      ownsDevTooling: false,
-      reason: "Scorer returned no usable tier for this contact",
-      recommendedAction: "retry",
-      failed: true,
-    };
+    return failedVerdict("Scorer returned no usable tier for this contact");
   }
+  const rawCode = String(raw?.reason_code ?? "").toUpperCase() as ICPReasonCode;
   return {
     classification: tier,
     confidence: ["high", "medium", "low"].includes(conf) ? conf : "low",
     ownsDevTooling: raw?.owns_dev_tooling === true,
     reason: String(raw?.rationale ?? "").slice(0, 300),
     recommendedAction: String(raw?.next_step ?? "").slice(0, 120),
+    reasonCode: SCORER_CODES.includes(rawCode) ? rawCode : codeForTier(tier),
   };
 }
 
@@ -145,6 +315,7 @@ function failedVerdict(why: string): ICPVerdict {
     ownsDevTooling: false,
     reason: why,
     recommendedAction: "retry",
+    reasonCode: "UNKNOWN",
     failed: true,
   };
 }
@@ -218,9 +389,30 @@ export async function classifyProfiles<T>(
 ): Promise<ICPVerdict[]> {
   if (items.length === 0) return [];
   const inputs = items.map(toInput);
-  const batches: ICPProfileInput[][] = [];
-  for (let i = 0; i < inputs.length; i += batchSize) batches.push(inputs.slice(i, i + batchSize));
+
+  // Hard exclusions first. These are policy, not judgement, so they never reach
+  // the model — which also means an org full of DevOps and Network titles costs
+  // almost nothing to score. Survivors keep their original index so the returned
+  // array still lines up with `items`.
+  const excluded = inputs.map((p) => hardExclude(p.titles));
+  const survivors: { i: number; p: ICPProfileInput }[] = [];
+  inputs.forEach((p, i) => {
+    if (!excluded[i]) survivors.push({ i, p });
+  });
+
+  const out: ICPVerdict[] = excluded.map(
+    (v) => v ?? failedVerdict("Not scored"), // placeholder, overwritten below
+  );
+  if (survivors.length === 0) return out;
+
+  const batches: { i: number; p: ICPProfileInput }[][] = [];
+  for (let i = 0; i < survivors.length; i += batchSize) batches.push(survivors.slice(i, i + batchSize));
   // A handful of batches at once is fine; thirty single calls was not.
-  const results = await Promise.all(batches.map((b) => scoreBatch(b)));
-  return results.flat();
+  const results = await Promise.all(batches.map((b) => scoreBatch(b.map((s) => s.p))));
+  batches.forEach((batch, bi) => {
+    batch.forEach((s, si) => {
+      out[s.i] = results[bi][si] ?? failedVerdict("Scorer returned nothing for this contact");
+    });
+  });
+  return out;
 }

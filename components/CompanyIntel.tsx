@@ -26,7 +26,7 @@ import {
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { emailStatusLabel, isSendableEmail, unsendableReason } from "@/lib/enrich/emailTrust";
-import { TIER_RANK } from "@/lib/icpClassifier";
+import { REASON_LABEL, TIER_RANK } from "@/lib/icpClassifier";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
@@ -573,6 +573,13 @@ function ApolloPersonCard({
       )}
       {person.icp && (
         <p className="mt-1 text-[11px] leading-snug text-ink-500">
+          {/* The fixed-vocabulary code first, then the prose. The code is what
+              makes the tier comparable across contacts; the prose is why. */}
+          {person.icp.reasonCode && (
+            <span className="mr-1.5 font-mono uppercase tracking-wide text-ink-600">
+              {REASON_LABEL[person.icp.reasonCode]} ·
+            </span>
+          )}
           {person.icp.reason}
           {person.icp.confidence === "low" && (
             <span className="ml-1 text-amber-400/80">(low confidence)</span>
@@ -949,10 +956,13 @@ function ApolloStakeholders({
   const ordered = [...decisionMakers].sort((a, b) => rank(a) - rank(b));
   const dmShown = ordered.slice(0, perColumn * 2);
 
-  // BADGE. A tier label that never varies is decoration, not information, so
-  // only show it when the visible set actually contains more than one tier.
-  const badgeDiscriminates =
-    new Set(dmShown.map((p) => p.icp?.classification).filter(Boolean)).size > 1;
+  // BADGE. This used to hide itself when every visible card shared a tier, on
+  // the theory that a constant label is decoration. That reasoning was
+  // backwards: the label is only decoration when you can't see what the other
+  // tiers would have been. The screened-out list below now shows PASS and its
+  // reason, so ANCHOR/TARGET/ROUTER mean something by contrast, and the badge
+  // always renders.
+  const badgeDiscriminates = true;
 
   const poolHasMore = decisionMakers.length > perColumn * 2;
   const canPullMore = poolHasMore || hasMore;
@@ -1058,6 +1068,38 @@ function ApolloStakeholders({
           {routersVisible(dmShown) === 1 ? "" : "s"}, ask who owns developer tooling rather than
           pitching.
         </p>
+      )}
+
+      {/* SCREENED OUT. Without this the tier badge was decoration: every card on
+          screen said ANCHOR or TARGET, so neither meant anything. Showing what
+          was dropped and under which rule is what gives the surviving tiers
+          their contrast, and it makes the hard exclusions auditable — if a real
+          buyer is being caught by a title rule, this is where you see it. */}
+      {rejected.length > 0 && (
+        <details className="rounded-lg border border-ink-800 bg-ink-950/40">
+          <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] text-ink-500 hover:text-ink-300">
+            screened out — {rejected.length} of {rest.length} surfaced
+          </summary>
+          <ul className="space-y-1.5 border-t border-ink-800 px-3 py-2.5">
+            {rejected.map((p, i) => (
+              <li key={p.apolloId || `pass-${i}`} className="flex flex-wrap items-baseline gap-x-2 text-[11px]">
+                <span className="text-ink-400">{p.name}</span>
+                <span className="min-w-0 truncate text-ink-600">{p.title}</span>
+                <span
+                  title={p.icp?.reason}
+                  className="rounded border border-ink-700 bg-ink-900 px-1 py-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-500"
+                >
+                  {p.icp?.reasonCode ? REASON_LABEL[p.icp.reasonCode] : "pass"}
+                </span>
+                {p.icp?.hardFiltered && (
+                  <span className="font-mono text-[10px] uppercase tracking-wide text-ink-600">
+                    rule
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {canPullMore && (

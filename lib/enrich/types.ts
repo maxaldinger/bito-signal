@@ -47,6 +47,13 @@ export interface EnrichContact {
     ownsDevTooling: boolean;
     reason: string;
     recommendedAction: string;
+    /** Fixed-vocabulary code behind the tier (lib/icpClassifier ICPReasonCode).
+     *  Typed loosely here to keep this module free of a runtime import; the
+     *  UI narrows it through REASON_LABEL. Absent on contacts scored before
+     *  Aug 2026. */
+    reasonCode?: import("../icpClassifier").ICPReasonCode;
+    /** The tier came from the deterministic title filter, not the model. */
+    hardFiltered?: boolean;
     /** The classifier call failed — `classification` is a placeholder, not a
      *  judgement. Consumers must fall back rather than treat it as REJECT. */
     failed?: boolean;

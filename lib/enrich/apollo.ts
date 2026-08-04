@@ -104,20 +104,26 @@ const DM_SENIORITIES = ["c_suite", "vp", "head", "director", "owner", "founder",
 // Engineering", "Director, IT Engineering" and so on. person_departments[] was
 // tested and is silently ignored by mixed_people/api_search — titles are the
 // only server-side lever that actually narrows to engineering.
+// "devops" and "site reliability" were removed Aug 2026. Those titles are a
+// hard exclusion downstream (their tooling budget is CI/CD and observability,
+// not coding agents), so asking Apollo for them was paying to source people the
+// classifier now drops on sight. "architecture" is kept because it surfaces
+// "VP Software Architecture"; the enterprise-architecture variants are excluded
+// downstream by title.
 const ENG_LEADER_TITLES = [
   "engineering",
   "software engineering",
   "platform engineering",
+  "application engineering",
   "technology",
   "developer experience",
   "developer productivity",
+  "engineering productivity",
   "infrastructure",
   "cloud engineering",
   "chief technology officer",
   "chief information officer",
   "architecture",
-  "devops",
-  "site reliability",
 ];
 // Two groups on purpose. Acronyms need BOTH boundaries or "ai" matches
 // "Aircraft"; word STEMS need only a leading one. The previous single-group
