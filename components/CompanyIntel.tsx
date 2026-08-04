@@ -26,7 +26,7 @@ import {
 import type { CompanyIntel as Intel } from "@/lib/types";
 import type { EnrichContact } from "@/lib/enrich/types";
 import { emailStatusLabel, isSendableEmail, unsendableReason } from "@/lib/enrich/emailTrust";
-import { REASON_LABEL, TIER_RANK } from "@/lib/icpClassifier";
+import { REASON_LABEL, TIER_RANK, type ICPClass } from "@/lib/icpClassifier";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
@@ -220,6 +220,7 @@ function ApolloPersonCard({
   hideWithoutEmail = true,
   showIcpBadge = true,
   unconfirmed = false,
+  screened = false,
 }: {
   person: EnrichContact;
   company: string;
@@ -241,6 +242,12 @@ function ApolloPersonCard({
    *  generated motion). Blocks the HubSpot push: creating a CRM record for an
    *  unverified name would write a possibly-fictional person into the CRM. */
   unconfirmed?: boolean;
+  /** Tiered PASS. The card still renders, with its tier and the rule that
+   *  screened it, because a list that silently shrinks explains nothing. What
+   *  it does NOT do is spend: no email reveal (an Apollo credit), no HubSpot
+   *  search, no connect-note generation. Cost was the only real argument for
+   *  hiding these, and this removes it. */
+  screened?: boolean;
 }) {
   // One in-flight reveal kind at a time, per card.
   const [loading, setLoading] = useState<RevealKind | null>(null);
@@ -335,7 +342,7 @@ function ApolloPersonCard({
   // the reveal so a page of cards doesn't burst. Failure is silent — the
   // company-level note is a fine fallback.
   useEffect(() => {
-    if (!ctx.callHook || !ctx.linkedin) return;
+    if (!ctx.callHook || !ctx.linkedin || screened) return; // no copy for a PASS
     let cancelled = false;
     const t = setTimeout(() => {
       setConnectLoading(true);
@@ -379,7 +386,7 @@ function ApolloPersonCard({
   // CRM. Cached per Apollo id (reopening reuses it) and staggered for rate limits.
   useEffect(() => {
     const id = person.apolloId;
-    if (!id) return;
+    if (!id || screened) return; // screened cards never spend a reveal credit
     let cancelled = false;
     const cached = getReveal(id);
     if (cached?.name) setRevealedName(cached.name);
@@ -515,14 +522,23 @@ function ApolloPersonCard({
   return (
     <div
       className={`overflow-hidden rounded-lg border bg-ink-950/50 ${
-        emailState === "none"
-          ? "border-red-500/60 ring-1 ring-red-500/25"
-          : contactProspected
-            ? "border-orange-500/50 ring-1 ring-orange-500/30"
-            : "border-ink-700"
+        screened
+          ? "border-ink-800 opacity-60"
+          : emailState === "none"
+            ? "border-red-500/60 ring-1 ring-red-500/25"
+            : contactProspected
+              ? "border-orange-500/50 ring-1 ring-orange-500/30"
+              : "border-ink-700"
       }`}
     >
-      {emailState === "none" && (
+      {screened && (
+        <div className="border-b border-ink-800 bg-ink-900/60 px-4 py-1.5 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-ink-500">
+          screened out
+          {person.icp?.reasonCode ? ` · ${REASON_LABEL[person.icp.reasonCode]}` : ""}
+          {person.icp?.hardFiltered ? " · rule" : ""}
+        </div>
+      )}
+      {!screened && emailState === "none" && (
         <div className="border-b border-red-500/40 bg-red-500/15 px-4 py-1.5 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-red-300">
           no email found · linkedin only · do not add to a sequence
         </div>
@@ -697,7 +713,9 @@ function ApolloPersonCard({
           companyDomain={domain}
           companyKey={accountKey}
           compact
-          autoCheck
+          // A screened contact still has working buttons if you disagree with
+          // the call, but nothing fires on its own.
+          autoCheck={!screened}
           autoCheckDelayMs={autoCheckDelayMs}
           defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}`}
           defaultBody={
@@ -908,11 +926,21 @@ function ApolloStakeholders({
 
   // Drop the pinned person from the list so they're not shown twice.
   const rest = pinnedContact ? people.filter((p) => !isPinned(p)) : people;
-  // Queue gate. The scorer decides: ANCHOR (owns the tooling decision), TARGET
-  // (adjacent to it), ROUTER (can redirect you internally — worth one message
-  // asking who owns dev tooling) and UNSCORED all reach the queue. Only PASS is
-  // screened out, because "we could not tell" must never behave like a
-  // rejection.
+  //
+  // NOTHING IS FILTERED OUT OF THIS LIST. Every surfaced contact renders, with
+  // its tier on it.
+  //
+  // PASS used to be dropped from the grid, then (briefly) moved into a collapsed
+  // "screened out" disclosure. Both are the same mistake wearing different
+  // clothes: a list that silently shrinks tells you nothing about WHY, and a
+  // tier badge means nothing when the only tiers on screen are the good ones.
+  // ANCHOR is informative because PASS is sitting three cards below it saying
+  // "devops / sre".
+  //
+  // The reason PASS was dropped in the first place was cost — every rendered
+  // card auto-reveals an email, which is an Apollo credit. That is solved by
+  // not auto-spending on a screened card (see `screened` below) rather than by
+  // hiding it.
   //
   // A FAILED verdict is not a verdict at all. Treat it as "no verdict" so the
   // seniority heuristic decides, exactly as for briefs cached before the
@@ -920,18 +948,23 @@ function ApolloStakeholders({
   // 36 of 36" and rendered an empty section — an outage indistinguishable from
   // a deliberate screening.
   const graded = (p: EnrichContact) => (p.icp && !p.icp.failed ? p.icp : undefined);
-  const decisionMakers = rest.filter((p) => {
+  /** The tier this contact actually displays under, heuristic included. */
+  const tierOf = (p: EnrichContact): ICPClass => {
     const v = graded(p);
-    return v ? v.classification !== "PASS" : isDecisionMaker(p);
-  });
+    if (v) return v.classification;
+    return isDecisionMaker(p) ? "UNSCORED" : "PASS";
+  };
+  /** Screened out: shown and labelled, but never auto-spent on. */
+  const screened = (p: EnrichContact) => tierOf(p) === "PASS";
+  const decisionMakers = rest.filter((p) => !screened(p));
   // Counted from the VISIBLE slice, not the whole pool. It used to count every
   // ROUTER the scorer passed, including ones whose cards had deleted
   // themselves, so the line could read "11 of these are ROUTERs" above an empty
   // grid. Nothing is hidden now, but the count should still describe what is
   // actually on screen rather than what was scored.
   const routersVisible = (shown: EnrichContact[]) =>
-    shown.filter((p) => graded(p)?.classification === "ROUTER").length;
-  const rejected = rest.filter((p) => graded(p)?.classification === "PASS");
+    shown.filter((p) => tierOf(p) === "ROUTER").length;
+  const rejected = rest.filter(screened);
   /** Profiles the classifier could not judge at all — surfaced separately so a
    *  classifier outage never masquerades as a screening decision. */
   const unclassified = rest.filter((p) => p.icp?.failed).length;
@@ -946,25 +979,27 @@ function ApolloStakeholders({
   // the unreachable rather than merely demote them.
   const rank = (p: EnrichContact) => {
     // Tier dominates: ANCHOR owns the decision, TARGET is adjacent, ROUTER only
-    // redirects, UNSCORED is unknown. Reachability breaks ties within a tier.
-    let s = (TIER_RANK[p.icp?.classification ?? "UNSCORED"] ?? 3) * 100;
+    // redirects, UNSCORED is unknown, PASS sinks to the bottom. Reachability
+    // breaks ties within a tier.
+    let s = (TIER_RANK[tierOf(p)] ?? 3) * 100;
     if (p.apolloId) s -= 10; // no id means no email can ever be revealed
     if (p.linkedinUrl) s -= 5; // a resolved profile beats a name search
     if (p.icp?.confidence === "high") s -= 2;
     return s;
   };
-  const ordered = [...decisionMakers].sort((a, b) => rank(a) - rank(b));
+  // Everyone, PASS included, ranked so the buyers sit at the top and the
+  // screened-out sink to the bottom where they read as an audit trail.
+  const ordered = [...rest].sort((a, b) => rank(a) - rank(b));
   const dmShown = ordered.slice(0, perColumn * 2);
 
   // BADGE. This used to hide itself when every visible card shared a tier, on
   // the theory that a constant label is decoration. That reasoning was
-  // backwards: the label is only decoration when you can't see what the other
-  // tiers would have been. The screened-out list below now shows PASS and its
-  // reason, so ANCHOR/TARGET/ROUTER mean something by contrast, and the badge
-  // always renders.
+  // backwards: the label is only decoration when you cannot see what the other
+  // tiers would have been. PASS renders in the same grid now, so
+  // ANCHOR/TARGET/ROUTER mean something by contrast, and the badge always shows.
   const badgeDiscriminates = true;
 
-  const poolHasMore = decisionMakers.length > perColumn * 2;
+  const poolHasMore = rest.length > perColumn * 2;
   const canPullMore = poolHasMore || hasMore;
 
   const pullMore = async () => {
@@ -1027,34 +1062,35 @@ function ApolloStakeholders({
         <p className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
           signs / gates the deal
         </p>
+        {(decisionMakers.length === 0 || unclassified > 0) && (
+          <p className="mb-3 text-xs text-ink-500">
+            {decisionMakers.length === 0 &&
+              `No engineering leaders surfaced. All ${rest.length} profile${rest.length === 1 ? "" : "s"} below were screened out; each card says under which rule.`}
+            {unclassified > 0 && (
+              <span className="text-amber-400/90">
+                {" "}
+                {unclassified} profile{unclassified === 1 ? "" : "s"} could not be scored (the
+                scorer errored, not a screening decision) — reload to retry.
+              </span>
+            )}
+          </p>
+        )}
         <div className="grid gap-3 lg:grid-cols-2">
-          {dmShown.length === 0 ? (
-            <p className="text-xs text-ink-500">
-              No engineering leaders surfaced.
-              {rejected.length > 0 &&
-                ` Scored ${rejected.length} of ${rest.length} surfaced profiles as PASS (no connection to how code gets written).`}
-              {unclassified > 0 && (
-                <span className="text-amber-400/90">
-                  {" "}
-                  {unclassified} profile{unclassified === 1 ? "" : "s"} could not be scored (the
-                  scorer errored, not a screening decision) — reload to retry.
-                </span>
-              )}
-            </p>
-          ) : (
-            dmShown.map((p, i) => (
-              <ApolloPersonCard
-                key={p.apolloId || `dm-${i}`}
-                person={p}
-                company={company}
-                accountKey={accountKey}
-                domain={domain}
-                ctx={ctx}
-                autoCheckDelayMs={i * 300}
-                showIcpBadge={badgeDiscriminates}
-              />
-            ))
-          )}
+          {dmShown.map((p, i) => (
+            <ApolloPersonCard
+              key={p.apolloId || `dm-${i}`}
+              person={p}
+              company={company}
+              accountKey={accountKey}
+              domain={domain}
+              ctx={ctx}
+              // Stagger only the cards that actually call out. A screened card
+              // makes no HubSpot check, so it needs no slot in the queue.
+              autoCheckDelayMs={i * 300}
+              showIcpBadge={badgeDiscriminates}
+              screened={screened(p)}
+            />
+          ))}
         </div>
       </div>
 
@@ -1068,38 +1104,6 @@ function ApolloStakeholders({
           {routersVisible(dmShown) === 1 ? "" : "s"}, ask who owns developer tooling rather than
           pitching.
         </p>
-      )}
-
-      {/* SCREENED OUT. Without this the tier badge was decoration: every card on
-          screen said ANCHOR or TARGET, so neither meant anything. Showing what
-          was dropped and under which rule is what gives the surviving tiers
-          their contrast, and it makes the hard exclusions auditable — if a real
-          buyer is being caught by a title rule, this is where you see it. */}
-      {rejected.length > 0 && (
-        <details className="rounded-lg border border-ink-800 bg-ink-950/40">
-          <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] text-ink-500 hover:text-ink-300">
-            screened out — {rejected.length} of {rest.length} surfaced
-          </summary>
-          <ul className="space-y-1.5 border-t border-ink-800 px-3 py-2.5">
-            {rejected.map((p, i) => (
-              <li key={p.apolloId || `pass-${i}`} className="flex flex-wrap items-baseline gap-x-2 text-[11px]">
-                <span className="text-ink-400">{p.name}</span>
-                <span className="min-w-0 truncate text-ink-600">{p.title}</span>
-                <span
-                  title={p.icp?.reason}
-                  className="rounded border border-ink-700 bg-ink-900 px-1 py-0.5 font-mono text-[10px] uppercase tracking-wide text-ink-500"
-                >
-                  {p.icp?.reasonCode ? REASON_LABEL[p.icp.reasonCode] : "pass"}
-                </span>
-                {p.icp?.hardFiltered && (
-                  <span className="font-mono text-[10px] uppercase tracking-wide text-ink-600">
-                    rule
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
       )}
 
       {canPullMore && (
