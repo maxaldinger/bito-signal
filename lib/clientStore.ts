@@ -94,6 +94,44 @@ async function pullState() {
   }
 }
 
+/** Propagate prospected marks across every name an account is known by.
+ *
+ *  MUST run in the client, not as a server-side data fix. Each store is pushed
+ *  to Supabase as ONE whole object, last writer wins, so anything written
+ *  straight into the table is erased by the next push from any open tab —
+ *  which is a debounced 700ms after the next mark, i.e. almost immediately.
+ *  Two server-side backfills were silently reverted that way before this was
+ *  understood. Applied through the store, the repair pushes like any other
+ *  change and sticks.
+ *
+ *  Idempotent: markProspected() is a no-op on a name that already has a mark,
+ *  and the whole pass writes nothing when there is nothing to add. */
+async function repairProspectedAliases() {
+  try {
+    const res = await fetch("/api/company-aliases");
+    if (!res.ok) return;
+    const data = (await res.json()) as { groups?: string[][] };
+    const groups = data?.groups ?? [];
+    if (groups.length === 0) return;
+    const map = prospected.get().companies;
+    for (const group of groups) {
+      // Earliest existing mark in the group wins, so the badge keeps saying
+      // when the account was ACTUALLY first prospected.
+      let earliest = 0;
+      for (const name of group) {
+        const k = matchingKey(map, "company", name);
+        const ts = k ? map[k] : undefined;
+        if (ts && (earliest === 0 || ts < earliest)) earliest = ts;
+      }
+      const anyMarked = group.some((n) => matchingKey(prospected.get().companies, "company", n));
+      if (!anyMarked) continue;
+      for (const name of group) markProspected("company", name, earliest);
+    }
+  } catch {
+    /* offline, or the alias source is unavailable — marks still work as before */
+  }
+}
+
 let synced = false;
 /** Start cross-device sync: union-merge with the server once (so nothing is
  * lost on first run), push the merged result up, then re-pull on tab focus.
@@ -118,6 +156,9 @@ export function initStateSync() {
     } catch {
       /* offline — stay local-only */
     }
+    // AFTER the merge, so it sees the server's marks and not just this
+    // browser's. Runs on every load and is cheap when there is nothing to do.
+    await repairProspectedAliases();
   })();
   const onFocus = () => {
     if (!document.hidden) void pullState();
@@ -224,14 +265,14 @@ function matchingKey(map: DateMap, kind: "company" | "contact", key: string): st
   return Object.keys(map).find((v) => normFor(kind, v) === target);
 }
 
-export function markProspected(kind: "company" | "contact", key: string): void {
+export function markProspected(kind: "company" | "contact", key: string, at?: number): void {
   if (!key) return;
   const cur = prospected.get();
   const field = kind === "company" ? "companies" : "contacts";
   // Already prospected → keep the original date, don't overwrite it.
   if (matchingKey(cur[field], kind, key)) return;
   const k = normFor(kind, key);
-  prospected.set({ ...cur, [field]: { ...cur[field], [k]: Date.now() } });
+  prospected.set({ ...cur, [field]: { ...cur[field], [k]: at && at > 0 ? at : Date.now() } });
 }
 
 export function unmarkProspected(kind: "company" | "contact", key: string): void {

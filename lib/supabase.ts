@@ -585,3 +585,102 @@ export async function fetchSignalPage(
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Company alias groups — every set of names that refer to ONE company.
+//
+// The client stores (prospected marks, deep-dive scores, HubSpot presence) are
+// keyed by company NAME, and one account legitimately carries several:
+//   - the Signal 2000 row the rep opened ("Tesla Motors")
+//   - what the live research resolved it to ("Tesla, Inc.")
+//   - a second directory row for the same business ("Tesla Inc.")
+// A mark written under one of those leaves the others grey. Rather than guess
+// at name similarity, this derives the groups from evidence already stored:
+// a brief PROVES its row name and its resolved name are the same company, and
+// two directory rows sharing a domain are the same company.
+// ---------------------------------------------------------------------------
+
+export interface AliasGroupsResult {
+  ok: boolean;
+  configured: boolean;
+  error?: string;
+  /** Each group is 2+ distinct names for one company. Singletons are dropped. */
+  groups: string[][];
+}
+
+export async function fetchCompanyAliasGroups(): Promise<AliasGroupsResult> {
+  const cfg = config();
+  if (!cfg) return { ok: false, configured: false, groups: [] };
+
+  const get = async (path: string): Promise<unknown[]> => {
+    const res = await fetch(`${cfg.url}/rest/v1/${path}`, {
+      headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`Supabase ${res.status} on ${path}`);
+    return (await res.json()) as unknown[];
+  };
+
+  try {
+    const [briefs, directory] = await Promise.all([
+      get("bito_briefs?select=company,intel&limit=5000"),
+      get("bito_directory?select=company,domain&limit=5000"),
+    ]);
+
+    // Union-find over raw names, so links chain: a directory row linked to a
+    // brief name linked to another directory row all land in one group.
+    const parent = new Map<string, string>();
+    const find = (x: string): string => {
+      let r = x;
+      while (parent.get(r) && parent.get(r) !== r) r = parent.get(r) as string;
+      parent.set(x, r);
+      return r;
+    };
+    const union = (a?: string, b?: string) => {
+      if (!a || !b || a === b) return;
+      if (!parent.has(a)) parent.set(a, a);
+      if (!parent.has(b)) parent.set(b, b);
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent.set(rb, ra);
+    };
+
+    for (const row of briefs as { company?: string; intel?: { name?: string } }[]) {
+      union(row?.company?.trim(), row?.intel?.name?.trim());
+    }
+    // Directory rows sharing a domain. Never group on an EMPTY domain — that
+    // would merge every domain-less row into one enormous bogus company.
+    const byDomain = new Map<string, string[]>();
+    for (const row of directory as { company?: string; domain?: string }[]) {
+      const d = row?.domain?.trim().toLowerCase();
+      const c = row?.company?.trim();
+      if (!d || !c) continue;
+      const list = byDomain.get(d) ?? [];
+      list.push(c);
+      byDomain.set(d, list);
+    }
+    for (const names of byDomain.values()) {
+      for (let i = 1; i < names.length; i++) union(names[0], names[i]);
+    }
+
+    const grouped = new Map<string, Set<string>>();
+    for (const name of parent.keys()) {
+      const root = find(name);
+      const set = grouped.get(root) ?? new Set<string>();
+      set.add(name);
+      grouped.set(root, set);
+    }
+    const groups = Array.from(grouped.values())
+      .map((s) => Array.from(s))
+      .filter((g) => g.length > 1);
+
+    return { ok: true, configured: true, groups };
+  } catch (e) {
+    return {
+      ok: false,
+      configured: true,
+      error: e instanceof Error ? e.message : "Alias lookup failed",
+      groups: [],
+    };
+  }
+}
