@@ -130,9 +130,22 @@ function LoginForm() {
           }}
           className="mt-4 w-full text-center font-mono text-[11px] text-ink-500 transition-colors hover:text-ink-300"
         >
-          {mode === "signin"
-            ? "first time? create your account (bito.ai email)"
-            : "already have an account? sign in"}
+          {mode === "signin" ? (
+            <>
+              first time?{" "}
+              <span className="text-sky-500 underline underline-offset-2 hover:text-sky-400">
+                create your account
+              </span>{" "}
+              (bito.ai email)
+            </>
+          ) : (
+            <>
+              already have an account?{" "}
+              <span className="text-sky-500 underline underline-offset-2 hover:text-sky-400">
+                sign in
+              </span>
+            </>
+          )}
         </button>
       </form>
     </div>
