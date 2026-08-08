@@ -132,6 +132,32 @@ async function repairProspectedAliases() {
   }
 }
 
+// Shared-browser guard: if a DIFFERENT user signs in on this browser, every
+// local bito-* store is the previous user's data and must be dropped before
+// the first sync — otherwise the union-merge would push one rep's marks into
+// another rep's server rows. The uid is remembered un-versioned on purpose.
+const UID_KEY = "bito-uid";
+async function guardLocalOwner(): Promise<void> {
+  try {
+    const res = await fetch("/api/auth/status", { cache: "no-store" });
+    const d = (await res.json()) as { signedIn?: boolean; email?: string };
+    if (!d.signedIn) return; // middleware will redirect; nothing to guard
+    const uid = d.email ?? "";
+    const prev = localStorage.getItem(UID_KEY);
+    if (prev && prev !== uid) {
+      const doomed: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("bito-") && k.endsWith(KEY_VERSION)) doomed.push(k);
+      }
+      for (const k of doomed) localStorage.removeItem(k);
+    }
+    localStorage.setItem(UID_KEY, uid);
+  } catch {
+    /* offline — local-only until the next load */
+  }
+}
+
 let synced = false;
 /** Start cross-device sync: union-merge with the server once (so nothing is
  * lost on first run), push the merged result up, then re-pull on tab focus.
@@ -140,6 +166,7 @@ export function initStateSync() {
   if (synced || typeof window === "undefined") return;
   synced = true;
   void (async () => {
+    await guardLocalOwner();
     try {
       const res = await fetch("/api/state", { cache: "no-store" });
       const data = res.ok ? ((await res.json()) as { state?: Record<string, unknown> }) : null;
@@ -176,7 +203,10 @@ export function initStateSync() {
 // the registry, so a factory reset sticks without a per-device manual clear.
 // (A plain server wipe would NOT stick: the load-time union-merge would push
 // each device's localStorage right back up.) v2 = 2026-07-16 full reset.
-const KEY_VERSION = ".v2";
+// v3 = 2026-08-08 multi-tenant split: per-user stores moved to
+// bito_user_state under the signed-in user's id (migrated server-side), so
+// local v2 blobs must never union-merge into a per-user store again.
+const KEY_VERSION = ".v3";
 
 function makeStore<T>(baseKey: string, empty: T, coerce?: (raw: unknown) => T) {
   const key = `${baseKey}${KEY_VERSION}`;
