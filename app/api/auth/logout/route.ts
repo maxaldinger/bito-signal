@@ -1,16 +1,9 @@
-// POST /api/auth/logout — clear the session cookie.
-
 import { NextResponse } from "next/server";
-import { AUTH_COOKIE } from "@/lib/auth";
+import { routeClient } from "@/lib/supabaseAuth";
 
+// POST /api/auth/logout — end the Supabase session (clears its cookies).
 export async function POST() {
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set(AUTH_COOKIE, "", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 0,
-  });
-  return res;
+  const sb = await routeClient();
+  await sb.auth.signOut();
+  return NextResponse.json({ ok: true });
 }

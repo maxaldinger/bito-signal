@@ -84,14 +84,18 @@ function FilterHeading({
 // reset (re-earned on every real push) is the only sure fix. Two-click confirm.
 function LogoutButton() {
   const [busy, setBusy] = useState(false);
-  const [enabled, setEnabled] = useState(false);
+  const [who, setWho] = useState<string | null>(null);
   useEffect(() => {
     fetch("/api/auth/status")
       .then((r) => r.json())
-      .then((d: { enabled?: boolean }) => setEnabled(Boolean(d.enabled)))
+      .then((d: { signedIn?: boolean; displayName?: string; email?: string }) => {
+        if (d.signedIn) setWho(d.displayName || d.email || "signed in");
+      })
       .catch(() => {});
   }, []);
-  if (!enabled) return null; // gate off — nothing to sign out of
+  // Auth is always on now (Supabase sessions) — inside the app there is always
+  // a session to sign out of. `who` doubles as the loading gate.
+  if (!who) return null;
   return (
     <button
       onClick={async () => {
@@ -104,9 +108,11 @@ function LogoutButton() {
         }
         window.location.assign("/login");
       }}
-      className="inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-500 transition-colors hover:text-ink-300"
+      title={`Signed in as ${who}`}
+      className="inline-flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-ink-500 transition-colors hover:text-ink-300"
     >
-      <LogOut className="h-3.5 w-3.5" /> {busy ? "signing out…" : "sign out"}
+      <LogOut className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{busy ? "signing out…" : `${who} · sign out`}</span>
     </button>
   );
 }

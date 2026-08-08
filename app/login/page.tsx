@@ -1,14 +1,20 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, Lock } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Loader2, Lock, UserPlus } from "lucide-react";
+
+// Sign in / create account. Accounts are individual now (Supabase Auth), and
+// creation is domain-gated server-side: @bito.ai addresses only, enforced in
+// /api/auth/signup via the service role — the public GoTrue signup endpoint is
+// disabled entirely.
 
 function LoginForm() {
-  const router = useRouter();
   const params = useSearchParams();
-  const [username, setUsername] = useState("");
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -23,24 +29,38 @@ function LoginForm() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch(mode === "signin" ? "/api/auth/login" : "/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify(
+          mode === "signin" ? { email, password } : { email, password, displayName },
+        ),
       });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        signedIn?: boolean;
+        error?: string;
+      };
       if (res.ok && data.ok) {
-        // Full navigation so middleware re-runs with the new cookie.
+        if (mode === "signup" && data.signedIn === false) {
+          setMode("signin");
+          setError("Account created — sign in.");
+          return;
+        }
+        // Full navigation so middleware re-runs with the new cookies.
         window.location.assign(next);
         return;
       }
-      setError(data.error || "Sign-in failed");
+      setError(data.error || (mode === "signin" ? "Sign-in failed" : "Sign-up failed"));
     } catch {
       setError("Network error — try again");
     } finally {
       setBusy(false);
     }
   };
+
+  const input =
+    "w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-600 focus:border-neon-600/50 focus:outline-none";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-ink-950 px-4">
@@ -50,50 +70,69 @@ function LoginForm() {
       >
         <div className="mb-6 flex items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-neon-600/40 bg-neon-500/10 text-neon-400">
-            <Lock className="h-4 w-4" />
+            {mode === "signin" ? <Lock className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
           </span>
           <div>
             <h1 className="text-lg font-bold tracking-tight text-ink-50">Bito Signal</h1>
-            <p className="font-mono text-[11px] text-ink-500">sign in to continue</p>
+            <p className="font-mono text-[11px] text-ink-500">
+              {mode === "signin" ? "sign in to continue" : "create your account"}
+            </p>
           </div>
         </div>
 
-        <label className="mb-1 block font-mono text-[11px] uppercase tracking-wider text-ink-400">
-          Username
-        </label>
-        <input
-          type="text"
-          autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoFocus
-          className="mb-4 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-ink-100 outline-none transition-colors focus:border-neon-600/50"
-        />
+        <div className="space-y-3">
+          <input
+            type="email"
+            required
+            autoComplete="email"
+            placeholder={mode === "signup" ? "you@bito.ai" : "email"}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={input}
+          />
+          <input
+            type="password"
+            required
+            autoComplete={mode === "signin" ? "current-password" : "new-password"}
+            placeholder={mode === "signup" ? "password (10+ characters)" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={input}
+          />
+          {mode === "signup" && (
+            <input
+              type="text"
+              required
+              placeholder="display name (teammates see this)"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className={input}
+            />
+          )}
+        </div>
 
-        <label className="mb-1 block font-mono text-[11px] uppercase tracking-wider text-ink-400">
-          Password
-        </label>
-        <input
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-ink-700 bg-ink-950 px-3 py-2 text-sm text-ink-100 outline-none transition-colors focus:border-neon-600/50"
-        />
-
-        {error && (
-          <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-            {error}
-          </p>
-        )}
+        {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
 
         <button
           type="submit"
-          disabled={busy || !username || !password}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-neon-500 py-2.5 text-sm font-semibold text-ink-950 transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={busy}
+          className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-neon-600/40 bg-neon-500/10 py-2.5 font-mono text-sm font-semibold text-neon-300 transition-colors hover:bg-neon-500/20 disabled:opacity-50"
         >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
-          Sign in
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          {mode === "signin" ? "Sign in" : "Create account"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setMode(mode === "signin" ? "signup" : "signin");
+            setError(null);
+          }}
+          className="mt-4 w-full text-center font-mono text-[11px] text-ink-500 transition-colors hover:text-ink-300"
+        >
+          {mode === "signin"
+            ? "first time? create your account (bito.ai email)"
+            : "already have an account? sign in"}
         </button>
       </form>
     </div>
@@ -102,7 +141,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense>
       <LoginForm />
     </Suspense>
   );

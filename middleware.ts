@@ -1,13 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { AUTH_COOKIE, authConfigured, isValidSession } from "@/lib/auth";
+import { authConfigured, middlewareUser } from "@/lib/supabaseAuth";
 
-// Password gate for the whole app. Runs on every route the matcher below keeps
+// Auth gate for the whole app — WS1: Supabase Auth sessions replace the old
+// single-shared-password HMAC cookie. Runs on every route the matcher keeps
 // (pages AND /api), because the API routes are the expensive surface — Apollo
 // credits, HubSpot writes, Anthropic calls. A UI-only gate would protect none
 // of that.
 //
-// Rollout is safe by construction: authConfigured() is false until the env vars
-// are set, so shipping this changes nothing until you opt in.
+// Identity now matters (per-user state, per-user HubSpot tokens), so the
+// session is validated against GoTrue on each request, not just checked for
+// cookie presence — and the middleware also REFRESHES expiring tokens, which
+// is why every branch below must return `res` (it carries refreshed cookies).
 
 /** The weekly Vercel cron hits this path. When CRON_SECRET is set, Vercel sends
  *  it as a bearer token and we let that through; when it is NOT set, we exempt
@@ -23,7 +26,8 @@ function isCronRequest(req: NextRequest): boolean {
 }
 
 export async function middleware(req: NextRequest) {
-  // Gate disabled until fully configured.
+  // Without Supabase env the app can't serve data anyway — don't add a lock
+  // screen in front of an already-broken deployment.
   if (!authConfigured()) return NextResponse.next();
 
   const { pathname } = req.nextUrl;
@@ -37,9 +41,10 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (await isValidSession(req.cookies.get(AUTH_COOKIE)?.value)) {
-    return NextResponse.next();
-  }
+  const { user, res } = await middlewareUser(req, () =>
+    NextResponse.next({ request: req }),
+  );
+  if (user) return res;
 
   // Unauthenticated: API calls get a clean 401; page loads bounce to /login
   // carrying where they were headed (relative-only, so no open redirect).

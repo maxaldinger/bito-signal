@@ -1,40 +1,28 @@
-// POST /api/auth/login — verify the shared credentials, set the session cookie.
+import { NextRequest, NextResponse } from "next/server";
+import { routeClient } from "@/lib/supabaseAuth";
 
-import { NextResponse, type NextRequest } from "next/server";
-import {
-  AUTH_COOKIE,
-  AUTH_MAX_AGE,
-  authConfigured,
-  checkCredentials,
-  sessionToken,
-} from "@/lib/auth";
+// POST /api/auth/login — Supabase Auth sign-in. Session cookies are set by the
+// ssr client through the route's cookie store.
+export const maxDuration = 15;
 
 export async function POST(req: NextRequest) {
-  if (!authConfigured()) {
-    // Nothing to log into — the gate is off.
-    return NextResponse.json({ ok: true, gate: "disabled" });
-  }
-
-  let body: { username?: string; password?: string };
+  let body: { email?: string; password?: string };
   try {
-    body = (await req.json()) as { username?: string; password?: string };
+    body = await req.json();
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid body" }, { status: 400 });
   }
-
-  const username = (body.username || "").trim();
-  const password = body.password || "";
-  if (!checkCredentials(username, password)) {
-    return NextResponse.json({ ok: false, error: "Incorrect username or password" }, { status: 401 });
+  const email = body.email?.trim().toLowerCase();
+  const password = body.password ?? "";
+  if (!email || !password) {
+    return NextResponse.json({ ok: false, error: "Email and password required" }, { status: 400 });
   }
 
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set(AUTH_COOKIE, await sessionToken(), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: AUTH_MAX_AGE,
-  });
-  return res;
+  const sb = await routeClient();
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error || !data.user) {
+    // One generic message on purpose — never confirm whether the account exists.
+    return NextResponse.json({ ok: false, error: "Wrong email or password" }, { status: 401 });
+  }
+  return NextResponse.json({ ok: true });
 }
