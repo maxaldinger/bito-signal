@@ -10,13 +10,13 @@ Owner: Max Aldinger · Plan date: Aug 4, 2026 · Produced via bito-build-plan (M
 
 **Effort (Traditional)**: 22–29 eng-days (~5–6 weeks solo)
 **Effort (Agentic)**: 9.5–12 eng-days (~2 weeks of sessions)
-**Top Risk**: The auth swap regresses a working app that has no test suite — mitigated by building against a staging Supabase project and keeping the old gate one `vercel rollback` away.
+**Top Risk**: The auth swap regresses a working app that has no test suite — accepted: until the team onboards the only user is Max, every step ships as an ordinary incremental deploy, and rollback is one `vercel rollback` (plus the frozen old project for catastrophe).
 
 **Decisions locked at checkpoints:**
 - Each user has their **own HubSpot portal** → per-user OAuth; "in HubSpot" is a shared, *attributed* fact ("synced by Rohan · Aug 3"), while live presence checks run against your own portal.
 - **Individual username/password per person** (Supabase Auth, signups disabled, users created by Max).
 - Store split confirmed: per-user = prospected (orange), favorites, reviewed, collapsed, low-priority, last-due, own-portal presence. Shared = reveal cache, company blurbs, deep-dive scores, sweep cursor, blacklist ("Not a fit" is not a fit for anyone).
-- **New, separate Supabase project — same gowarm.org account** (settled after Checkpoint 3): production currently lives in "max@gowarm.org's Project" (ref `lfyldhhlpviiqdaosnpb`), which also serves WARM. The separation is PROJECT-level, not account-level: Max keeps owning the infrastructure and bills Bito for it, and copies the project over if he ever leaves. Organizing a Bito-controlled account was judged more overhead than it's worth. The new project is the build environment during development and BECOMES production at cutover; the old project keeps the frozen pre-cutover copy as rollback.
+- **New, separate Supabase project — same gowarm.org account** (settled after Checkpoint 3): production currently lives in "max@gowarm.org's Project" (ref `lfyldhhlpviiqdaosnpb`), which also serves WARM. The separation is PROJECT-level, not account-level: Max keeps owning the infrastructure and bills Bito for it, and copies the project over if he ever leaves. Organizing a Bito-controlled account was judged more overhead than it's worth. The project move happens on DAY ONE (data copied old-shape, env flipped, zero code change), and everything after ships incrementally to production — Max's explicit call: "we can ship in prod, not enough people for it to matter." The old project stays frozen as catastrophic fallback.
 
 ## 2. Context Summary
 
@@ -73,8 +73,9 @@ Browser (each user) ──sb JWT cookies──▶ middleware (@supabase/ssr refr
 
 ### WS0 — New, separate Supabase project (revised at Checkpoint 3)
 **Why**: verified via the Supabase API — the current project (`lfyldhhlpviiqdaosnpb`) is shared with WARM. Bito Signal data moves to its own project so the two products never mix at the data layer. Ownership stays with Max (gowarm.org account); he bills Bito for infrastructure and copies the project if he leaves.
-**What**: Max creates ONE new project in the existing account (suggested name: "bito-signal"). It is the build target for the whole rebuild (so no work ever happens against live data) and becomes production at cutover. `.env.local` points at it from day one. Cleaner than migrate-in-place: the new project starts at the multi-tenant schema directly, with data mapped old→new in a single migration pass, no intermediate state.
-**Note**: keep it on a paid tier at cutover (free tier pauses after ~1 week idle — unacceptable for the team's daily tool; fine during the build).
+**What**: Max creates ONE new project in the existing account (suggested name: "bito-signal"). Day one: copy all tables OLD-shape (a pure infra move — the running code doesn't change), flip Vercel + local env to the new project, verify, freeze the old one. From then on the new project IS production and every workstream ships to it incrementally, with small additive schema steps landing alongside the code that needs them (user_id on bito_state with WS1/WS3; row-per-entry cache tables with WS4; RLS + anon revocation flip on with the WS2 two-client deploy).
+**Rollout philosophy (Max's call)**: ship in prod. Until the team onboards, the only user is Max; there is no separate staging environment and no big-bang cutover day. Each deploy is the same commit-push-verify loop this repo already runs daily.
+**Note**: move the project to a paid tier before the team onboards (free tier pauses after ~1 week idle; fine while it's Max only).
 
 ### WS1 — Auth platform swap
 **Repos**: `bito-signal`
@@ -107,8 +108,11 @@ Browser (each user) ──sb JWT cookies──▶ middleware (@supabase/ssr refr
 **Database changes**: `bito_sync_events` (kind company|contact, key, company_key, contact_key/email, user_id, portal_id, synced_at, task_url) — written server-side on every successful task create; Max's existing prospected marks seed it at cutover with original dates.
 **Key code changes**: cards + collapsed rows show your own orange mark *plus* a shared chip "synced by Rohan · Aug 3" (name via `bito_profiles`); "In HubSpot first" sort = own-portal checks ∪ sync events.
 
-### WS7 — Migration & cutover
-Full cross-project copy, WARM project → Bito project, in one scripted pass (all tables are small: ~170 briefs, 2,000 directory rows, a few thousand signals, 2,696 reveals — minutes over PostgREST with the service keys of both projects): shared tables copied as-is; Max's `bito_state` → his uid; shared stores → the new row-per-entry tables; prospected marks → `bito_sync_events` with original dates. Then: create the 4–5 auth users + profiles, flip Vercel env vars to the Bito project, deploy, verify (RLS probe + manual pass of Max's marks/favorites/reveals), invite the team. The WARM project is left untouched as the frozen rollback copy; after a clean week, export a final snapshot for the record and delete Bito data from the WARM project to complete the separation. Retire `AUTH_USERNAME/PASSWORD/SECRET` and `HUBSPOT_OWNER_ID`. `RUNBOOK.md`: add a user, rotate `TOKEN_ENCRYPTION_KEY`, reconnect HubSpot.
+### WS7 — Day-one project move + incremental data migrations + cleanup
+**Day one (with WS0)**: scripted cross-project copy, old project → new, OLD shapes as-is (all tables are small: ~170 briefs, 2,000 directory rows, a few thousand signals, 2,696 reveals — minutes over PostgREST with both service keys; per-table row counts asserted). Flip env, verify the app works unchanged, freeze the old project.
+**Per-workstream migrations, shipped with the code that needs them**: Max's `bito_state` rows → his uid (lands with WS1/WS3); blob stores → row-per-entry tables (lands with WS4); prospected marks → `bito_sync_events` with original dates (lands with WS6).
+**Team onboarding**: once WS3 + WS5 are live, create the 4–5 auth users + profiles and invite the team — a normal deploy, not an event.
+**Cleanup, after a clean week**: export a final snapshot of the old project's Bito tables for the record, then delete them from the shared WARM project to complete the separation. Retire `AUTH_USERNAME/PASSWORD/SECRET` and `HUBSPOT_OWNER_ID`. `RUNBOOK.md`: add a user, rotate `TOKEN_ENCRYPTION_KEY`, reconnect HubSpot, tier upgrade.
 
 ## 5. Task Breakdown
 
@@ -116,7 +120,7 @@ Full cross-project copy, WARM project → Bito project, in one scripted pass (al
 
 | # | Task | WS | Trad | Agentic | Blocked By | AC |
 |---|---|---|---|---|---|---|
-| 1 | Max creates the new Supabase project; point `.env.local` at it | 0 | 0.5d | 0.5d | none | Bito Signal has its own project; local dev no longer touches the shared WARM project |
+| 1 | Max creates the new project; day-one copy (old shapes) + env flip + freeze old | 0/7 | 1d | 0.5d | none | app runs unchanged on the new project; old project frozen; row counts match |
 | 2 | `supabase/schema.sql`: all tables, RLS policies, anon revocation | 2 | 2d | 1d | 1 | applies cleanly to a fresh project; anon returns zero rows everywhere |
 | 3 | Auth config + create users + `bito_profiles` | 1 | 1d | 0.5d | 2 | signup disabled; 5 users exist; profiles seeded |
 | 4 | `@supabase/ssr` middleware + `/login` swap; retire HMAC gate | 1 | 2d | 1d | 3 | wrong password rejected; session survives refresh; cron bearer passes |
@@ -128,7 +132,7 @@ Full cross-project copy, WARM project → Bito project, in one scripted pass (al
 | 10 | Encrypted token store + refresh-on-demand w/ single-flight | 5 | 2d | 1d | 9 | forced-expired token refreshes transparently; two parallel calls refresh once |
 | 11 | Thread userId through search/task call sites + owner resolution | 5 | 1.5d | 0.5d | 10 | a task created by Rohan lands in Rohan's portal, owned by Rohan |
 | 12 | `bito_sync_events` + attribution chip + sort union | 6 | 2d | 1d | 11 | Amar sees "synced by Rohan · date" on a card Rohan pushed |
-| 13 | Cross-project migration script + env flip + `RUNBOOK.md` + old-project cleanup | 7 | 2.5d | 1d | all | all data present in the new project post-cutover; old project frozen, then Bito tables cleared after verification week |
+| 13 | Team onboarding + old-project snapshot & cleanup + `RUNBOOK.md` | 7 | 1.5d | 1d | 6, 11 | team logged in and connected; old project Bito tables snapshotted then cleared |
 
 **Total (Traditional)**: 22.5–29 eng-days · **Total (Agentic)**: 9.5–12 eng-days
 **Basis**: file-level footprint measured in-repo (12 stores in `clientStore.ts`, ~14 Supabase call sites, 2 HubSpot entry routes); HubSpot token mechanics from vendor docs. Low compression: WS5 token/encryption/race work. High compression: schema, CRUD endpoints, threading.
@@ -136,13 +140,13 @@ Full cross-project copy, WARM project → Bito project, in one scripted pass (al
 ## 6. Sequencing
 
 Critical path: **1 → 2 → 3 → 4 → 5 → 6 → 9 → 10 → 11 → 12 → 13**, with 7–8 parallel after task 5.
-Nothing user-visible changes for Max until cutover day (task 13); the India team onboards immediately after. Agentic timeline ≈ 2 weeks of working sessions.
+Every task ships to production as it completes — the same commit-push-verify loop this repo runs daily. Max live-tests each step as the only user; the India team onboards at task 13, which is a normal deploy rather than a cutover event. Agentic timeline ≈ 2 weeks of working sessions.
 
 ## 7. Cross-Cutting Concerns
 
-- **Data migration**: cross-project copy (WARM → Bito), scripted, verified by row counts + spot checks per table; source left untouched until the verification week ends.
-- **Backward compatibility**: none needed mid-build (the Bito project carries all WIP); cutover is one env flip + one deploy + one script.
-- **Rollback**: flip Vercel env back to the WARM project + `vercel rollback` — the old copy is bit-for-bit what was running.
+- **Data migration**: day-one cross-project copy in old shapes (row-count-asserted), then small per-workstream migrations shipped with the code that needs them.
+- **Backward compatibility**: not needed — single-user production until onboarding, shipping incrementally by explicit decision.
+- **Rollback**: per step, `vercel rollback` (schema steps are additive); catastrophically, flip env back to the frozen old project.
 - **Security**: signups disabled; anon fully revoked; tokens AES-GCM at rest, unreadable by any user JWT; RLS default-deny converts missed filters into empty results, not leaks; `SUPABASE_SERVICE_ROLE_KEY` is a new secret confined to server env.
 - **Observability**: log OAuth refresh failures + disconnects with user id; log sync-event writes; Vercel runtime logs remain the venue.
 - **Performance**: no material change — server-mediated PostgREST as today; reveal-cache lookups replace a client blob with an indexed point read.
