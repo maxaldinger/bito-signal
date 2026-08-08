@@ -16,7 +16,7 @@ Owner: Max Aldinger · Plan date: Aug 4, 2026 · Produced via bito-build-plan (M
 - Each user has their **own HubSpot portal** → per-user OAuth; "in HubSpot" is a shared, *attributed* fact ("synced by Rohan · Aug 3"), while live presence checks run against your own portal.
 - **Individual username/password per person** (Supabase Auth, signups disabled, users created by Max).
 - Store split confirmed: per-user = prospected (orange), favorites, reviewed, collapsed, low-priority, last-due, own-portal presence. Shared = reveal cache, company blurbs, deep-dive scores, sweep cursor, blacklist ("Not a fit" is not a fit for anyone).
-- **New Bito-owned Supabase project** (Checkpoint 3 correction): production currently lives in "max@gowarm.org's Project" (ref `lfyldhhlpviiqdaosnpb`) — a WARM-account project. Per Max's employment agreement the two must not mix, so the rebuild targets a fresh project under a Bito-designated account. It serves as the build environment during development and BECOMES production at cutover; the WARM project keeps the frozen pre-cutover copy as rollback.
+- **New, separate Supabase project — same gowarm.org account** (settled after Checkpoint 3): production currently lives in "max@gowarm.org's Project" (ref `lfyldhhlpviiqdaosnpb`), which also serves WARM. The separation is PROJECT-level, not account-level: Max keeps owning the infrastructure and bills Bito for it, and copies the project over if he ever leaves. Organizing a Bito-controlled account was judged more overhead than it's worth. The new project is the build environment during development and BECOMES production at cutover; the old project keeps the frozen pre-cutover copy as rollback.
 
 ## 2. Context Summary
 
@@ -71,9 +71,9 @@ Browser (each user) ──sb JWT cookies──▶ middleware (@supabase/ssr refr
 
 ## 4. Workstream Detail
 
-### WS0 — New Bito-owned Supabase project (revised at Checkpoint 3)
-**Why**: verified via the Supabase API — the current project is "max@gowarm.org's Project" (`lfyldhhlpviiqdaosnpb`), a WARM-account asset holding Bito work product. Employment-agreement boundary: don't mix the two.
-**What**: Max creates ONE new project under a Bito-designated account/org. It is the build target for the whole rebuild (so no work ever happens against live data) and becomes production at cutover. `.env.local` points at it from day one. This replaces the earlier "staging + migrate-in-place" design — and is actually cleaner: the new project starts at the multi-tenant schema directly, with data mapped old→new in a single migration pass, no intermediate state.
+### WS0 — New, separate Supabase project (revised at Checkpoint 3)
+**Why**: verified via the Supabase API — the current project (`lfyldhhlpviiqdaosnpb`) is shared with WARM. Bito Signal data moves to its own project so the two products never mix at the data layer. Ownership stays with Max (gowarm.org account); he bills Bito for infrastructure and copies the project if he leaves.
+**What**: Max creates ONE new project in the existing account (suggested name: "bito-signal"). It is the build target for the whole rebuild (so no work ever happens against live data) and becomes production at cutover. `.env.local` points at it from day one. Cleaner than migrate-in-place: the new project starts at the multi-tenant schema directly, with data mapped old→new in a single migration pass, no intermediate state.
 **Note**: keep it on a paid tier at cutover (free tier pauses after ~1 week idle — unacceptable for the team's daily tool; fine during the build).
 
 ### WS1 — Auth platform swap
@@ -116,7 +116,7 @@ Full cross-project copy, WARM project → Bito project, in one scripted pass (al
 
 | # | Task | WS | Trad | Agentic | Blocked By | AC |
 |---|---|---|---|---|---|---|
-| 1 | Max creates the Bito-owned Supabase project; point `.env.local` at it | 0 | 0.5d | 0.5d | none | build env is Bito-owned; local dev no longer touches the WARM project |
+| 1 | Max creates the new Supabase project; point `.env.local` at it | 0 | 0.5d | 0.5d | none | Bito Signal has its own project; local dev no longer touches the shared WARM project |
 | 2 | `supabase/schema.sql`: all tables, RLS policies, anon revocation | 2 | 2d | 1d | 1 | applies cleanly to a fresh project; anon returns zero rows everywhere |
 | 3 | Auth config + create users + `bito_profiles` | 1 | 1d | 0.5d | 2 | signup disabled; 5 users exist; profiles seeded |
 | 4 | `@supabase/ssr` middleware + `/login` swap; retire HMAC gate | 1 | 2d | 1d | 3 | wrong password rejected; session survives refresh; cron bearer passes |
@@ -128,7 +128,7 @@ Full cross-project copy, WARM project → Bito project, in one scripted pass (al
 | 10 | Encrypted token store + refresh-on-demand w/ single-flight | 5 | 2d | 1d | 9 | forced-expired token refreshes transparently; two parallel calls refresh once |
 | 11 | Thread userId through search/task call sites + owner resolution | 5 | 1.5d | 0.5d | 10 | a task created by Rohan lands in Rohan's portal, owned by Rohan |
 | 12 | `bito_sync_events` + attribution chip + sort union | 6 | 2d | 1d | 11 | Amar sees "synced by Rohan · date" on a card Rohan pushed |
-| 13 | Cross-project migration script + env flip + `RUNBOOK.md` + WARM-side cleanup | 7 | 2.5d | 1d | all | all data present in the Bito project post-cutover; WARM project frozen, then cleared after verification week |
+| 13 | Cross-project migration script + env flip + `RUNBOOK.md` + old-project cleanup | 7 | 2.5d | 1d | all | all data present in the new project post-cutover; old project frozen, then Bito tables cleared after verification week |
 
 **Total (Traditional)**: 22.5–29 eng-days · **Total (Agentic)**: 9.5–12 eng-days
 **Basis**: file-level footprint measured in-repo (12 stores in `clientStore.ts`, ~14 Supabase call sites, 2 HubSpot entry routes); HubSpot token mechanics from vendor docs. Low compression: WS5 token/encryption/race work. High compression: schema, CRUD endpoints, threading.
@@ -168,8 +168,7 @@ Nothing user-visible changes for Max until cutover day (task 13); the India team
 - **Display names**: Max seeds `bito_profiles` at cutover (accepted).
 - **Sync events store contact email/key**: yes (accepted default) — makes person-level attribution precise.
 - **Regions**: India users get the same region toggle as today; no per-user defaults (accepted default).
-- **Which Bito account owns the new Supabase project**: Max's Bito email vs a Bito org — Max decides with Bito; blocks task 1 only.
-- **Same boundary elsewhere**: the GitHub repo (`maxaldinger/bito-signal`) and the Vercel team also live under the max@gowarm.org identity. Out of scope here, but the employment-agreement logic that moved the database applies to both — flagged for Max to settle with Bito.
+- **Infrastructure ownership** (settled): Max owns the account, bills Bito, copies the project on departure. The GitHub repo and Vercel team follow the same model — no further action.
 
 ## 10. Scope Boundary
 
