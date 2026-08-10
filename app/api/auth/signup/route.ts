@@ -25,7 +25,9 @@ export async function POST(req: NextRequest) {
 
   if (!emailMayRegister(email)) {
     return NextResponse.json(
-      { ok: false, error: `Sign-up is limited to @${signupDomainLabel()} addresses` },
+      // Invite-only now: the address must be on the allowlist Max maintains.
+      // Deliberately does not reveal whether the domain or the list failed.
+      { ok: false, error: `Sign-up is invite-only for the Bito team (@${signupDomainLabel()}) — ask Max to add your email` },
       { status: 403 },
     );
   }

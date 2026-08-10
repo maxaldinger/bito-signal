@@ -41,17 +41,26 @@ export function authConfigured(): boolean {
 /** Email domain every teammate signs up with. */
 const SIGNUP_DOMAIN = "bito.ai";
 
-/** True when this address may create an account. @bito.ai always may;
- *  ALLOWED_SIGNUP_EMAILS (comma-separated, exact matches) covers exceptions. */
+/** True when this address may create an account.
+ *
+ *  EXACT ALLOWLIST, not a domain check. The signup route creates accounts
+ *  with the email pre-confirmed (no verification mail is ever sent), so a
+ *  domain rule would trust the STRING: anyone who found the URL could type
+ *  made-up@bito.ai and become `authenticated` — which carries real read
+ *  access. Max flagged exactly this. The address must appear verbatim in
+ *  ALLOWED_SIGNUP_EMAILS (comma-separated env, Max-controlled); the domain
+ *  requirement stays as a second belt. Adding a teammate = adding one entry
+ *  to the env var. The durable upgrade, if the team outgrows an env var, is
+ *  real email verification via custom SMTP — deliberately not built tonight. */
 export function emailMayRegister(email: string): boolean {
   const e = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return false;
-  if (e.endsWith(`@${SIGNUP_DOMAIN}`)) return true;
-  const extra = (process.env.ALLOWED_SIGNUP_EMAILS ?? "")
+  if (!e.endsWith(`@${SIGNUP_DOMAIN}`)) return false;
+  const allowed = (process.env.ALLOWED_SIGNUP_EMAILS ?? "")
     .split(",")
     .map((x) => x.trim().toLowerCase())
     .filter(Boolean);
-  return extra.includes(e);
+  return allowed.includes(e);
 }
 
 export function signupDomainLabel(): string {
