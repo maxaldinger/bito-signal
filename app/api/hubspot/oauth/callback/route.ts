@@ -18,7 +18,9 @@ export const maxDuration = 30;
 
 function bounce(req: NextRequest, param: string): NextResponse {
   const url = req.nextUrl.clone();
-  url.pathname = "/";
+  // Success lands in the app; failures land back on the connect page, which
+  // explains the state and offers retry.
+  url.pathname = param === "hs=connected" ? "/" : "/connect";
   url.search = `?${param}`;
   return NextResponse.redirect(url);
 }

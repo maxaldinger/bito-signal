@@ -48,6 +48,25 @@ function LoginForm() {
           return;
         }
         // Full navigation so middleware re-runs with the new cookies.
+        // New accounts ALWAYS route through the HubSpot connect step; sign-ins
+        // route through it only when no connection exists yet, so an already-
+        // connected user never sees it.
+        if (mode === "signup") {
+          window.location.assign(`/connect?next=${encodeURIComponent(next)}`);
+          return;
+        }
+        try {
+          const st = (await (await fetch("/api/hubspot/oauth/status")).json()) as {
+            configured?: boolean;
+            connected?: boolean;
+          };
+          if (st.configured && !st.connected) {
+            window.location.assign(`/connect?next=${encodeURIComponent(next)}`);
+            return;
+          }
+        } catch {
+          /* status unavailable — go straight in */
+        }
         window.location.assign(next);
         return;
       }
