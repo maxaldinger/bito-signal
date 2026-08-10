@@ -36,3 +36,6 @@ yarn-error.log*
 .pnpm-debug.log*
 
 .vercel
+
+# HubSpot CLI auth (contains the personal access key)
+hubspot.config.yml

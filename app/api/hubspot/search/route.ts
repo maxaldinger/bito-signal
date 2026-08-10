@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hubspotSearch, type HsKind } from "@/lib/hubspot";
+import { sessionUserId } from "@/lib/supabaseAuth";
 
 // GET /api/hubspot/search?kind=company&name=Ramp[&domain=ramp.com]
 //   — or — ?kind=contact&name=Jane%20Doe[&email=jane@ramp.com]
@@ -20,7 +21,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Pass a name, domain, or email to search" }, { status: 400 });
   }
 
-  const result = await hubspotSearch(kind, { name, domain, email });
+  // WS5: the check runs against the CALLER's portal via their OAuth
+  // connection. No connection -> a clear "connect first" error, never a silent
+  // fallback to someone else's portal.
+  const uid = await sessionUserId();
+  if (!uid) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const result = await hubspotSearch(kind, { name, domain, email }, { asUser: uid });
   const status = result.ok ? 200 : result.configured ? 502 : 501;
   return NextResponse.json(result, { status });
 }

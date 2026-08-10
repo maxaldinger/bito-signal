@@ -1,7 +1,9 @@
+import { sessionUserId } from "@/lib/supabaseAuth";
 import { NextRequest, NextResponse } from "next/server";
 import { hubspotCreateTask, type HsKind, type HsTaskType } from "@/lib/hubspot";
 import { apolloPersonContact } from "@/lib/enrich/apollo";
 import { isSendableEmail } from "@/lib/enrich/emailTrust";
+import { readRevealCache, writeRevealCache } from "@/lib/enrich/revealCache";
 
 // POST /api/hubspot/task
 // body: {
@@ -58,12 +60,28 @@ export async function POST(req: NextRequest) {
   let phone = body.phone;
   if (body.kind === "contact" && body.apolloId) {
     if (!email) {
-      const r = await apolloPersonContact({ id: body.apolloId, reveal: "email" });
-      // Apply the SAME verification bar the UI does. This fill-in runs
-      // server-side on an address the rep never saw, so without the check it
-      // was the one path that could write a guessed/extrapolated email into
-      // HubSpot no matter what the card displayed.
-      if (r.ok && r.email && isSendableEmail(r.emailStatus)) email = r.email;
+      // WS4: the shared reveal cache first — a teammate may already have paid
+      // for this contact, and "attempted, none found" is cached too.
+      const cached = await readRevealCache(body.apolloId);
+      if (cached && cached.email !== null) {
+        if (cached.email && isSendableEmail(cached.email_status)) email = cached.email;
+      } else {
+        const r = await apolloPersonContact({ id: body.apolloId, reveal: "email" });
+        // Apply the SAME verification bar the UI does. This fill-in runs
+        // server-side on an address the rep never saw, so without the check it
+        // was the one path that could write a guessed/extrapolated email into
+        // HubSpot no matter what the card displayed.
+        if (r.ok && r.email && isSendableEmail(r.emailStatus)) email = r.email;
+        if (r.configured && (r.ok || /no email on file/i.test(r.error ?? ""))) {
+          await writeRevealCache(body.apolloId, {
+            name: r.name ?? undefined,
+            email: r.email ?? "",
+            email_status: r.emailStatus ?? null,
+            linkedin_url: r.linkedinUrl ?? undefined,
+            company_domain: r.companyDomain ?? undefined,
+          });
+        }
+      }
     }
     if (!phone) {
       const r = await apolloPersonContact({ id: body.apolloId, reveal: "phone" });
@@ -83,6 +101,8 @@ export async function POST(req: NextRequest) {
     if (root(email.split("@")[1]) !== root(body.companyDomain)) email = undefined;
   }
 
+  const uid = await sessionUserId();
+  if (!uid) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const result = await hubspotCreateTask({
     kind: body.kind as HsKind,
     objectId: body.objectId,
@@ -97,7 +117,7 @@ export async function POST(req: NextRequest) {
     body: body.body ?? "",
     dueDateMs: body.dueDateMs,
     taskType,
-  });
+  }, { asUser: uid });
   const status = result.ok ? 200 : result.configured ? 502 : 501;
   return NextResponse.json(result, { status });
 }

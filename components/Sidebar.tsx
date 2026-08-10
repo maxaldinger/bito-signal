@@ -82,6 +82,55 @@ function FilterHeading({
 // because an earlier bug stamped records the app merely *found* in HubSpot, not
 // ones it actually pushed — so the stored marks can't be trusted and a clean
 // reset (re-earned on every real push) is the only sure fix. Two-click confirm.
+// WS5: each user's own HubSpot connection. Not connected -> an orange call to
+// action (pushes fail without it); connected -> the portal domain + disconnect.
+function HubSpotConnectChip() {
+  const [state, setState] = useState<{
+    loaded: boolean;
+    configured?: boolean;
+    connected?: boolean;
+    hubDomain?: string;
+  }>({ loaded: false });
+  useEffect(() => {
+    fetch("/api/hubspot/oauth/status")
+      .then((r) => r.json())
+      .then((d: { configured?: boolean; connected?: boolean; hubDomain?: string }) =>
+        setState({ loaded: true, configured: d.configured, connected: d.connected, hubDomain: d.hubDomain }),
+      )
+      .catch(() => setState({ loaded: true }));
+  }, []);
+  if (!state.loaded || state.configured === false) return null;
+  if (!state.connected) {
+    return (
+      <a
+        href="/api/hubspot/oauth/install"
+        title="Connect your own HubSpot portal — tasks you push land in YOUR HubSpot, owned by you"
+        className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/40 bg-orange-500/10 px-2 py-1 font-mono text-[11px] font-semibold text-orange-300 transition-colors hover:bg-orange-500/20"
+      >
+        Connect HubSpot
+      </a>
+    );
+  }
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5 font-mono text-[11px] text-ink-500">
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-neon-500" />
+      <span className="truncate" title={`Connected to ${state.hubDomain ?? "your HubSpot"}`}>
+        HubSpot: {state.hubDomain ?? "connected"}
+      </span>
+      <button
+        onClick={async () => {
+          await fetch("/api/hubspot/oauth/disconnect", { method: "POST" }).catch(() => {});
+          window.location.reload();
+        }}
+        className="shrink-0 text-ink-600 transition-colors hover:text-ink-300"
+        title="Disconnect this portal"
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
 function LogoutButton() {
   const [busy, setBusy] = useState(false);
   const [who, setWho] = useState<string | null>(null);
@@ -519,6 +568,7 @@ export function Sidebar({
         <ResetProspected />
 
         <div className="mt-auto pt-6 text-center">
+          <HubSpotConnectChip />
           <LogoutButton />
           <p className="mt-3 font-mono text-[10px] text-ink-500">built for bito.ai</p>
         </div>

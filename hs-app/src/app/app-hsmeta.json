@@ -1,0 +1,39 @@
+{
+  "uid": "bito_signal_app",
+  "type": "app",
+  "config": {
+    "description": "Bito Signal — the GTM prospecting dashboard's per-user HubSpot connection. Unlisted; installed only by the Bito sales team on their own portals.",
+    "name": "Bito Signal",
+    "distribution": "marketplace",
+    "auth": {
+      "type": "oauth",
+      "redirectUrls": [
+        "https://bito-new-customer-intel.vercel.app/api/hubspot/oauth/callback",
+        "http://localhost:3000/api/hubspot/oauth/callback"
+      ],
+      "requiredScopes": [
+        "oauth",
+        "crm.objects.contacts.read",
+        "crm.objects.contacts.write",
+        "crm.objects.companies.read",
+        "crm.objects.companies.write",
+        "crm.objects.owners.read"
+      ],
+      "optionalScopes": [],
+      "conditionallyRequiredScopes": []
+    },
+    "permittedUrls": {
+      "fetch": [
+        "https://api.hubapi.com"
+      ],
+      "iframe": [],
+      "img": []
+    },
+    "support": {
+      "supportEmail": "max.aldinger@bito.ai",
+      "documentationUrl": "https://bito-new-customer-intel.vercel.app",
+      "supportUrl": "https://bito-new-customer-intel.vercel.app",
+      "supportPhone": "+18005555555"
+    }
+  }
+}

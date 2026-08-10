@@ -79,9 +79,25 @@ export interface HsTaskResult {
 const PAK_REFRESH_URL = "https://api.hubapi.com/localdevauth/v1/auth/refresh";
 let accessTokenCache: { token: string; expiresAt: number } | undefined;
 
-async function resolveAccessToken(): Promise<
-  { ok: true; token: string } | { ok: false; configured: boolean; error: string }
+export interface HsAuthContext {
+  /** Supabase user id — use THIS user's OAuth connection (WS5). Absent = the
+   *  env HUBSPOT_TOKEN (the weekly cron, which stays on Max's private app). */
+  asUser?: string;
+  /** Owner id resolved alongside the token — assigned to tasks/notes so they
+   *  land in the acting user's own queue. */
+  ownerId?: string;
+}
+
+async function resolveAccessToken(ctx?: HsAuthContext): Promise<
+  { ok: true; token: string; ownerId?: string } | { ok: false; configured: boolean; error: string }
 > {
+  if (ctx?.asUser) {
+    const { resolveUserAccessToken } = await import("./hubspotOAuth");
+    const r = await resolveUserAccessToken(ctx.asUser);
+    if (!r.ok || !r.token) return { ok: false, configured: true, error: r.error ?? "HubSpot not connected" };
+    ctx.ownerId = r.ownerId;
+    return { ok: true, token: r.token, ownerId: r.ownerId };
+  }
   const raw = process.env.HUBSPOT_TOKEN?.trim();
   if (!raw)
     return { ok: false, configured: false, error: "HUBSPOT_TOKEN not set — add it to .env.local / Vercel env" };
@@ -279,7 +295,8 @@ export function companyNameMatches(queried: string, found: string): boolean {
 /** Search HubSpot for a company (by domain, else name) or contact (by email, else name). */
 export async function hubspotSearch(
   kind: HsKind,
-  opts: { name?: string; domain?: string; email?: string }
+  opts: { name?: string; domain?: string; email?: string },
+  ctx?: HsAuthContext
 ): Promise<HsSearchResult> {
   const fail = (configured: boolean, error: string): HsSearchResult => ({
     configured,
@@ -289,7 +306,7 @@ export async function hubspotSearch(
     records: [],
   });
 
-  const auth = await resolveAccessToken();
+  const auth = await resolveAccessToken(ctx);
   if (!auth.ok) return fail(auth.configured, auth.error);
   const key = auth.token;
 
@@ -474,11 +491,12 @@ function contactProps(opts: { name?: string; email?: string; phone?: string; job
 // Resolve (objectId → search → create) a company, returning its id + record.
 async function resolveCompany(
   opts: { name?: string; domain?: string; objectId?: string },
-  key: string
+  key: string,
+  ctx?: HsAuthContext
 ): Promise<{ ok: boolean; error?: string; id?: string; record?: HsRecord; created?: boolean }> {
   if (!opts.objectId && !opts.name && !opts.domain) return { ok: true }; // nothing to link
   if (opts.objectId) return { ok: true, id: opts.objectId, record: { id: opts.objectId, name: opts.name } };
-  const search = await hubspotSearch("company", { name: opts.name, domain: opts.domain });
+  const search = await hubspotSearch("company", { name: opts.name, domain: opts.domain }, ctx);
   if (!search.ok) return { ok: false, error: search.error };
   if (search.found) return { ok: true, id: search.records[0].id, record: search.records[0], created: false };
   const props: Record<string, string> = {};
@@ -524,12 +542,13 @@ export async function hubspotCreateTask(input: {
   body: string;
   dueDateMs: number;
   taskType?: HsTaskType;
-}): Promise<HsTaskResult> {
+}, ctx?: HsAuthContext): Promise<HsTaskResult> {
   const fail = (configured: boolean, error: string): HsTaskResult => ({ configured, ok: false, error });
 
-  const auth = await resolveAccessToken();
+  const auth = await resolveAccessToken(ctx);
   if (!auth.ok) return fail(auth.configured, auth.error);
   const key = auth.token;
+  const actingOwnerId = auth.ownerId ?? process.env.HUBSPOT_OWNER_ID?.trim();
   if (!input.subject?.trim()) return fail(true, "A task subject is required");
   if (!Number.isFinite(input.dueDateMs)) return fail(true, "A valid due date is required");
 
@@ -540,7 +559,8 @@ export async function hubspotCreateTask(input: {
   if (input.kind === "company") {
     const co = await resolveCompany(
       { name: input.name, domain: input.domain, objectId: input.objectId },
-      key
+      key,
+      ctx
     );
     if (!co.ok || !co.id) return fail(true, co.error || "Could not resolve the company in HubSpot");
     taskAssociations.push({ id: co.id, typeId: TASK_TO_COMPANY });
@@ -566,7 +586,8 @@ export async function hubspotCreateTask(input: {
     // kill the contact task — we just skip the company association.
     const co = await resolveCompany(
       { name: input.companyName, domain: input.companyDomain, objectId: input.companyObjectId },
-      key
+      key,
+      ctx
     );
 
     // 2. Contact — find or create, then fill email/phone/jobtitle.
@@ -574,7 +595,7 @@ export async function hubspotCreateTask(input: {
     let contactRecord: HsRecord | undefined;
     let contactCreated = false;
     if (!contactId) {
-      const search = await hubspotSearch("contact", { name: input.name, email: input.email });
+      const search = await hubspotSearch("contact", { name: input.name, email: input.email }, ctx);
       if (!search.ok) return fail(true, search.error || "HubSpot contact lookup failed");
       if (search.found) {
         contactId = search.records[0].id;
@@ -619,10 +640,11 @@ export async function hubspotCreateTask(input: {
     primary = { ...contactRecord, kind: "contact", created: contactCreated };
   }
 
-  // Create the task, associated to every resolved record. Assign it to the rep
-  // (HUBSPOT_OWNER_ID) so it lands in their "my tasks" queue — without an owner
-  // the task is created unassigned and hidden from the default Tasks view.
-  const ownerId = process.env.HUBSPOT_OWNER_ID?.trim();
+  // Create the task, associated to every resolved record. Assign it to the
+  // ACTING user's owner id (their OAuth connection), falling back to the
+  // legacy env owner — without an owner the task is created unassigned and
+  // hidden from the default Tasks view.
+  const ownerId = actingOwnerId;
   const payload = {
     properties: {
       hs_task_subject: input.subject.trim(),
@@ -664,6 +686,7 @@ export async function hubspotCreateTask(input: {
       typeId: a.typeId === TASK_TO_COMPANY ? NOTE_TO_COMPANY : NOTE_TO_CONTACT,
     })),
     key,
+    actingOwnerId,
   );
 
   // Pin the task to the top of each linked record's timeline (best-effort) —
@@ -696,9 +719,10 @@ async function createNote(
   bodyHtml: string,
   associations: { id: string; typeId: number }[],
   key: string,
+  actingOwnerId?: string,
 ): Promise<{ id?: string; error?: string }> {
   if (!bodyHtml.trim() || associations.length === 0) return {};
-  const ownerId = process.env.HUBSPOT_OWNER_ID?.trim();
+  const ownerId = actingOwnerId ?? process.env.HUBSPOT_OWNER_ID?.trim();
   const payload = {
     properties: {
       hs_note_body: bodyHtml,
