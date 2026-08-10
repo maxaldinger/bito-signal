@@ -1,4 +1,6 @@
-import { sessionUserId } from "@/lib/supabaseAuth";
+import { adminClient, sessionUserId } from "@/lib/supabaseAuth";
+import { normCompany } from "@/lib/companyKey";
+import { getConnection } from "@/lib/hubspotOAuth";
 import { NextRequest, NextResponse } from "next/server";
 import { hubspotCreateTask, type HsKind, type HsTaskType } from "@/lib/hubspot";
 import { apolloPersonContact } from "@/lib/enrich/apollo";
@@ -118,6 +120,28 @@ export async function POST(req: NextRequest) {
     dueDateMs: body.dueDateMs,
     taskType,
   }, { asUser: uid });
+
+  // WS6 — a successful push is a SYNC EVENT: shared, attributed history so
+  // teammates see "synced by Max · date" on this account/contact. Best-effort;
+  // the task already landed, so a logging failure must never fail the push.
+  if (result.ok) {
+    try {
+      const conn = await getConnection(uid);
+      const companyName = body.kind === "company" ? body.name : body.companyName;
+      await adminClient().from("bito_sync_events").insert({
+        kind: body.kind,
+        key: body.kind === "contact" ? body.apolloId || body.name || "" : normCompany(body.name ?? ""),
+        company_key: companyName ? normCompany(companyName) : null,
+        contact_key: body.kind === "contact" ? body.apolloId || body.name || null : null,
+        user_id: uid,
+        portal_id: conn?.portal_id ?? null,
+        task_url: result.taskUrl ?? null,
+      });
+    } catch (e) {
+      console.error("[sync-event] log failed:", e instanceof Error ? e.message : e);
+    }
+  }
+
   const status = result.ok ? 200 : result.configured ? 502 : 501;
   return NextResponse.json(result, { status });
 }

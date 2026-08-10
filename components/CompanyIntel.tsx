@@ -46,6 +46,8 @@ import { HubSpotActions } from "./HubSpotActions";
 import {
   useIsProspected,
   useProspectedAt,
+  useCompanySyncEvent,
+  useContactSyncEvent,
   setDeepDiveScore,
   getReveal,
   mergeReveal,
@@ -530,6 +532,8 @@ function ApolloPersonCard({
   const emailRes = result.email;
   const phoneRes = result.phone;
   const contactProspected = useIsProspected("contact", person.apolloId || displayName);
+  const contactTeamSync = useContactSyncEvent(person.apolloId || displayName);
+  const contactTeamChip = contactTeamSync && !contactTeamSync.mine ? contactTeamSync : undefined;
 
   // Only a COMPANY-domain email is usable — a personal/off-domain one would
   // mis-associate the contact in HubSpot, so we treat it as "none surfaced".
@@ -603,6 +607,14 @@ function ApolloPersonCard({
       <div className="flex items-center justify-between gap-2">
         <h4 className="min-w-0 truncate text-sm font-semibold text-ink-100">{displayName}</h4>
         <div className="flex shrink-0 items-center gap-1.5">
+          {contactTeamChip && (
+            <span
+              title={`Synced to ${contactTeamChip.by}'s HubSpot on ${new Date(contactTeamChip.at).toLocaleDateString("en-US")}`}
+              className="inline-flex items-center gap-1 rounded-md border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-300"
+            >
+              synced by {contactTeamChip.by}
+            </span>
+          )}
           {contactProspected && (
             <span
               title="Already prospected — a HubSpot task has been created for this contact"
@@ -1296,6 +1308,8 @@ export function CompanyIntel({
   const companyAliases = [acctKey, intel.name];
   const companyProspected = useIsProspected("company", acctKey);
   const companyProspectedAt = useProspectedAt("company", acctKey);
+  const companyTeamSync = useCompanySyncEvent(acctKey);
+  const companyTeamChip = companyTeamSync && !companyTeamSync.mine ? companyTeamSync : undefined;
 
   // On-demand sections: the brief now generates lean (summary / ICP / people /
   // motion + outreach). These heavier sections are pulled only when expanded.
@@ -1397,6 +1411,14 @@ export function CompanyIntel({
                   <Check className="h-3.5 w-3.5" strokeWidth={3.5} />
                 </span>
                 Prospected · sent to HubSpot{companyProspectedAt ? ` · ${fmtDate(companyProspectedAt)}` : ""}
+              </span>
+            )}
+            {companyTeamChip && (
+              <span
+                title={`Synced to ${companyTeamChip.by}'s HubSpot on ${new Date(companyTeamChip.at).toLocaleDateString("en-US")}`}
+                className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/40 bg-sky-500/10 px-2.5 py-1 font-mono text-xs font-semibold text-sky-300"
+              >
+                synced by {companyTeamChip.by} · {new Date(companyTeamChip.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
               </span>
             )}
             <span className="rounded border border-neon-600/30 bg-neon-500/10 px-2 py-0.5 font-mono text-xs font-medium text-neon-300">

@@ -14,21 +14,11 @@ function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
-// Company names arrive from two sources that spell the SAME company differently:
-// the Apollo sweep ("Instabug") and the live-research brief ("Instabug, Inc.").
-// Strip punctuation + common legal suffixes so prospected badges and cached
-// scores match across both. Applied on read AND write so values stored under
-// the old (lowercase-only) rule still resolve.
-const COMPANY_SUFFIX =
-  /\b(inc|incorporated|corp|corporation|co|company|llc|ltd|limited|gmbh|plc|sa|ag|nv|bv|pte|pvt|private|holdings)\b/g;
-function normCompany(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[.,]/g, " ")
-    .replace(COMPANY_SUFFIX, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
+// normCompany moved to lib/companyKey.ts (WS6) so the sync-event writer on the
+// server normalizes identically to every client-side store. Re-exported so
+// existing imports keep working.
+import { normCompany } from "./companyKey";
+export { normCompany };
 
 // ---------------- Cross-device sync ----------------
 // Each makeStore registers here so the sync layer can hydrate it from Supabase
@@ -227,6 +217,7 @@ export function initStateSync() {
       /* offline — stay local-only */
     }
     await pullSharedCaches();
+    await pullSyncEvents();
     // AFTER the merge, so it sees the server's marks and not just this
     // browser's. Runs on every load and is cheap when there is nothing to do.
     await repairProspectedAliases();
@@ -235,6 +226,7 @@ export function initStateSync() {
     if (!document.hidden) {
       void pullState();
       void pullSharedCaches();
+      void pullSyncEvents();
     }
   };
   window.addEventListener("focus", onFocus);
@@ -737,4 +729,60 @@ export function mergeReveal(apolloId: string, patch: ApolloReveal): void {
   const cur = apolloReveals.get();
   const next = { ...(cur[apolloId] ?? {}), ...patch };
   apolloReveals.set({ ...cur, [apolloId]: next });
+}
+
+// ---------------- Sync events (WS6) ----------------
+// Shared, attributed "who pushed what to their HubSpot" — read-only on the
+// client (the server writes events on every successful task create). Local-only
+// store (no /api/state sync); hydrated from /api/sync-events on load + focus.
+export type SyncEvent = { by: string; user: string; at: string };
+type SyncEvents = { me?: string; companies: Record<string, SyncEvent>; contacts: Record<string, SyncEvent> };
+const syncEvents = makeStore<SyncEvents>(
+  "bito-sync-events",
+  { companies: {}, contacts: {} },
+  (raw) => {
+    const r = (raw ?? {}) as Partial<SyncEvents>;
+    return { me: r.me, companies: r.companies ?? {}, contacts: r.contacts ?? {} };
+  },
+  false,
+);
+
+export async function pullSyncEvents(): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const res = await fetch("/api/sync-events", { cache: "no-store" });
+    if (!res.ok) return;
+    const d = (await res.json()) as { ok?: boolean } & Partial<SyncEvents>;
+    if (d.ok) syncEvents.applyServer({ me: d.me, companies: d.companies, contacts: d.contacts });
+  } catch {
+    /* offline — chips just don't render */
+  }
+}
+
+/** Latest sync event for a company (normalized matching), with `mine` so the
+ *  UI can suppress the chip when the viewer is the one who synced it. */
+export function useCompanySyncEvent(company: string): (SyncEvent & { mine: boolean }) | undefined {
+  const s = syncEvents.useStore();
+  if (!company) return undefined;
+  const target = normCompany(company);
+  for (const [k, v] of Object.entries(s.companies)) {
+    if (normCompany(k) === target) return { ...v, mine: v.user === s.me };
+  }
+  return undefined;
+}
+
+/** Latest sync event for a contact (exact key: apolloId || name). */
+export function useContactSyncEvent(key: string): (SyncEvent & { mine: boolean }) | undefined {
+  const s = syncEvents.useStore();
+  if (!key) return undefined;
+  const v = s.contacts[key] ?? s.contacts[key.toLowerCase()];
+  return v ? { ...v, mine: v.user === s.me } : undefined;
+}
+
+/** Companies map for the feed's "in HubSpot" union (key -> epoch ms). */
+export function useSyncEventCompanies(): Record<string, number> {
+  const s = syncEvents.useStore();
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(s.companies)) out[k] = new Date(v.at).getTime();
+  return out;
 }

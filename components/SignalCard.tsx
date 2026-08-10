@@ -27,6 +27,7 @@ import {
   useDeepDiveScore,
   useIsProspected,
   useProspectedAt,
+  useCompanySyncEvent,
   useIsLowPriority,
   useIsCollapsed,
   toggleLowPriority,
@@ -206,6 +207,10 @@ export function SignalCard({
   const score = briefScore ?? signal.strength;
   const prospected = useIsProspected("company", signal.account);
   const prospectedAt = useProspectedAt("company", signal.account);
+  // WS6: a teammate's sync shows as an attributed chip. The viewer's own sync
+  // is already covered by the orange Prospected badge, so `mine` suppresses.
+  const teamSync = useCompanySyncEvent(signal.account);
+  const teamChip = teamSync && !teamSync.mine ? teamSync : undefined;
   const lowPriority = useIsLowPriority(signal.account);
   const collapsed = useIsCollapsed(signal.account);
   const favorite = useIsFavorite(signal.account);
@@ -244,6 +249,14 @@ export function SignalCard({
                 <Check className="h-2 w-2" strokeWidth={3.5} />
               </span>
               Prospected
+            </span>
+          )}
+          {teamChip && (
+            <span
+              title={`Synced to ${teamChip.by}'s HubSpot on ${new Date(teamChip.at).toLocaleDateString("en-US")}`}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-300"
+            >
+              synced by {teamChip.by}
             </span>
           )}
           <button
@@ -294,6 +307,13 @@ export function SignalCard({
           >
             <X className="h-3.5 w-3.5" />
           </button>
+        </div>
+      )}
+      {teamChip && (
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2">
+          <span className="min-w-0 font-mono text-xs font-semibold uppercase tracking-wide text-sky-300">
+            synced by {teamChip.by} · {new Date(teamChip.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+          </span>
         </div>
       )}
 

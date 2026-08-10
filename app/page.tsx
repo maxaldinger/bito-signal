@@ -15,6 +15,7 @@ import {
   useProspectedCompanies,
   useLowPriorityCompanies,
   useHubspotPresence,
+  useSyncEventCompanies,
   useBlacklist,
   useReviewedCompanies,
   markReviewed,
@@ -335,12 +336,16 @@ export default function Page() {
   const prospectedMap = useProspectedCompanies();
   const lowPriMap = useLowPriorityCompanies();
   const presenceMap = useHubspotPresence();
+  // WS6: "in HubSpot" is a team-level fact — your own portal check, your own
+  // marks, OR a teammate's sync event all count.
+  const syncEventMap = useSyncEventCompanies();
   const isInHubspot = useCallback(
     (s: Signal): boolean => {
       const live = companyValue(presenceMap, s.account);
-      return live !== undefined ? live === 1 : companyInMap(prospectedMap, s.account);
+      if (live !== undefined) return live === 1;
+      return companyInMap(prospectedMap, s.account) || companyInMap(syncEventMap, s.account);
     },
-    [presenceMap, prospectedMap],
+    [presenceMap, prospectedMap, syncEventMap],
   );
 
   const segmentCounts = useMemo(() => {
