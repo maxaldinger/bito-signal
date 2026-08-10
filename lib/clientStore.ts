@@ -158,6 +158,49 @@ async function guardLocalOwner(): Promise<void> {
   }
 }
 
+// ---- WS4: row-per-entry write-through for the shared caches ----
+type CacheKind = "scores" | "blurbs" | "sweepCursor" | "blacklist";
+function pushCacheEntry(kind: CacheKind, key: string, value: unknown): void {
+  if (typeof window === "undefined") return;
+  void fetch("/api/cache", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, key, value }),
+  }).catch(() => {});
+}
+function deleteCacheEntry(kind: CacheKind, key: string): void {
+  if (typeof window === "undefined") return;
+  void fetch("/api/cache", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, key }),
+  }).catch(() => {});
+}
+
+/** Hydrate the four shared caches from their row-per-entry tables. Server is
+ *  authoritative — same posture as pullState for per-user stores. */
+async function pullSharedCaches(): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const res = await fetch("/api/cache", { cache: "no-store" });
+    if (!res.ok) return;
+    const d = (await res.json()) as {
+      ok?: boolean;
+      scores?: Record<string, number>;
+      blurbs?: Record<string, string>;
+      sweepCursor?: Record<string, number>;
+      blacklist?: Record<string, string>;
+    };
+    if (!d.ok) return;
+    if (d.scores) scores.applyServer(d.scores);
+    if (d.blurbs) companyBlurbs.applyServer(d.blurbs);
+    if (d.sweepCursor) sweepCursor.applyServer(d.sweepCursor);
+    if (d.blacklist) blacklist.applyServer(d.blacklist);
+  } catch {
+    /* offline — local copies serve */
+  }
+}
+
 let synced = false;
 /** Start cross-device sync: union-merge with the server once (so nothing is
  * lost on first run), push the merged result up, then re-pull on tab focus.
@@ -183,12 +226,16 @@ export function initStateSync() {
     } catch {
       /* offline — stay local-only */
     }
+    await pullSharedCaches();
     // AFTER the merge, so it sees the server's marks and not just this
     // browser's. Runs on every load and is cheap when there is nothing to do.
     await repairProspectedAliases();
   })();
   const onFocus = () => {
-    if (!document.hidden) void pullState();
+    if (!document.hidden) {
+      void pullState();
+      void pullSharedCaches();
+    }
   };
   window.addEventListener("focus", onFocus);
   document.addEventListener("visibilitychange", onFocus);
@@ -208,7 +255,15 @@ export function initStateSync() {
 // local v2 blobs must never union-merge into a per-user store again.
 const KEY_VERSION = ".v3";
 
-function makeStore<T>(baseKey: string, empty: T, coerce?: (raw: unknown) => T) {
+function makeStore<T>(
+  baseKey: string,
+  empty: T,
+  coerce?: (raw: unknown) => T,
+  // WS4: shared caches opt OUT of the /api/state whole-blob sync — they are
+  // served row-per-entry from /api/cache instead. localStorage stays as this
+  // browser's working copy either way.
+  serverSync = true,
+) {
   const key = `${baseKey}${KEY_VERSION}`;
   let cache: T | null = null;
   const listeners = new Set<() => void>();
@@ -248,12 +303,15 @@ function makeStore<T>(baseKey: string, empty: T, coerce?: (raw: unknown) => T) {
     return useSyncExternalStore(subscribe, get, () => empty);
   }
   // Register for cross-device sync. applyServer writes server data in locally
-  // without scheduling a push back (no echo loop).
-  registry.set(key, {
-    applyServer: (raw) => commit(coerce ? coerce(raw) : ((raw as T) ?? empty)),
-    current: () => get(),
-  });
-  return { get, set, useStore };
+  // without scheduling a push back (no echo loop). Un-synced stores skip the
+  // registry, which also makes their schedulePush calls no-ops.
+  if (serverSync) {
+    registry.set(key, {
+      applyServer: (raw) => commit(coerce ? coerce(raw) : ((raw as T) ?? empty)),
+      current: () => get(),
+    });
+  }
+  return { get, set, useStore, applyServer: (raw: unknown) => commit(coerce ? coerce(raw) : ((raw as T) ?? empty)) };
 }
 
 // ---------------- Prospected ----------------
@@ -346,7 +404,7 @@ export function useProspectedAt(kind: "company" | "contact", key: string): numbe
 
 // ---------------- Deep-dive ICP scores ----------------
 type Scores = Record<string, number>;
-const scores = makeStore<Scores>("bito-deepdive-scores", {});
+const scores = makeStore<Scores>("bito-deepdive-scores", {}, undefined, false);
 
 export function setDeepDiveScore(company: string, score: number): void {
   if (!company) return;
@@ -354,6 +412,7 @@ export function setDeepDiveScore(company: string, score: number): void {
   const k = normCompany(company);
   if (cur[k] === score) return;
   scores.set({ ...cur, [k]: score });
+  pushCacheEntry("scores", k, score);
 }
 
 export function useDeepDiveScore(company: string): number | undefined {
@@ -497,7 +556,7 @@ export function useHubspotPresence(): Record<string, number> {
 // Companies the rep marked as not a fit (e.g. an OSS project, not a buyer).
 // Hidden from the feed entirely and kept hidden across pulls. Stores the display
 // name (value) keyed by normalized name (key) for a restore list.
-const blacklist = makeStore<Record<string, string>>("bito-blacklist", {});
+const blacklist = makeStore<Record<string, string>>("bito-blacklist", {}, undefined, false);
 
 export function toggleBlacklist(company: string): void {
   if (!company) return;
@@ -507,8 +566,10 @@ export function toggleBlacklist(company: string): void {
     const next = { ...cur };
     delete next[k];
     blacklist.set(next);
+    deleteCacheEntry("blacklist", k);
   } else {
     blacklist.set({ ...cur, [k]: company });
+    pushCacheEntry("blacklist", k, company);
   }
 }
 
@@ -520,6 +581,7 @@ export function removeFromBlacklist(company: string): void {
   const next = { ...cur };
   delete next[k];
   blacklist.set(next);
+  deleteCacheEntry("blacklist", k);
 }
 
 export function useIsBlacklisted(company: string): boolean {
@@ -612,7 +674,7 @@ export function setLastDueDate(date: string): void {
 // The page the next Apollo ICP sweep should fetch, per region. Persisted so the
 // cursor marches forward across pulls instead of restarting (which would
 // re-fetch page 1 and return only duplicates).
-const sweepCursor = makeStore<Record<string, number>>("bito-sweep-cursor", {});
+const sweepCursor = makeStore<Record<string, number>>("bito-sweep-cursor", {}, undefined, false);
 
 export function getSweepPage(region: string): number | undefined {
   const v = sweepCursor.get()[region];
@@ -621,13 +683,15 @@ export function getSweepPage(region: string): number | undefined {
 
 export function setSweepPage(region: string, page: number): void {
   if (!region || !(page >= 1)) return;
-  sweepCursor.set({ ...sweepCursor.get(), [region]: Math.min(100, Math.floor(page)) });
+  const clamped = Math.min(100, Math.floor(page));
+  sweepCursor.set({ ...sweepCursor.get(), [region]: clamped });
+  pushCacheEntry("sweepCursor", region, clamped);
 }
 
 // ---------------- Company blurb cache ----------------
 // Caches the generated "what the company does" blurb per company so a card that
 // already fetched one doesn't re-fetch (Apollo/web) on re-render or re-page.
-const companyBlurbs = makeStore<Record<string, string>>("bito-company-blurbs", {});
+const companyBlurbs = makeStore<Record<string, string>>("bito-company-blurbs", {}, undefined, false);
 
 export function getCompanyBlurb(company: string): string | undefined {
   if (!company) return undefined;
@@ -640,7 +704,10 @@ export function getCompanyBlurb(company: string): string | undefined {
 export function setCompanyBlurb(company: string, blurb: string): void {
   if (!company || !blurb) return;
   const cur = companyBlurbs.get();
-  companyBlurbs.set({ ...cur, [normCompany(company)]: blurb });
+  const k = normCompany(company);
+  if (cur[k] === blurb) return;
+  companyBlurbs.set({ ...cur, [k]: blurb });
+  pushCacheEntry("blurbs", k, blurb);
 }
 
 // ---------------- Apollo reveal cache ----------------
@@ -657,7 +724,9 @@ export type ApolloReveal = {
    *  whose email had already been revealed. */
   linkedinUrl?: string;
 };
-const apolloReveals = makeStore<Record<string, ApolloReveal>>("bito-apollo-reveals", {});
+// Local-only latency cache now: the AUTHORITATIVE reveal cache is server-side
+// (bito_reveal_cache, consulted by the person route before any Apollo spend).
+const apolloReveals = makeStore<Record<string, ApolloReveal>>("bito-apollo-reveals", {}, undefined, false);
 
 export function getReveal(apolloId: string): ApolloReveal | undefined {
   return apolloId ? apolloReveals.get()[apolloId] : undefined;

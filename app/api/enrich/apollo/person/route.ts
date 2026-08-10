@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apolloPersonContact, type RevealKind } from "@/lib/enrich/apollo";
+import { cachedResponse, readRevealCache, writeRevealCache } from "@/lib/enrich/revealCache";
+import { sessionUserId } from "@/lib/supabaseAuth";
 
-// GET /api/enrich/apollo/person?id=<apolloId>&reveal=email|phone
+// GET /api/enrich/apollo/person?id=<apolloId>&reveal=email|phone|profile
 //   — or — ?name=Jane%20Doe&reveal=…[&company=Ramp][&domain=ramp.com][&linkedin=…]
-// Reveals ONE field (email or phone) for a single person on demand. Matching by
-// `id` (from a prior people search) is exact; name matching is a fuzzy fallback.
+//
+// WS4: the shared reveal cache lives HERE, next to the spend. An id-keyed
+// reveal checks bito_reveal_cache first — a contact any teammate already paid
+// to reveal costs nothing, ever again. Real Apollo responses are written back
+// (email "" = attempted-but-none, so a known-empty contact doesn't re-spend
+// either). Name-based lookups skip the cache: no stable key.
 export const maxDuration = 30;
 
 export async function GET(req: NextRequest) {
@@ -29,7 +35,37 @@ export async function GET(req: NextRequest) {
   }
   const reveal = revealParam as RevealKind;
 
+  if (id) {
+    const row = await readRevealCache(id);
+    if (row) {
+      const hit = cachedResponse(row, reveal);
+      if (hit) return NextResponse.json(hit, { headers: { "Cache-Control": "no-store" } });
+    }
+  }
+
   const result = await apolloPersonContact({ id, name, company, domain, linkedinUrl, reveal });
+
+  // Write back whatever the call produced, including "attempted, none found" —
+  // ok:false with a match still tells us Apollo has nothing, and that answer
+  // is worth caching so nobody re-spends on it.
+  if (id && result.configured) {
+    const matched = result.ok || /no email on file|no phone/i.test(result.error ?? "");
+    if (matched) {
+      await writeRevealCache(
+        id,
+        {
+          name: result.name ?? undefined,
+          country: result.country ?? undefined,
+          linkedin_url: result.linkedinUrl ?? undefined,
+          company_domain: result.companyDomain ?? undefined,
+          ...(reveal === "email" ? { email: result.email ?? "", email_status: result.emailStatus ?? null } : {}),
+          ...(reveal === "phone" && result.phone ? { phone: result.phone } : {}),
+        },
+        (await sessionUserId()) ?? undefined,
+      );
+    }
+  }
+
   const status = result.ok ? 200 : result.configured ? 502 : 501;
   return NextResponse.json(result, { status });
 }
