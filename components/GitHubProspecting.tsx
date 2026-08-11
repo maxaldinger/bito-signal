@@ -503,9 +503,16 @@ function passesFilters(p: Prospect, f: FilterState): boolean {
   if (f.tier === "forked" && p.bestAction !== "forked") return false;
   if (f.tier === "starred" && p.bestAction !== "starred") return false;
   // Size floor. Unknown headcount only survives at "Any" — an unsized company
-  // can't be claimed to have a moderate-to-large codebase.
+  // can't be claimed to have a moderate-to-large codebase. Directory employee
+  // counts stand in when enrichment didn't persist a headcount (everyone
+  // enriched before the size gate wrote one): the card's badge already shows
+  // them, and a filter that rejects a size the card displays reads as broken —
+  // Microsoft at ~181K was hidden behind every floor.
   const floor = Number(f.size);
-  if (floor > 0 && !(typeof p.headcount === "number" && p.headcount >= floor)) return false;
+  if (floor > 0) {
+    const size = typeof p.headcount === "number" ? p.headcount : p.directory?.employees;
+    if (!(typeof size === "number" && size >= floor)) return false;
+  }
   if (f.repo !== "all" && p.bestRepo !== f.repo && !p.signals.some((s) => s.repo === f.repo)) return false;
   if (
     f.q &&
@@ -693,8 +700,12 @@ export function GitHubProspecting() {
   // How many tracked people even HAVE a company size. Headcount is only written
   // during enrichment, so early in a run this is ~0 — and then every size floor
   // above "Any" matches nobody, which reads as a broken tab unless we say so.
+  // Directory employees count too, same fallback as the filter itself.
   const sizeKnownCount = useMemo(
-    () => all.filter((p) => typeof p.headcount === "number").length,
+    () =>
+      all.filter(
+        (p) => typeof p.headcount === "number" || typeof p.directory?.employees === "number",
+      ).length,
     [all],
   );
 

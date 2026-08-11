@@ -6,11 +6,15 @@
 // This inverts it. "Pull anyone in developer experience" is a real prospecting
 // motion and the tool had no way to express it.
 //
-// COST. Apollo search is free and this screen reveals NO emails on its own.
-// Every other people surface auto-reveals on mount, which is fine for eight
-// cards inside one brief and ruinous here: "developer experience" matches tens
-// of thousands of people. Reveal is one button, one card, one credit, and it
-// says so.
+// COST. Apollo search is free but returns MASKED names ("Romain Hu***t") and
+// no emails. QUALIFIED cards auto-fill both on arrival — same behavior as the
+// brief cards — because the reveal endpoint is shared-cache-guarded server
+// side: a person anyone on the team already revealed costs nothing, and a
+// fresh one costs the credit the rep was about to spend by hand anyway. The
+// blast radius stays bounded because only the CURRENT PAGE (25 people) ever
+// auto-fills, and only its QUALIFIED cards — UNRESOLVED/ROUTER stay masked
+// behind the same gate as everywhere else, and known no-email people are
+// skipped (a credit for "none on file" buys nothing).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -206,6 +210,37 @@ export function TitleSearch() {
     }
   };
 
+  // Auto-fill QUALIFIED cards with the real name + verified email. Keyed off
+  // `people`, so each page of results queues exactly once; `autoQueued`
+  // survives re-renders so mid-flight state updates can't re-fire a reveal.
+  // Three workers — a page fills in seconds without tripping Apollo's
+  // per-minute limits. The cleanup halts unstarted work when the page flips;
+  // anything not yet started re-queues if those results ever come back.
+  const autoQueued = useRef(new Set<string>());
+  useEffect(() => {
+    const queue = people.filter((p) => {
+      if (!p.apolloId || autoQueued.current.has(p.apolloId)) return false;
+      if (p.hasEmail === false) return false; // known "none on file" — skip
+      return allowedActions(normalizeClass(p.icp?.classification)).showEmail;
+    });
+    if (queue.length === 0) return;
+    let live = true;
+    const workers = Array.from({ length: 3 }, (_, w) =>
+      (async () => {
+        for (let i = w; i < queue.length; i += 3) {
+          if (!live) return;
+          autoQueued.current.add(queue[i].apolloId as string);
+          await reveal(queue[i]);
+        }
+      })(),
+    );
+    void Promise.all(workers);
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [people]);
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     void run(1);
@@ -217,7 +252,9 @@ export function TitleSearch() {
         <h2 className="text-xl font-bold tracking-tight text-ink-50">Title Search</h2>
         <p className="mt-1 text-sm text-ink-400">
           Find people by job title across every company, not just one account. Search costs
-          nothing; revealing an email costs one Apollo credit and only happens when you click.
+          nothing. Qualified cards fill in the real name and verified email automatically —
+          one Apollo credit each, free when a teammate already revealed the person. Unresolved
+          and router cards stay masked until someone reviews the profile.
         </p>
       </div>
 
