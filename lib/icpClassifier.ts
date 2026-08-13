@@ -102,28 +102,18 @@ export interface ICPVerdict {
 // pullable for that division only — hence `divisionOverride`.
 // ---------------------------------------------------------------------------
 
-/** Named in the spec. Matched on the account name, loosely.
- *
- *  NetApp and Synopsys were originally on this list and are deliberately GONE:
- *  Synopsys sells EDA software, and NetApp's revenue is storage software +
- *  cloud services — a NetApp brief scoring 82/99 with a live Gemini Enterprise
- *  adoption signal was blocked by its own name here, which is exactly
- *  backwards. A name ban is a last resort; the category regex plus the rep's
- *  pull-anyway override handle the gray cases. */
-const HARDWARE_ACCOUNTS = [
-  "honeywell",
-  "ametek",
-  "logitech",
-];
-
 /** Build everything internally; procurement is a wall. Spec calls these out
  *  separately from hardware — same outcome, different reason. */
 const BUILDS_INTERNALLY = ["meta", "facebook", "google", "alphabet", "amazon"];
 
-/** Category words that make an account hardware-primary. Applied to the
- *  account's own industry/segment text, not to a person's title. */
-const HARDWARE_CATEGORY =
-  /\b(?:semiconductor|semis?|foundry|wafer|photonic|optoelectronic|rf\b|radio frequency|sensor|capital equipment|process technology|industrial control|instrumentation|aerospace|defen[cs]e|avionics|munition|medical device|diagnostics? equipment|automotive|automaker|vehicle manufactur|networking hardware|storage hardware|electronic manufactur|contract manufactur|industrial conglomerate)\b/i;
+// The HARDWARE-PRIMARY screen (a name list + an industry-category regex) is
+// GONE (2026-08-12, Max). It contradicted the ICP head-on: the Signal 2000
+// universe is mostly non-software companies with large SWE orgs — NetApp
+// (~3.5K engineers, 82/99 brief, live Gemini Enterprise signal) was blocked
+// by its own name, and the category regex would have blocked exactly the
+// aerospace/automotive/medical accounts the directory exists to reach.
+// "Revenue comes from hardware" says nothing about how many engineers they
+// employ, and the SWE-size gates elsewhere already handle scale.
 
 export interface AccountExclusion {
   excluded: boolean;
@@ -148,29 +138,14 @@ export function accountExcluded(
   // A named software division overrides the parent's category. The spec allows
   // pulling those, scoped to the division.
   if (division && division.trim()) return undefined;
+  void context; // industry text no longer screens accounts (see note above)
 
-  const hit = HARDWARE_ACCOUNTS.find((h) => name.includes(h));
-  if (hit) {
-    return {
-      excluded: true,
-      code: "HARDWARE_ACCOUNT",
-      reason: `${company} is hardware-primary: revenue comes from physical product and software is a supporting function.`,
-    };
-  }
   const internal = BUILDS_INTERNALLY.find((h) => new RegExp(`\\b${h}\\b`).test(name));
   if (internal) {
     return {
       excluded: true,
       code: "HARDWARE_ACCOUNT",
       reason: `${company} builds its developer tooling internally and procurement is a wall.`,
-    };
-  }
-  const cat = (context || "").match(HARDWARE_CATEGORY);
-  if (cat) {
-    return {
-      excluded: true,
-      code: "HARDWARE_ACCOUNT",
-      reason: `${company} is hardware-primary (${cat[0].toLowerCase()}): software is a supporting function, not the product.`,
     };
   }
   return undefined;

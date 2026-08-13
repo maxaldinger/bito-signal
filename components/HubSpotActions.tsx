@@ -276,7 +276,7 @@ export function HubSpotActions({
               }
               className={`${btn} hover:border-orange-500/40 hover:text-orange-300`}
             >
-              <CalendarPlus className="h-3 w-3" /> Create + task
+              <CalendarPlus className="h-3 w-3" /> Create HubSpot task
             </button>
           </>
         ) : (
@@ -554,7 +554,7 @@ function TaskModal({
                 className="inline-flex items-center gap-1.5 rounded-lg border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-xs font-semibold text-orange-300 transition-colors hover:bg-orange-500/20 disabled:opacity-50"
               >
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                Create task
+                Create HubSpot task
               </button>
             </>
           )}

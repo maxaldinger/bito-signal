@@ -51,9 +51,6 @@ import {
   setDeepDiveScore,
   getReveal,
   mergeReveal,
-  useContactReview,
-  setContactReview,
-  clearContactReview,
 } from "@/lib/clientStore";
 
 function Section({
@@ -286,39 +283,21 @@ function ApolloPersonCard({
   const contactProspectedAt = useProspectedAt("contact", contactKey);
   const contactTeamSync = useContactSyncEvent(contactKey);
   const contactTeamChip = contactTeamSync && !contactTeamSync.mine ? contactTeamSync : undefined;
-  const review = useContactReview(contactKey);
-  // Verdict writes are server-first (a lost write would unlock the credit
-  // spend, then vanish on the next focus-pull) — so the click has a busy
-  // state and failure is said out loud, not swallowed.
-  const [reviewBusy, setReviewBusy] = useState(false);
-  const [reviewError, setReviewError] = useState<string | null>(null);
-  const recordReview = async (verdict: "qualified" | "excluded") => {
-    if (reviewBusy) return;
-    setReviewBusy(true);
-    setReviewError(null);
-    const ok = await setContactReview(contactKey, verdict);
-    if (!ok) setReviewError("Couldn't save the verdict — check the connection and try again.");
-    setReviewBusy(false);
-  };
-
   // STAGE 6 — the available actions must match the classification.
   //   QUALIFIED  → LinkedIn, Draft email, HubSpot task, address shown
-  //   ROUTER     → LinkedIn, HubSpot task, "Who owns this?" instead of Draft
+  //   ROUTER     → LinkedIn, HubSpot task (routing-ask note), no email
   //   UNRESOLVED → LinkedIn only. No draft, no task, NO ADDRESS.
   // "Do not surface a verified email address for anyone the rationale says is
   // not a buyer" — so an UNRESOLVED card never spends a reveal credit either.
   //
-  // ...BUT HUMAN DECISIONS OUTRANK THE MODEL. A contact already in the CRM —
+  // ...BUT CRM GROUND TRUTH OUTRANKS THE MODEL. A contact already in HubSpot —
   // pushed by this rep or synced by a teammate — has been reviewed and worked
   // by a person; a later pull's classifier verdict must not retract their
   // email or their push button (it did exactly that, and locked cards that
-  // were already in HubSpot). And "review the profile" is only a real
-  // instruction because the review can be RECORDED: the rep's explicit
-  // verdict wins over the title read, in both directions.
+  // were already in HubSpot).
   const modelState: ICPClass = state ?? "UNRESOLVED";
-  const humanQualified = review === "qualified" || contactProspected || !!contactTeamSync;
-  const effective: ICPClass =
-    review === "excluded" ? "EXCLUDED" : humanQualified ? "QUALIFIED" : modelState;
+  const humanQualified = contactProspected || !!contactTeamSync;
+  const effective: ICPClass = humanQualified ? "QUALIFIED" : modelState;
   const gate = allowedActions(effective);
   const screened = effective === "EXCLUDED";
   /** When this contact reached HubSpot, from own marks or a teammate's sync. */
@@ -530,7 +509,7 @@ function ApolloPersonCard({
   const [draft, setDraft] = useState<{ text?: string; error?: string } | null>(null);
   const [draftCopied, setDraftCopied] = useState(false);
 
-  const draftEmail = async (routing = false) => {
+  const draftEmail = async () => {
     if (drafting) return;
     setDrafting(true);
     setDraft(null);
@@ -538,28 +517,14 @@ function ApolloPersonCard({
     try {
       const who = (revealedName || person.name).split(" ")[0];
       const role = person.title || "an engineering leader";
-      const styleRules =
+      const content =
+        `Write a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
+        `Address them by first name only. Tie it to Bito AI Architect's value (the context layer that grounds their AI coding tools and reviews in their real cross-repo codebase) for an engineering team. ` +
+        `Output ONLY the email: a "Subject:" line, then the body (under 120 words, one clear CTA). ` +
         `Plain text only — NO markdown, asterisks, bold, headings, or "---" separators. ` +
         `Do NOT add any notes, caveats, or commentary to the rep, and no placeholders like [Your name]. ` +
         `Don't invent facts; if you can't verify a detail, just leave it out. ` +
         `Use plain punctuation only — no em or en dashes.`;
-      // A ROUTER gets a ROUTING ASK, never the pitch. The old code wired the
-      // "Who owns this?" button to the same pitch prompt as "Draft email",
-      // which produced exactly the 25-minute-call email the ROUTER tier
-      // exists to prevent.
-      const content = routing
-        ? `Write a very short note from a Bito sales rep to ${who} (${role}) at ${company}. ` +
-          `They are probably NOT the buyer — this is a routing ask, not a pitch. ` +
-          `At most one sentence of context (Bito connects AI coding tools to a team's real cross-repo architecture), ` +
-          `then ask directly who on their team owns developer tooling or developer productivity platforms` +
-          `${person.icp?.routesTo ? ` (likely ${person.icp.routesTo})` : ""}, and thank them. ` +
-          `Under 70 words total. NO product pitch, NO meeting ask, NO claims about their org. ` +
-          `Output ONLY the note: a "Subject:" line, then the body. ` +
-          styleRules
-        : `Write a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
-          `Address them by first name only. Tie it to Bito AI Architect's value (the context layer that grounds their AI coding tools and reviews in their real cross-repo codebase) for an engineering team. ` +
-          `Output ONLY the email: a "Subject:" line, then the body (under 120 words, one clear CTA). ` +
-          styleRules;
       const res = await fetch("/api/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -661,21 +626,8 @@ function ApolloPersonCard({
       {screened && (
         <div className="border-b border-ink-800 bg-ink-900/60 px-4 py-1.5 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-ink-500">
           screened out
-          {review === "excluded"
-            ? " · rep review"
-            : person.icp?.reasonCode
-              ? ` · ${REASON_LABEL[person.icp.reasonCode]}`
-              : ""}
-          {review !== "excluded" && person.icp?.hardFiltered ? " · rule" : ""}
-          {review === "excluded" && (
-            <button
-              type="button"
-              onClick={() => void clearContactReview(contactKey)}
-              className="ml-2 underline hover:text-ink-300"
-            >
-              undo
-            </button>
-          )}
+          {person.icp?.reasonCode ? ` · ${REASON_LABEL[person.icp.reasonCode]}` : ""}
+          {person.icp?.hardFiltered ? " · rule" : ""}
         </div>
       )}
       {!screened && emailState === "none" && (
@@ -718,7 +670,7 @@ function ApolloPersonCard({
           <span
             title={`${person.icp?.reason ?? ""}${person.icp?.recommendedAction ? ` · ${person.icp.recommendedAction}` : ""}${person.icp ? ` (confidence: ${person.icp.confidence})` : ""}${
               effective !== modelState
-                ? ` · model said ${modelState.toLowerCase()} — overridden by ${review ? "rep review" : "CRM ground truth (already in HubSpot)"}`
+                ? ` · model said ${modelState.toLowerCase()} — overridden by CRM ground truth (already in HubSpot)`
                 : ""
             }`}
             className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${
@@ -777,7 +729,7 @@ function ApolloPersonCard({
         {gate.draftEmail && (
           <button
             type="button"
-            onClick={() => void draftEmail(false)}
+            onClick={() => void draftEmail()}
             disabled={drafting}
             title="Draft a personalized cold outreach email for this person (AI)"
             className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-300 disabled:opacity-50"
@@ -786,65 +738,17 @@ function ApolloPersonCard({
             Draft email
           </button>
         )}
-        {gate.whoOwnsThis && (
-          <button
-            type="button"
-            onClick={() => void draftEmail(true)}
-            disabled={drafting}
-            title="Draft a short routing note — asks who owns developer tooling, never pitches"
-            className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 disabled:opacity-50"
-          >
-            {drafting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Compass className="h-3 w-3" />}
-            Who owns this?
-          </button>
-        )}
         {effective === "UNRESOLVED" && (
           <span className="font-mono text-[11px] text-ink-600">
-            unresolved · review the profile, then record the call →
+            unresolved · review the profile before working this contact
           </span>
         )}
-        {/* The review, RECORDABLE. UNRESOLVED's instruction is "review the
-            profile" — these buttons are where that review lands, shared with
-            the whole team. ROUTER gets them too: a router who turns out to
-            OWN the platform is a buyer, not a hop. */}
-        {review === undefined &&
-          !humanQualified &&
-          (modelState === "UNRESOLVED" || modelState === "ROUTER") && (
-            <>
-              <button
-                type="button"
-                onClick={() => void recordReview("qualified")}
-                disabled={reviewBusy}
-                title="You reviewed the profile and they own application engineering / a developer platform — unlocks email + HubSpot push, for the whole team"
-                className="inline-flex items-center gap-1 rounded border border-neon-600/40 bg-neon-500/10 px-2 py-1 font-mono text-[11px] font-semibold text-neon-300 transition-colors hover:bg-neon-500/20 disabled:opacity-50"
-              >
-                {reviewBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}{" "}
-                Qualifies
-              </button>
-              <button
-                type="button"
-                onClick={() => void recordReview("excluded")}
-                disabled={reviewBusy}
-                title="You reviewed the profile and they are not a buyer — screens this card out, for the whole team"
-                className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-400 transition-colors hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
-              >
-                Not a fit
-              </button>
-              {reviewError && (
-                <span className="font-mono text-[11px] text-red-400">{reviewError}</span>
-              )}
-            </>
-          )}
-        {review === "qualified" && (
-          <span className="font-mono text-[11px] text-ink-600">
-            reviewed · qualifies{" "}
-            <button
-              type="button"
-              onClick={() => void clearContactReview(contactKey)}
-              className="underline hover:text-ink-300"
-            >
-              undo
-            </button>
+        {/* No "Who owns this?" button — a ROUTER's routing ask lives in the
+            HubSpot task note instead (see defaultBody below), so the move is
+            recorded where the work happens. */}
+        {effective === "ROUTER" && (
+          <span className="font-mono text-[11px] text-amber-300/80">
+            router · task carries the routing ask, not a pitch
           </span>
         )}
       </div>
@@ -931,9 +835,8 @@ function ApolloPersonCard({
           // task for someone we have just said we cannot identify is how the
           // pipeline fills with people who will never be worked.
           <p className="font-mono text-[11px] leading-snug text-ink-500">
-            HubSpot push disabled while this contact is unreviewed. Open the profile; if they own
-            application engineering or a developer platform, hit &ldquo;Qualifies&rdquo; above — it
-            unlocks the email and the push, for the whole team.
+            HubSpot push disabled while this contact is UNRESOLVED. Review the profile; if they own
+            application engineering or a developer platform, they qualify.
           </p>
         ) : unconfirmed ? (
           // Pushing here would CREATE a HubSpot contact from a name only the
@@ -962,7 +865,7 @@ function ApolloPersonCard({
           // the call, but nothing fires on its own.
           autoCheck={!screened}
           autoCheckDelayMs={autoCheckDelayMs}
-          defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}`}
+          defaultSubject={`SIGNAL DASH - ${company} - ${displayName.split(" ")[0]}${effective === "ROUTER" ? " - ROUTER" : ""}`}
           defaultBody={
             // LinkedIn-workflow note: COMPANY → WHAT I SAW → EMAIL OPENER →
             // PROFILE → LINKEDIN OUTREACH (CONNECT + 3 DMs). No WHO (the task's
@@ -972,6 +875,14 @@ function ApolloPersonCard({
             // above the templated email body, angled differently from the
             // LinkedIn connect note so a prospect on both channels never sees
             // the same observation twice.
+            //
+            // ROUTER tasks lead with the routing instruction: this person is a
+            // path to the buyer, so the task is "ask who owns it", never the
+            // pitch below.
+            (effective === "ROUTER"
+              ? `ROUTER — routing ask, NOT a pitch. Ask ${displayName.split(" ")[0]} who on their team owns developer tooling / developer productivity.` +
+                `${person.icp?.routesTo ? `\nROUTES TO: ${person.icp.routesTo}` : ""}\n\n`
+              : "") +
             `COMPANY: ${ctx.companyLine}\n` +
             // WHAT I SAW must be traceable to a real artifact. When the brief
             // produced no signal, say so rather than letting the next section
@@ -1196,7 +1107,7 @@ function ApolloStakeholders({
     return (
       <div className="rounded-lg border border-ink-700 bg-ink-950/50 p-4">
         <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-ink-400">
-          account excluded · hardware-primary
+          account excluded
         </p>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-500">{accountBlock.reason}</p>
         <p className="mt-1.5 text-[11px] text-ink-600">
