@@ -343,11 +343,14 @@ export interface AllowedActions {
 export function allowedActions(cls: ICPClass): AllowedActions {
   switch (cls) {
     case "QUALIFIED":
+    case "UNRESOLVED":
+      // Max, 2026-08-12: "don't treat unresolved any different than you would
+      // qualified." UNRESOLVED is almost every contact on every pull — the
+      // badge and the AMBIGUOUS-TITLE reason stay as a caution LABEL, but all
+      // actions work. Locking the majority of results made the tool unusable.
       return { linkedin: true, draftEmail: true, hubspotTask: true, whoOwnsThis: false, showEmail: true };
     case "ROUTER":
       return { linkedin: true, draftEmail: false, hubspotTask: true, whoOwnsThis: true, showEmail: false };
-    case "UNRESOLVED":
-      return { linkedin: true, draftEmail: false, hubspotTask: false, whoOwnsThis: false, showEmail: false };
     default:
       return { linkedin: false, draftEmail: false, hubspotTask: false, whoOwnsThis: false, showEmail: false };
   }

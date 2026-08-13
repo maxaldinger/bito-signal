@@ -7,14 +7,13 @@
 // motion and the tool had no way to express it.
 //
 // COST. Apollo search is free but returns MASKED names ("Romain Hu***t") and
-// no emails. QUALIFIED cards auto-fill both on arrival — same behavior as the
-// brief cards — because the reveal endpoint is shared-cache-guarded server
-// side: a person anyone on the team already revealed costs nothing, and a
-// fresh one costs the credit the rep was about to spend by hand anyway. The
-// blast radius stays bounded because only the CURRENT PAGE (25 people) ever
-// auto-fills, and only its QUALIFIED cards — UNRESOLVED/ROUTER stay masked
-// behind the same gate as everywhere else, and known no-email people are
-// skipped (a credit for "none on file" buys nothing).
+// no emails. Cards auto-fill the real name and verified email on arrival —
+// NO reveal button (Max: "if it surfaces an email, it's just there"). The
+// reveal endpoint is shared-cache-guarded server side, so a person anyone on
+// the team already revealed costs nothing, and known no-email people are
+// skipped (a credit for "none on file" buys nothing). Blast radius stays
+// bounded: only the CURRENT PAGE (25 people) ever auto-fills, and screened
+// tiers spend nothing.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -252,9 +251,8 @@ export function TitleSearch() {
         <h2 className="text-xl font-bold tracking-tight text-ink-50">Title Search</h2>
         <p className="mt-1 text-sm text-ink-400">
           Find people by job title across every company, not just one account. Search costs
-          nothing. Qualified cards fill in the real name and verified email automatically —
-          one Apollo credit each, free when a teammate already revealed the person. Unresolved
-          and router cards stay masked until someone reviews the profile.
+          nothing; names and verified emails fill in automatically as cards load — one Apollo
+          credit each, free when anyone on the team already revealed the person.
         </p>
       </div>
 
@@ -347,7 +345,6 @@ export function TitleSearch() {
               key={p.apolloId || `${p.name}-${i}`}
               person={p}
               reveal={p.apolloId ? reveals[p.apolloId] : undefined}
-              onReveal={() => void reveal(p)}
               autoCheckDelayMs={i * 300}
             />
           ))}
@@ -414,12 +411,10 @@ function Filter({
 function PersonCard({
   person,
   reveal,
-  onReveal,
   autoCheckDelayMs,
 }: {
   person: TitleSearchPerson;
   reveal?: RevealState;
-  onReveal: () => void;
   autoCheckDelayMs: number;
 }) {
   const tier: ICPClass = normalizeClass(person.icp?.classification);
@@ -522,27 +517,18 @@ function PersonCard({
           </a>
           {!gate.showEmail ? (
             <span className="font-mono text-[11px] text-ink-600">
-              {tier.toLowerCase()} · no address until the profile is reviewed
+              {tier.toLowerCase()} · no address for this tier
             </span>
           ) : noEmailOnFile ? (
             <span className="inline-flex items-center gap-1 rounded border border-ink-800 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-500">
               <Mail className="h-3 w-3" /> no email on file · linkedin only
             </span>
           ) : person.apolloId && !reveal?.done ? (
-            <button
-              type="button"
-              onClick={onReveal}
-              disabled={reveal?.loading}
-              title="Spends one Apollo credit"
-              className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-sky-500/40 hover:text-sky-300 disabled:opacity-50"
-            >
-              {reveal?.loading ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Mail className="h-3 w-3" />
-              )}
-              Reveal email <span className="text-ink-600">(1 credit)</span>
-            </button>
+            // No reveal button — the page auto-fills every card; this is just
+            // the in-flight state while the queue gets here.
+            <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-500">
+              <Loader2 className="h-3 w-3 animate-spin" /> pulling email…
+            </span>
           ) : null}
         </div>
 

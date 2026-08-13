@@ -738,11 +738,6 @@ function ApolloPersonCard({
             Draft email
           </button>
         )}
-        {effective === "UNRESOLVED" && (
-          <span className="font-mono text-[11px] text-ink-600">
-            unresolved · review the profile before working this contact
-          </span>
-        )}
         {/* No "Who owns this?" button — a ROUTER's routing ask lives in the
             HubSpot task note instead (see defaultBody below), so the move is
             recorded where the work happens. */}
@@ -835,8 +830,7 @@ function ApolloPersonCard({
           // task for someone we have just said we cannot identify is how the
           // pipeline fills with people who will never be worked.
           <p className="font-mono text-[11px] leading-snug text-ink-500">
-            HubSpot push disabled while this contact is UNRESOLVED. Review the profile; if they own
-            application engineering or a developer platform, they qualify.
+            HubSpot push disabled — this title is screened out by the exclusion rules.
           </p>
         ) : unconfirmed ? (
           // Pushing here would CREATE a HubSpot contact from a name only the
