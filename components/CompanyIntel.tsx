@@ -357,37 +357,44 @@ function ApolloPersonCard({
         data = { ok: false, error: `HTTP ${res.status} — ${res.statusText || "bad response"}` };
       }
       setResult((r) => ({ ...r, [kind]: data }));
-      if (data.ok) {
-        if (data.name) setRevealedName(data.name);
-        if (data.country) setRevealedCountry(data.country);
-        // people/match carries the real profile URL; the people SEARCH usually
-        // doesn't. We were throwing this away, so every task note printed
-        // "PROFILE: UNRESOLVED" for a contact whose profile we had already
-        // paid to resolve.
-        if (data.linkedinUrl) setRevealedLinkedin(data.linkedinUrl);
-        // Cache by Apollo id so reopening the brief reuses it (no re-spend). Use
-        // "" for an attempted-but-empty field so it reads as "tried, none found"
-        // rather than "not yet tried" (which would re-reveal next time).
-        if (person.apolloId) {
-          const patch: {
-            name?: string;
-            email?: string;
-            emailStatus?: string;
-            phone?: string;
-            country?: string;
-            linkedinUrl?: string;
-          } = {};
-          if (data.name) patch.name = data.name;
-          if (data.country) patch.country = data.country;
-          if (data.linkedinUrl) patch.linkedinUrl = data.linkedinUrl;
+      // Identity fields (real name, profile URL, location) come back on ANY
+      // successful MATCH — including ok:false "Apollo matched this person but
+      // has no email on file". Gating them behind data.ok was why exactly the
+      // no-email cards kept their masked "Ba***u" names while everyone else
+      // un-obfuscated.
+      if (data.name) setRevealedName(data.name);
+      if (data.country) setRevealedCountry(data.country);
+      // people/match carries the real profile URL; the people SEARCH usually
+      // doesn't. We were throwing this away, so every task note printed
+      // "PROFILE: UNRESOLVED" for a contact whose profile we had already
+      // paid to resolve.
+      if (data.linkedinUrl) setRevealedLinkedin(data.linkedinUrl);
+      // Cache by Apollo id so reopening the brief reuses it (no re-spend). Use
+      // "" for an attempted-but-empty field so it reads as "tried, none found"
+      // rather than "not yet tried" (which would re-reveal next time). The
+      // paid fields only cache on data.ok — a transport failure must NOT be
+      // recorded as attempted-none.
+      if (person.apolloId) {
+        const patch: {
+          name?: string;
+          email?: string;
+          emailStatus?: string;
+          phone?: string;
+          country?: string;
+          linkedinUrl?: string;
+        } = {};
+        if (data.name) patch.name = data.name;
+        if (data.country) patch.country = data.country;
+        if (data.linkedinUrl) patch.linkedinUrl = data.linkedinUrl;
+        if (data.ok) {
           if (kind === "email") {
             patch.email = data.email ?? "";
             patch.emailStatus = data.emailStatus;
           } else {
             patch.phone = data.phone ?? "";
           }
-          mergeReveal(person.apolloId, patch);
         }
+        if (Object.keys(patch).length > 0) mergeReveal(person.apolloId, patch);
       }
     } catch (e) {
       setResult((r) => ({
