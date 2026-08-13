@@ -102,12 +102,17 @@ export interface ICPVerdict {
 // pullable for that division only — hence `divisionOverride`.
 // ---------------------------------------------------------------------------
 
-/** Named in the spec. Matched on the account name, loosely. */
+/** Named in the spec. Matched on the account name, loosely.
+ *
+ *  NetApp and Synopsys were originally on this list and are deliberately GONE:
+ *  Synopsys sells EDA software, and NetApp's revenue is storage software +
+ *  cloud services — a NetApp brief scoring 82/99 with a live Gemini Enterprise
+ *  adoption signal was blocked by its own name here, which is exactly
+ *  backwards. A name ban is a last resort; the category regex plus the rep's
+ *  pull-anyway override handle the gray cases. */
 const HARDWARE_ACCOUNTS = [
   "honeywell",
   "ametek",
-  "synopsys",
-  "netapp",
   "logitech",
 ];
 

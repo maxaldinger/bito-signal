@@ -51,6 +51,9 @@ import {
   setDeepDiveScore,
   getReveal,
   mergeReveal,
+  useContactReview,
+  setContactReview,
+  clearContactReview,
 } from "@/lib/clientStore";
 
 function Section({
@@ -276,14 +279,51 @@ function ApolloPersonCard({
   const [connectGeneric, setConnectGeneric] = useState(false);
   const [connectLoading, setConnectLoading] = useState(false);
 
+  // Ground truth first: what the team has already DONE with this contact.
+  // Keyed like prospected marks — Apollo id when present, else the name.
+  const contactKey = person.apolloId || person.name;
+  const contactProspected = useIsProspected("contact", contactKey);
+  const contactProspectedAt = useProspectedAt("contact", contactKey);
+  const contactTeamSync = useContactSyncEvent(contactKey);
+  const contactTeamChip = contactTeamSync && !contactTeamSync.mine ? contactTeamSync : undefined;
+  const review = useContactReview(contactKey);
+  // Verdict writes are server-first (a lost write would unlock the credit
+  // spend, then vanish on the next focus-pull) — so the click has a busy
+  // state and failure is said out loud, not swallowed.
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const recordReview = async (verdict: "qualified" | "excluded") => {
+    if (reviewBusy) return;
+    setReviewBusy(true);
+    setReviewError(null);
+    const ok = await setContactReview(contactKey, verdict);
+    if (!ok) setReviewError("Couldn't save the verdict — check the connection and try again.");
+    setReviewBusy(false);
+  };
+
   // STAGE 6 — the available actions must match the classification.
   //   QUALIFIED  → LinkedIn, Draft email, HubSpot task, address shown
   //   ROUTER     → LinkedIn, HubSpot task, "Who owns this?" instead of Draft
   //   UNRESOLVED → LinkedIn only. No draft, no task, NO ADDRESS.
   // "Do not surface a verified email address for anyone the rationale says is
   // not a buyer" — so an UNRESOLVED card never spends a reveal credit either.
-  const gate = allowedActions(state);
-  const screened = state === "EXCLUDED";
+  //
+  // ...BUT HUMAN DECISIONS OUTRANK THE MODEL. A contact already in the CRM —
+  // pushed by this rep or synced by a teammate — has been reviewed and worked
+  // by a person; a later pull's classifier verdict must not retract their
+  // email or their push button (it did exactly that, and locked cards that
+  // were already in HubSpot). And "review the profile" is only a real
+  // instruction because the review can be RECORDED: the rep's explicit
+  // verdict wins over the title read, in both directions.
+  const modelState: ICPClass = state ?? "UNRESOLVED";
+  const humanQualified = review === "qualified" || contactProspected || !!contactTeamSync;
+  const effective: ICPClass =
+    review === "excluded" ? "EXCLUDED" : humanQualified ? "QUALIFIED" : modelState;
+  const gate = allowedActions(effective);
+  const screened = effective === "EXCLUDED";
+  /** When this contact reached HubSpot, from own marks or a teammate's sync. */
+  const pushedAt =
+    contactProspectedAt ?? (contactTeamSync ? new Date(contactTeamSync.at).getTime() : undefined);
 
   /** FREE lookup — people/match with no reveal_* flag costs no credit. Fills in
    *  the profile URL (and the un-obfuscated name) for a contact whose email was
@@ -429,21 +469,43 @@ function ApolloPersonCard({
   // delivers phones async via webhook (we have none), so it always fails here —
   // phones are pulled via the Apollo Chrome extension once a contact's in the
   // CRM. Cached per Apollo id (reopening reuses it) and staggered for rate limits.
+  //
+  // The tier gate holds back the EMAIL, never the NAME: people/match without a
+  // reveal flag is free, and the UNRESOLVED instruction — "review the profile"
+  // — is impossible against a masked name (a LinkedIn search for "Hu***t"
+  // finds nobody). So every card resolves its real name and profile URL;
+  // only gate.showEmail cards touch a credit. gate.showEmail is a dependency
+  // on purpose: when a review verdict qualifies the card, the email reveal
+  // runs then.
   useEffect(() => {
     const id = person.apolloId;
-    if (!id || !gate.showEmail) return; // only a QUALIFIED card spends a reveal credit
+    if (!id) return;
     let cancelled = false;
     const cached = getReveal(id);
     if (cached?.name) setRevealedName(cached.name);
     if (cached?.country) setRevealedCountry(cached.country);
     if (cached?.linkedinUrl) setRevealedLinkedin(cached.linkedinUrl);
-    if (cached?.email !== undefined)
+
+    if (!gate.showEmail) {
+      // Gated tier: free unmask only. Staggered like the reveal so a page of
+      // cards doesn't burst Apollo's per-minute limit.
+      if (!cached?.name || !cached?.linkedinUrl) {
+        const t = setTimeout(() => {
+          if (!cancelled) void resolveProfile(id);
+        }, autoCheckDelayMs);
+        return () => {
+          cancelled = true;
+          clearTimeout(t);
+        };
+      }
+      return;
+    }
+
+    if (cached?.email !== undefined) {
       setResult((r) => ({
         ...r,
         email: { ok: true, email: cached.email, emailStatus: cached.emailStatus, name: cached.name },
       }));
-
-    if (cached?.email !== undefined) {
       // Already revealed, so no credit is owed — but 2,696 cached entries were
       // written before the profile URL was captured, and this early return is
       // why they stayed "PROFILE: UNRESOLVED" forever: the reveal never re-ran,
@@ -461,14 +523,14 @@ function ApolloPersonCard({
       clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [person.apolloId]);
+  }, [person.apolloId, gate.showEmail]);
 
   // Per-person cold email draft (AI assist).
   const [drafting, setDrafting] = useState(false);
   const [draft, setDraft] = useState<{ text?: string; error?: string } | null>(null);
   const [draftCopied, setDraftCopied] = useState(false);
 
-  const draftEmail = async () => {
+  const draftEmail = async (routing = false) => {
     if (drafting) return;
     setDrafting(true);
     setDraft(null);
@@ -476,14 +538,28 @@ function ApolloPersonCard({
     try {
       const who = (revealedName || person.name).split(" ")[0];
       const role = person.title || "an engineering leader";
-      const content =
-        `Write a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
-        `Address them by first name only. Tie it to Bito AI Architect's value (the context layer that grounds their AI coding tools and reviews in their real cross-repo codebase) for an engineering team. ` +
-        `Output ONLY the email: a "Subject:" line, then the body (under 120 words, one clear CTA). ` +
+      const styleRules =
         `Plain text only — NO markdown, asterisks, bold, headings, or "---" separators. ` +
         `Do NOT add any notes, caveats, or commentary to the rep, and no placeholders like [Your name]. ` +
         `Don't invent facts; if you can't verify a detail, just leave it out. ` +
         `Use plain punctuation only — no em or en dashes.`;
+      // A ROUTER gets a ROUTING ASK, never the pitch. The old code wired the
+      // "Who owns this?" button to the same pitch prompt as "Draft email",
+      // which produced exactly the 25-minute-call email the ROUTER tier
+      // exists to prevent.
+      const content = routing
+        ? `Write a very short note from a Bito sales rep to ${who} (${role}) at ${company}. ` +
+          `They are probably NOT the buyer — this is a routing ask, not a pitch. ` +
+          `At most one sentence of context (Bito connects AI coding tools to a team's real cross-repo architecture), ` +
+          `then ask directly who on their team owns developer tooling or developer productivity platforms` +
+          `${person.icp?.routesTo ? ` (likely ${person.icp.routesTo})` : ""}, and thank them. ` +
+          `Under 70 words total. NO product pitch, NO meeting ask, NO claims about their org. ` +
+          `Output ONLY the note: a "Subject:" line, then the body. ` +
+          styleRules
+        : `Write a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
+          `Address them by first name only. Tie it to Bito AI Architect's value (the context layer that grounds their AI coding tools and reviews in their real cross-repo codebase) for an engineering team. ` +
+          `Output ONLY the email: a "Subject:" line, then the body (under 120 words, one clear CTA). ` +
+          styleRules;
       const res = await fetch("/api/assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -531,10 +607,6 @@ function ApolloPersonCard({
     `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(liQuery)}`;
   const emailRes = result.email;
   const phoneRes = result.phone;
-  const contactProspected = useIsProspected("contact", person.apolloId || displayName);
-  const contactTeamSync = useContactSyncEvent(person.apolloId || displayName);
-  const contactTeamChip = contactTeamSync && !contactTeamSync.mine ? contactTeamSync : undefined;
-
   // Only a COMPANY-domain email is usable — a personal/off-domain one would
   // mis-associate the contact in HubSpot, so we treat it as "none surfaced".
   const rootOf = (d?: string) => {
@@ -589,8 +661,21 @@ function ApolloPersonCard({
       {screened && (
         <div className="border-b border-ink-800 bg-ink-900/60 px-4 py-1.5 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-ink-500">
           screened out
-          {person.icp?.reasonCode ? ` · ${REASON_LABEL[person.icp.reasonCode]}` : ""}
-          {person.icp?.hardFiltered ? " · rule" : ""}
+          {review === "excluded"
+            ? " · rep review"
+            : person.icp?.reasonCode
+              ? ` · ${REASON_LABEL[person.icp.reasonCode]}`
+              : ""}
+          {review !== "excluded" && person.icp?.hardFiltered ? " · rule" : ""}
+          {review === "excluded" && (
+            <button
+              type="button"
+              onClick={() => void clearContactReview(contactKey)}
+              className="ml-2 underline hover:text-ink-300"
+            >
+              undo
+            </button>
+          )}
         </div>
       )}
       {!screened && emailState === "none" && (
@@ -612,7 +697,7 @@ function ApolloPersonCard({
               title={`Synced to ${contactTeamChip.by}'s HubSpot on ${new Date(contactTeamChip.at).toLocaleDateString("en-US")}`}
               className="inline-flex items-center gap-1 rounded-md border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-300"
             >
-              synced by {contactTeamChip.by}
+              synced by {contactTeamChip.by} · {fmtDate(new Date(contactTeamChip.at).getTime())}
             </span>
           )}
           {contactProspected && (
@@ -623,19 +708,25 @@ function ApolloPersonCard({
               <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">
                 <Check className="h-2.5 w-2.5" strokeWidth={3.5} />
               </span>
-              In HubSpot
+              In HubSpot{pushedAt ? ` · ${fmtDate(pushedAt)}` : ""}
             </span>
           )}
           {/* STAGE 4. Always rendered: three states that are actually used mean
               the badge carries information, and UNRESOLVED is the honest common
-              case rather than a gap. */}
+              case rather than a gap. Shows the EFFECTIVE tier; when a human
+              decision overrode the model, the tooltip says which and why. */}
           <span
-            title={`${person.icp?.reason ?? ""}${person.icp?.recommendedAction ? ` · ${person.icp.recommendedAction}` : ""}${person.icp ? ` (confidence: ${person.icp.confidence})` : ""}`}
+            title={`${person.icp?.reason ?? ""}${person.icp?.recommendedAction ? ` · ${person.icp.recommendedAction}` : ""}${person.icp ? ` (confidence: ${person.icp.confidence})` : ""}${
+              effective !== modelState
+                ? ` · model said ${modelState.toLowerCase()} — overridden by ${review ? "rep review" : "CRM ground truth (already in HubSpot)"}`
+                : ""
+            }`}
             className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide ${
-              TIER_STYLE[state] ?? TIER_STYLE.UNRESOLVED
+              TIER_STYLE[effective] ?? TIER_STYLE.UNRESOLVED
             }`}
           >
-            {state.toLowerCase()}
+            {effective.toLowerCase()}
+            {effective !== modelState ? " ✓" : ""}
           </span>
           {person.seniority && (
             <span className="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-ink-300">
@@ -661,7 +752,7 @@ function ApolloPersonCard({
             </span>
           )}
           {person.icp.reason}
-          {state === "ROUTER" && person.icp.routesTo && (
+          {effective === "ROUTER" && person.icp.routesTo && (
             <span className="ml-1 text-amber-300/90">Routes to: {person.icp.routesTo}</span>
           )}
           {person.icp.confidence === "low" && (
@@ -686,7 +777,7 @@ function ApolloPersonCard({
         {gate.draftEmail && (
           <button
             type="button"
-            onClick={draftEmail}
+            onClick={() => void draftEmail(false)}
             disabled={drafting}
             title="Draft a personalized cold outreach email for this person (AI)"
             className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-300 disabled:opacity-50"
@@ -698,18 +789,62 @@ function ApolloPersonCard({
         {gate.whoOwnsThis && (
           <button
             type="button"
-            onClick={draftEmail}
+            onClick={() => void draftEmail(true)}
             disabled={drafting}
-            title="Draft a short note asking who owns developer tooling"
+            title="Draft a short routing note — asks who owns developer tooling, never pitches"
             className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300 transition-colors hover:bg-amber-500/20 disabled:opacity-50"
           >
             {drafting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Compass className="h-3 w-3" />}
             Who owns this?
           </button>
         )}
-        {state === "UNRESOLVED" && (
+        {effective === "UNRESOLVED" && (
           <span className="font-mono text-[11px] text-ink-600">
-            unresolved · review the profile before working this contact
+            unresolved · review the profile, then record the call →
+          </span>
+        )}
+        {/* The review, RECORDABLE. UNRESOLVED's instruction is "review the
+            profile" — these buttons are where that review lands, shared with
+            the whole team. ROUTER gets them too: a router who turns out to
+            OWN the platform is a buyer, not a hop. */}
+        {review === undefined &&
+          !humanQualified &&
+          (modelState === "UNRESOLVED" || modelState === "ROUTER") && (
+            <>
+              <button
+                type="button"
+                onClick={() => void recordReview("qualified")}
+                disabled={reviewBusy}
+                title="You reviewed the profile and they own application engineering / a developer platform — unlocks email + HubSpot push, for the whole team"
+                className="inline-flex items-center gap-1 rounded border border-neon-600/40 bg-neon-500/10 px-2 py-1 font-mono text-[11px] font-semibold text-neon-300 transition-colors hover:bg-neon-500/20 disabled:opacity-50"
+              >
+                {reviewBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}{" "}
+                Qualifies
+              </button>
+              <button
+                type="button"
+                onClick={() => void recordReview("excluded")}
+                disabled={reviewBusy}
+                title="You reviewed the profile and they are not a buyer — screens this card out, for the whole team"
+                className="inline-flex items-center gap-1 rounded border border-ink-700 bg-ink-900 px-2 py-1 font-mono text-[11px] text-ink-400 transition-colors hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
+              >
+                Not a fit
+              </button>
+              {reviewError && (
+                <span className="font-mono text-[11px] text-red-400">{reviewError}</span>
+              )}
+            </>
+          )}
+        {review === "qualified" && (
+          <span className="font-mono text-[11px] text-ink-600">
+            reviewed · qualifies{" "}
+            <button
+              type="button"
+              onClick={() => void clearContactReview(contactKey)}
+              className="underline hover:text-ink-300"
+            >
+              undo
+            </button>
           </span>
         )}
       </div>
@@ -796,8 +931,9 @@ function ApolloPersonCard({
           // task for someone we have just said we cannot identify is how the
           // pipeline fills with people who will never be worked.
           <p className="font-mono text-[11px] leading-snug text-ink-500">
-            HubSpot push disabled while this contact is UNRESOLVED. Review the profile; if they own
-            application engineering or a developer platform, they qualify.
+            HubSpot push disabled while this contact is unreviewed. Open the profile; if they own
+            application engineering or a developer platform, hit &ldquo;Qualifies&rdquo; above — it
+            unlocks the email and the push, for the whole team.
           </p>
         ) : unconfirmed ? (
           // Pushing here would CREATE a HubSpot contact from a name only the
@@ -936,6 +1072,9 @@ function ApolloStakeholders({
   const [excludedCounts, setExcludedCounts] = useState<Record<string, number>>({});
   const [surfaced, setSurfaced] = useState(0);
   const [accountBlock, setAccountBlock] = useState<{ reason: string } | null>(null);
+  // Rep override for the account screen: once forced, every page of this
+  // account's pull carries the flag so "pull more" doesn't re-block.
+  const [forced, setForced] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -946,13 +1085,14 @@ function ApolloStakeholders({
   // Dedupes by Apollo id so overlapping pages don't double-list a person. On the
   // initial load, also asks Apollo to look up the motion's named contact (pin).
   const fetchPage = useCallback(
-    async (p: number, append: boolean): Promise<void> => {
+    async (p: number, append: boolean, force = false): Promise<void> => {
       const params = new URLSearchParams({ company, page: String(p) });
       if (domain) params.set("domain", domain);
       if (!append && pinName) params.set("pin", pinName);
       // Forward the brief's signal so each contact's rationale can reference
       // what's actually happening at the account, not just their title.
       if (ctx.callHook) params.set("signal", ctx.callHook.slice(0, 600));
+      if (force) params.set("force", "1");
       const res = await fetch(`/api/enrich/apollo/people?${params.toString()}`);
       let body: ApolloPeopleResponse | { error?: string };
       try {
@@ -1063,6 +1203,27 @@ function ApolloStakeholders({
           No contacts were pulled and no credits were spent. If a software division here has its
           own engineering org, prospect that division directly.
         </p>
+        {/* The category call is a heuristic and the rep can see the whole
+            brief. When the evidence contradicts it (a real software org, a
+            live AI-tooling signal, a big ICP score), the rep's judgment
+            outranks the screen. */}
+        <button
+          type="button"
+          onClick={() => {
+            setForced(true);
+            setAccountBlock(null);
+            setError(null);
+            setLoading(true);
+            fetchPage(1, false, true).finally(() => setLoading(false));
+          }}
+          className="mt-3 inline-flex items-center gap-1.5 rounded border border-neon-600/40 bg-neon-500/10 px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-neon-300 transition-colors hover:bg-neon-500/20"
+        >
+          Pull contacts anyway
+        </button>
+        <p className="mt-1.5 text-[11px] text-ink-600">
+          Overrides the account screen — for when the brief&rsquo;s own evidence (a real software
+          org, a live AI-tooling signal) contradicts the category call.
+        </p>
       </div>
     );
   }
@@ -1155,7 +1316,7 @@ function ApolloStakeholders({
     // once, and every card auto-reveals an email on mount.
     if (decisionMakers.length <= shown && hasMore) {
       setLoadingMore(true);
-      await fetchPage(pageFetched + 1, true).finally(() => setLoadingMore(false));
+      await fetchPage(pageFetched + 1, true, forced).finally(() => setLoadingMore(false));
       return;
     }
     setPerColumn(perColumn + PER_COLUMN_STEP);

@@ -20,12 +20,15 @@ export async function GET(req: NextRequest) {
   // about THIS account rather than the job title alone. Capped: it only needs
   // to be context, and it rides in a URL.
   const signal = req.nextUrl.searchParams.get("signal")?.trim().slice(0, 600) || undefined;
+  // Rep override for the account-level exclusion (the "Pull contacts anyway"
+  // button). Rides the URL, so the CDN caches forced and unforced separately.
+  const force = req.nextUrl.searchParams.get("force") === "1";
 
   if (!company && !domain) {
     return NextResponse.json({ error: "Pass ?company= and/or ?domain=" }, { status: 400 });
   }
 
-  const result = await apolloPeopleByTitle(company, domain, page, pin, signal);
+  const result = await apolloPeopleByTitle(company, domain, page, pin, signal, undefined, force);
   const status = result.ok ? 200 : result.configured ? 502 : 501;
   return NextResponse.json(result, {
     status,

@@ -21,6 +21,9 @@ const KINDS = {
   blurbs: { table: "bito_company_blurbs", key: "company_key", val: "blurb" },
   sweepCursor: { table: "bito_sweep_cursor", key: "cursor_key", val: "page" },
   blacklist: { table: "bito_blacklist", key: "company_key", val: "company" },
+  // Rep review verdicts on contacts ("qualified" | "excluded") — the recorded
+  // outcome of the "review the profile" step the UNRESOLVED tier demands.
+  contactReviews: { table: "bito_contact_reviews", key: "key", val: "verdict" },
 } as const;
 type Kind = keyof typeof KINDS;
 
@@ -30,11 +33,24 @@ export async function GET() {
   const admin = adminClient();
   const out: Record<string, Record<string, unknown>> = {};
   for (const [kind, cfg] of Object.entries(KINDS)) {
-    const { data, error } = await admin.from(cfg.table).select(`${cfg.key},${cfg.val}`);
-    if (error) return NextResponse.json({ ok: false, error: `${kind}: ${error.message}` }, { status: 502 });
     const map: Record<string, unknown> = {};
-    for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
-      map[String(row[cfg.key])] = row[cfg.val];
+    // Page past PostgREST's 1000-row response cap. contactReviews is the first
+    // per-CONTACT kind here, so it can realistically outgrow one page — and a
+    // silently truncated map gets applied as AUTHORITATIVE by the client's
+    // full-replace hydration, erasing real verdicts. `.order()` keeps the
+    // pages disjoint.
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await admin
+        .from(cfg.table)
+        .select(`${cfg.key},${cfg.val}`)
+        .order(cfg.key, { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error)
+        return NextResponse.json({ ok: false, error: `${kind}: ${error.message}` }, { status: 502 });
+      const rows = (data ?? []) as unknown as Record<string, unknown>[];
+      for (const row of rows) map[String(row[cfg.key])] = row[cfg.val];
+      if (rows.length < PAGE) break;
     }
     out[kind] = map;
   }
@@ -63,13 +79,27 @@ export async function POST(req: NextRequest) {
   if (numeric && !Number.isFinite(value as number)) {
     return NextResponse.json({ ok: false, error: "Numeric value required" }, { status: 400 });
   }
+  if (kind === "contactReviews" && value !== "qualified" && value !== "excluded") {
+    return NextResponse.json(
+      { ok: false, error: "Verdict must be 'qualified' or 'excluded'" },
+      { status: 400 },
+    );
+  }
   const cfg = KINDS[kind];
+  const row: Record<string, unknown> = {
+    [cfg.key]: key,
+    [cfg.val]: value,
+    updated_at: new Date().toISOString(),
+  };
+  // A verdict carries who made the call and when — "reviewed" only means
+  // something if someone owns it.
+  if (kind === "contactReviews") {
+    row.user_id = user.id;
+    row.reviewed_at = new Date().toISOString();
+  }
   const { error } = await adminClient()
     .from(cfg.table)
-    .upsert(
-      { [cfg.key]: key, [cfg.val]: value, updated_at: new Date().toISOString() },
-      { onConflict: cfg.key },
-    );
+    .upsert(row, { onConflict: cfg.key });
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 502 });
   return NextResponse.json({ ok: true });
 }

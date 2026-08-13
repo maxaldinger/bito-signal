@@ -149,7 +149,7 @@ async function guardLocalOwner(): Promise<void> {
 }
 
 // ---- WS4: row-per-entry write-through for the shared caches ----
-type CacheKind = "scores" | "blurbs" | "sweepCursor" | "blacklist";
+type CacheKind = "scores" | "blurbs" | "sweepCursor" | "blacklist" | "contactReviews";
 function pushCacheEntry(kind: CacheKind, key: string, value: unknown): void {
   if (typeof window === "undefined") return;
   void fetch("/api/cache", {
@@ -167,6 +167,29 @@ function deleteCacheEntry(kind: CacheKind, key: string): void {
   }).catch(() => {});
 }
 
+/** Like pushCacheEntry/deleteCacheEntry but CONFIRMED: resolves true only when
+ *  the server accepted the write. For entries where a silently lost write is
+ *  not acceptable (review verdicts drive the credit-spending gate, and the
+ *  focus-time pull is a full replace that would erase an unpersisted one). */
+async function writeCacheEntryConfirmed(
+  method: "POST" | "DELETE",
+  kind: CacheKind,
+  key: string,
+  value?: unknown,
+): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  try {
+    const res = await fetch("/api/cache", {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(method === "POST" ? { kind, key, value } : { kind, key }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Hydrate the four shared caches from their row-per-entry tables. Server is
  *  authoritative — same posture as pullState for per-user stores. */
 async function pullSharedCaches(): Promise<void> {
@@ -180,12 +203,14 @@ async function pullSharedCaches(): Promise<void> {
       blurbs?: Record<string, string>;
       sweepCursor?: Record<string, number>;
       blacklist?: Record<string, string>;
+      contactReviews?: Record<string, "qualified" | "excluded">;
     };
     if (!d.ok) return;
     if (d.scores) scores.applyServer(d.scores);
     if (d.blurbs) companyBlurbs.applyServer(d.blurbs);
     if (d.sweepCursor) sweepCursor.applyServer(d.sweepCursor);
     if (d.blacklist) blacklist.applyServer(d.blacklist);
+    if (d.contactReviews) contactReviews.applyServer(d.contactReviews);
   } catch {
     /* offline — local copies serve */
   }
@@ -392,6 +417,52 @@ export function useProspectedAt(kind: "company" | "contact", key: string): numbe
   const k = matchingKey(map, kind, key);
   const ts = k ? map[k] : 0;
   return ts && ts > 0 ? ts : undefined;
+}
+
+// ---------------- Contact review verdicts (shared) ----------------
+// The Stage-6 gate's missing half: UNRESOLVED means "review the profile" —
+// this records the review's outcome, shared with the whole team, so a card
+// someone already judged never comes back locked (or worked) on a later pull.
+// Keyed by Apollo id when the contact has one, else normalized name — the
+// same convention as prospected contact marks.
+type ContactReviews = Record<string, "qualified" | "excluded">;
+const contactReviews = makeStore<ContactReviews>("bito-contact-reviews", {}, undefined, false);
+
+/** Record a review verdict. SERVER-FIRST, unlike the other cache writes: the
+ *  verdict unlocks the credit-spending email reveal, and the focus-time
+ *  hydration is a full replace — an optimistic local set whose POST quietly
+ *  failed would unlock the card, spend the credit, then vanish on the next
+ *  tab focus. Local state only changes once the server has the row.
+ *  Returns false when the write didn't stick — the caller says so. */
+export async function setContactReview(
+  key: string,
+  verdict: "qualified" | "excluded",
+): Promise<boolean> {
+  if (!key) return false;
+  const k = normFor("contact", key);
+  const ok = await writeCacheEntryConfirmed("POST", "contactReviews", k, verdict);
+  if (ok) contactReviews.set({ ...contactReviews.get(), [k]: verdict });
+  return ok;
+}
+
+export async function clearContactReview(key: string): Promise<boolean> {
+  if (!key) return false;
+  const k = normFor("contact", key);
+  const cur = contactReviews.get();
+  if (cur[k] === undefined) return true;
+  const ok = await writeCacheEntryConfirmed("DELETE", "contactReviews", k);
+  if (ok) {
+    const next = { ...cur };
+    delete next[k];
+    contactReviews.set(next);
+  }
+  return ok;
+}
+
+export function useContactReview(key: string): "qualified" | "excluded" | undefined {
+  const s = contactReviews.useStore();
+  if (!key) return undefined;
+  return s[normFor("contact", key)];
 }
 
 // ---------------- Deep-dive ICP scores ----------------

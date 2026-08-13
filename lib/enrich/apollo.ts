@@ -614,7 +614,11 @@ export async function apolloPeopleByTitle(
   signal?: string,
   /** Set when deliberately targeting a SOFTWARE DIVISION of a hardware parent.
    *  The spec allows those, scoped to the division. */
-  division?: string
+  division?: string,
+  /** Rep override: pull despite an account-level exclusion. The category call
+   *  is a heuristic and it misfires (NetApp, 82/99 with a live AI-tooling
+   *  signal, was blocked by name); the rep looking at the evidence outranks it. */
+  force?: boolean
 ): Promise<ApolloPeopleResult> {
   const fail = (configured: boolean, error: string): ApolloPeopleResult => ({
     configured,
@@ -626,7 +630,7 @@ export async function apolloPeopleByTitle(
   // STAGE 1 — account-level exclusion, BEFORE any Apollo call. A hardware-primary
   // account costs one string comparison here instead of two searches, a
   // classifier pass and a page of cards that each want a reveal credit.
-  const acct = accountExcluded(company, signal, division);
+  const acct = force ? undefined : accountExcluded(company, signal, division);
   if (acct) {
     return {
       configured: true,

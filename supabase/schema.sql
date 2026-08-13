@@ -102,6 +102,10 @@ create table public.bito_blacklist (
   company text not null,
   created_by uuid references auth.users (id) on delete set null,
   created_at timestamp with time zone not null default now(),
+  -- /api/cache stamps updated_at on every upsert; this column was missing at
+  -- creation and every organic blacklist write 502'd (PGRST204) until the
+  -- blacklist_updated_at migration (2026-08-12) added it.
+  updated_at timestamp with time zone not null default now(),
   constraint bito_blacklist_pkey primary key (company_key)
 );
 
@@ -118,6 +122,29 @@ begin
     execute format('create policy %I on public.%I for delete to authenticated using (true)', t || '_auth_delete', t);
   end loop;
 end $$;
+
+-- Contact review verdicts — the Stage-6 gate's missing half. UNRESOLVED means
+-- "review the profile"; this records that review, shared across the team, so a
+-- contact someone already judged doesn't come back locked (or worked) on the
+-- next pull. (Migration: contact_reviews, 2026-08-12.)
+create table public.bito_contact_reviews (
+  key text not null,
+  verdict text not null,
+  user_id uuid references auth.users (id) on delete set null,
+  reviewed_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now(),
+  constraint bito_contact_reviews_pkey primary key (key),
+  constraint bito_contact_reviews_verdict_check check (verdict in ('qualified', 'excluded'))
+);
+alter table public.bito_contact_reviews enable row level security;
+create policy bito_contact_reviews_auth_select on public.bito_contact_reviews
+  for select to authenticated using (true);
+create policy bito_contact_reviews_auth_insert on public.bito_contact_reviews
+  for insert to authenticated with check (true);
+create policy bito_contact_reviews_auth_update on public.bito_contact_reviews
+  for update to authenticated using (true) with check (true);
+create policy bito_contact_reviews_auth_delete on public.bito_contact_reviews
+  for delete to authenticated using (true);
 
 -- ---------------------------------------------------------------------------
 -- Sync attribution: who pushed what to their HubSpot, visible to everyone.
