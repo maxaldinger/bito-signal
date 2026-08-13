@@ -658,6 +658,7 @@ export default function Page() {
               </>
             ) : tab === "directory" ? (
               <DirectoryView
+                region={region}
                 onSelectCompany={getIntel}
                 onGetIntel={getIntel}
                 briefs={briefs}
@@ -667,7 +668,7 @@ export default function Page() {
             ) : tab === "github" ? (
               <GitHubProspecting />
             ) : tab === "titles" ? (
-              <TitleSearch />
+              <TitleSearch region={region} />
             ) : tab === "favorites" ? (
               <FavoritesView
                 signals={signals}

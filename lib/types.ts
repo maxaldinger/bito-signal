@@ -80,6 +80,9 @@ export interface DirectoryEntry {
   companyKey: string;       // normalized dedup key
   company: string;
   domain?: string;
+  /** Directory scope — 'us' (the original Signal 2000) or 'in' (largest
+   *  Indian companies). Follows the header's US/IN toggle. */
+  region?: "us" | "in";
   segment: SegmentId;
   sweEstimate?: number;     // modeled engineer headcount (rough, shown with "~")
   shortBrief: string;       // pre-populated "what they do" (Apollo short_description)

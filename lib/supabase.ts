@@ -346,6 +346,7 @@ interface DirectoryRow {
   company_key: string;
   company: string;
   domain: string | null;
+  region: string | null;
   segment: string | null;
   swe_estimate: number | null;
   short_brief: string | null;
@@ -362,6 +363,7 @@ function rowToDirectory(r: DirectoryRow): DirectoryEntry {
     companyKey: r.company_key,
     company: r.company,
     domain: r.domain ?? undefined,
+    region: r.region === "in" ? "in" : "us",
     segment: (r.segment as SegmentId) || "enterprise",
     sweEstimate: r.swe_estimate ?? undefined,
     shortBrief: r.short_brief ?? "",
@@ -385,6 +387,7 @@ export async function upsertDirectory(
     company_key: e.companyKey,
     company: e.company,
     domain: e.domain ?? null,
+    region: e.region ?? "us",
     segment: e.segment,
     swe_estimate: e.sweEstimate ?? null,
     short_brief: e.shortBrief || null,
@@ -418,9 +421,10 @@ export async function upsertDirectory(
   }
 }
 
-/** Fetch the whole directory (strongest-fit first), paged through PostgREST's
- * ~1000-row cap up to `cap`. */
+/** Fetch one region's directory (strongest-fit first), paged through
+ * PostgREST's ~1000-row cap up to `cap`. */
 export async function fetchDirectory(
+  region: RegionId = "us",
   cap = 2500,
 ): Promise<{ configured: boolean; ok: boolean; error?: string; entries: DirectoryEntry[]; total: number }> {
   const cfg = config();
@@ -431,7 +435,7 @@ export async function fetchDirectory(
   try {
     for (let offset = 0; offset < cap; offset += chunk) {
       const res = await fetch(
-        `${cfg.url}/rest/v1/bito_directory?select=*&order=strength.desc,company.asc&limit=${chunk}&offset=${offset}`,
+        `${cfg.url}/rest/v1/bito_directory?select=*&region=eq.${region}&order=strength.desc,company.asc&limit=${chunk}&offset=${offset}`,
         {
           headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}`, Prefer: "count=exact" },
           signal: AbortSignal.timeout(TIMEOUT_MS),

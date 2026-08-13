@@ -35,6 +35,7 @@ import {
   type ICPClass,
 } from "@/lib/icpClassifier";
 import type { TitleSearchPerson } from "@/lib/enrich/apollo";
+import type { RegionId } from "@/lib/data";
 import { isSendableEmail, provenanceIsWeak, provenanceLabel } from "@/lib/enrich/emailTrust";
 import { fmtNum } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
@@ -88,11 +89,14 @@ interface RevealState {
   done?: boolean;
 }
 
-export function TitleSearch() {
+export function TitleSearch({ region }: { region: RegionId }) {
   const [query, setQuery] = useState("developer experience");
   const [sizeIdx, setSizeIdx] = useState(1); // 1,000+
   const [senIdx, setSenIdx] = useState(0); // director+
-  const [usOnly, setUsOnly] = useState(true);
+  // "This region only" — the header's US/IN toggle picks WHICH country that
+  // is, this checkbox just turns the geographic filter on/off.
+  const [regionOnly, setRegionOnly] = useState(true);
+  const regionCountry = region === "in" ? "India" : "United States";
 
   const [people, setPeople] = useState<TitleSearchPerson[]>([]);
   const [page, setPage] = useState(1);
@@ -131,7 +135,7 @@ export function TitleSearch() {
             titles,
             seniorities: SENIORITY_SETS[senIdx].values,
             employeeRanges: SIZE_BANDS[sizeIdx].ranges,
-            locations: usOnly ? ["United States"] : [],
+            locations: regionOnly ? [regionCountry] : [],
             page: toPage,
             perPage: 25,
           }),
@@ -163,14 +167,15 @@ export function TitleSearch() {
         }
       }
     },
-    [query, senIdx, sizeIdx, usOnly],
+    [query, senIdx, sizeIdx, regionOnly, regionCountry],
   );
 
-  // First load: run the default query so the screen isn't a blank form.
+  // First load AND region flips: run the query so the screen tracks the
+  // header's US/IN toggle without a manual re-search.
   useEffect(() => {
     void run(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [region]);
 
   const reveal = async (p: TitleSearchPerson) => {
     const id = p.apolloId;
@@ -305,11 +310,11 @@ export function TitleSearch() {
           <label className="flex cursor-pointer items-center gap-1.5 font-mono text-[11px] text-ink-400">
             <input
               type="checkbox"
-              checked={usOnly}
-              onChange={(e) => setUsOnly(e.target.checked)}
+              checked={regionOnly}
+              onChange={(e) => setRegionOnly(e.target.checked)}
               className="h-3 w-3 accent-neon-500"
             />
-            US only
+            {region === "in" ? "India" : "US"} only
           </label>
         </div>
       </form>

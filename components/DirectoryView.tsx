@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Search,
   Building2,
@@ -13,6 +13,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { DirectoryEntry, Signal, BriefState } from "@/lib/types";
+import type { RegionId } from "@/lib/data";
 import { useBlacklist, companyInMap } from "@/lib/clientStore";
 import { SignalCard } from "./SignalCard";
 import { NotAFitList } from "./SignalFeed";
@@ -117,12 +118,15 @@ function Pager({
 
 export function DirectoryView({
   briefs,
+  region,
   onSelectCompany,
   onGetIntel,
   onCloseIntel,
   onRefreshIntel,
 }: {
   briefs: Record<string, BriefState>;
+  /** Header's US/IN toggle — picks which region's directory shows. */
+  region: RegionId;
   onSelectCompany: (c: string) => void;
   onGetIntel: (c: string) => void;
   onCloseIntel: (company: string) => void;
@@ -136,10 +140,10 @@ export function DirectoryView({
   const [populating, setPopulating] = useState(false);
   const blacklistMap = useBlacklist();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setError("");
     try {
-      const res = await fetch("/api/directory", { cache: "no-store" });
+      const res = await fetch(`/api/directory?region=${region}`, { cache: "no-store" });
       const data = (await res.json()) as { ok: boolean; error?: string; entries: DirectoryEntry[] };
       if (data.ok) setEntries(data.entries);
       else {
@@ -150,11 +154,14 @@ export function DirectoryView({
       setEntries([]);
       setError("Network error loading the directory.");
     }
-  };
+  }, [region]);
 
+  // Region flip = a different directory: show the skeleton, reload, page 1.
   useEffect(() => {
+    setEntries(null);
+    setPage(1);
     void load();
-  }, []);
+  }, [load]);
 
   const populate = async () => {
     if (populating) return;
@@ -222,19 +229,25 @@ export function DirectoryView({
             <Building2 className="h-5 w-5 text-neon-400" /> Signal 2000
           </h2>
           <p className="mt-1 text-sm text-ink-300">
-            The ~2,000 largest US companies across every sector — short brief on view,
-            full intel on demand. {entries ? `${entries.length.toLocaleString()} companies.` : ""}
+            The ~2,000 largest {region === "in" ? "Indian" : "US"} companies across every sector —
+            short brief on view, full intel on demand.{" "}
+            {entries ? `${entries.length.toLocaleString()} companies.` : ""}
           </p>
         </div>
-        <button
-          onClick={populate}
-          disabled={populating}
-          title="Re-seed the directory from the largest-US-companies list"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200 disabled:opacity-50"
-        >
-          {populating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          {populating ? "Building…" : "Refresh list"}
-        </button>
+        {/* The re-seed button only applies to the US list (its static seed
+            lives in the repo); the India list is built server-side from
+            Apollo + a curated seed via scripts/build-india-directory.mjs. */}
+        {region === "us" && (
+          <button
+            onClick={populate}
+            disabled={populating}
+            title="Re-seed the directory from the largest-US-companies list"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200 disabled:opacity-50"
+          >
+            {populating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {populating ? "Building…" : "Refresh list"}
+          </button>
+        )}
       </div>
 
       {/* Search */}
@@ -273,18 +286,28 @@ export function DirectoryView({
         </div>
       ) : entries.length === 0 ? (
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
-          <p className="text-sm text-ink-300">The directory is empty.</p>
-          <p className="mt-1 text-xs text-ink-500">
-            Build it now — seeds the ~2,000 largest US companies across every sector.
+          <p className="text-sm text-ink-300">
+            The {region === "in" ? "India" : "US"} directory is empty.
           </p>
-          <button
-            onClick={populate}
-            disabled={populating}
-            className="mt-4 inline-flex items-center gap-2 rounded-lg border border-neon-600/50 bg-neon-500/15 px-5 py-2.5 text-sm font-semibold text-neon-300 shadow-glow-sm transition-all hover:bg-neon-500/25 disabled:opacity-50"
-          >
-            {populating ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
-            {populating ? "Building directory…" : "Build directory"}
-          </button>
+          {region === "us" ? (
+            <>
+              <p className="mt-1 text-xs text-ink-500">
+                Build it now — seeds the ~2,000 largest US companies across every sector.
+              </p>
+              <button
+                onClick={populate}
+                disabled={populating}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg border border-neon-600/50 bg-neon-500/15 px-5 py-2.5 text-sm font-semibold text-neon-300 shadow-glow-sm transition-all hover:bg-neon-500/25 disabled:opacity-50"
+              >
+                {populating ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
+                {populating ? "Building directory…" : "Build directory"}
+              </button>
+            </>
+          ) : (
+            <p className="mt-1 text-xs text-ink-500">
+              The India list is seeded server-side (scripts/build-india-directory.mjs) — ask Max.
+            </p>
+          )}
         </div>
       ) : (
         <>
