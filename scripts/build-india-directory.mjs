@@ -112,7 +112,7 @@ const bandLabel = (n) =>
 // ---------------------------------------------------------------------------
 // 1. Apollo India sweep, largest bands first.
 // ---------------------------------------------------------------------------
-const BANDS = ["100001,1000000", "50001,100000", "20001,50000", "10001,20000", "5001,10000", "2001,5000", "1001,2000"];
+const BANDS = ["100001,1000000", "50001,100000", "20001,50000", "10001,20000", "5001,10000", "2001,5000", "1001,2000", "501,1000"];
 const candidates = new Map(); // rootDomain -> {name, domain, fromBand}
 for (const band of BANDS) {
   if (candidates.size >= CAP + 700) break;
@@ -190,8 +190,21 @@ async function enrichWorker() {
     processOrg(c, org);
   }
 }
+// Not companies: India's biggest "employers" in Apollo include state
+// departments, police forces, universities and schools. A prospecting
+// directory wants none of them (first run surfaced "Basic Education
+// Department, Uttar Pradesh" at #2 with 624K teachers).
+const NOT_A_COMPANY =
+  /\b(university|universit|college|school|institute of|polytechnic|academy of|police|army|navy|air force|ministry|government|govt\.?|municipal|panchayat|zilla|district court|state road transport|forest department|education department)\b/i;
+const GOV_DOMAIN = /\.(gov|nic|ac)\.in$|\.edu$/i;
+
 function processOrg(c, org) {
   if (!org) { dropped += 1; return; }
+  const checkName = `${c.name} ${typeof org.name === "string" ? org.name : ""}`;
+  const checkDomain = typeof org.primary_domain === "string" ? org.primary_domain : c.domain;
+  // Underscores never appear in real company names — they mark junk Apollo
+  // records ("TCS_India", an ultimatix.net dup of TCS that landed at #2).
+  if (NOT_A_COMPANY.test(checkName) || GOV_DOMAIN.test(checkDomain) || /_/.test(checkName)) { dropped += 1; return; }
   const employees = typeof org.estimated_num_employees === "number" && Number.isFinite(org.estimated_num_employees)
     ? org.estimated_num_employees : undefined;
   // Under 500 employees can't be a "largest companies in India" row — for a
