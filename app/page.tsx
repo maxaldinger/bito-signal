@@ -9,6 +9,7 @@ import { DirectoryView } from "@/components/DirectoryView";
 import { GitHubProspecting } from "@/components/GitHubProspecting";
 import { TitleSearch } from "@/components/TitleSearch";
 import { SalesAssist } from "@/components/SalesAssist";
+import { PipelineQuestions } from "@/components/PipelineQuestions";
 import { PullControls } from "@/components/PullControls";
 import {
   useDeepDiveScores,
@@ -678,6 +679,8 @@ export default function Page() {
                 onCloseIntel={closeBrief}
                 onRefreshIntel={(c) => getIntel(c, true)}
               />
+            ) : tab === "pipeline" ? (
+              <PipelineQuestions />
             ) : (
               <SalesAssist />
             )}

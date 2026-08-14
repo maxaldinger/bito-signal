@@ -14,6 +14,7 @@ import {
   Building2,
   Github,
   LogOut,
+  ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 import { SEGMENTS, SIGNAL_TYPES, SWE_BANDS, type SweBandId } from "@/lib/data";
@@ -21,7 +22,7 @@ import type { SegmentId, SignalTypeId } from "@/lib/types";
 import { useFavorites, useProspectedCount, clearAllProspected } from "@/lib/clientStore";
 import { SegmentIcon } from "./SegmentIcon";
 
-export type TabId = "feed" | "directory" | "github" | "titles" | "favorites" | "assist";
+export type TabId = "feed" | "directory" | "github" | "titles" | "favorites" | "assist" | "pipeline";
 
 const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "feed", label: "Signal Feed", icon: Radio },
@@ -30,6 +31,12 @@ const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "titles", label: "Title Search", icon: UserSearch },
   { id: "favorites", label: "Signal favorites", icon: Star },
   { id: "assist", label: "Sales Assist", icon: Sparkles },
+];
+
+// Below the divider: reference material for working the pipeline, as opposed
+// to the prospecting surfaces above it.
+const NAV_PIPELINE: { id: TabId; label: string; icon: LucideIcon }[] = [
+  { id: "pipeline", label: "Pipeline Questions", icon: ClipboardList },
 ];
 
 // Section heading with "all" / "clear" affordances.
@@ -328,6 +335,27 @@ export function Sidebar({
               </button>
             );
           })}
+            <div className="my-2 border-t border-ink-800" />
+            {NAV_PIPELINE.map((item) => {
+              const active = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    onTab(item.id);
+                    onMobileClose?.();
+                  }}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
+                    active
+                      ? "border border-neon-600/30 bg-neon-500/10 text-neon-300"
+                      : "border border-transparent text-ink-300 hover:bg-ink-800 hover:text-ink-50"
+                  }`}
+                >
+                  <item.icon className="h-[17px] w-[17px]" />
+                  <span className="flex-1 text-left">{item.label}</span>
+                </button>
+              );
+            })}
         </nav>
 
         {/* Pull / pagination controls — sit above the collapsible filters */}
