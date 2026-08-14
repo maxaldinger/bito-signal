@@ -48,46 +48,55 @@ const DISCOVERY: Group[] = [
   {
     heading: "The pain, in their words",
     items: [
+      // Broadest first — "what goes wrong most" opens the wound, the
+      // senior-rewrite question drills into the sharpest instance, and cost
+      // lands last so it prices the pain they just described.
+      { n: 7, q: "What kind of task does the agent get wrong most often?" },
       {
-        n: 7,
+        n: 8,
         q: "Where does the agent produce output they can't ship without a senior engineer rewriting it?",
       },
-      { n: 8, q: "What kind of task does the agent get wrong most often?" },
       { n: 9, q: "What is the cost of that today, in time or rework, not in tokens?" },
     ],
   },
   {
     heading: "Priority",
     items: [
+      // Adoption is the GATE, so it goes first: if people aren't using the
+      // tools yet, the cost-vs-quality ranking is moot (Ivan's point).
       {
         n: 10,
-        q: "If they could only fix one, cost or quality, which one and why?",
-        note: "Every account gives both. Make them rank it.",
+        q: "Is adoption itself still a problem, or are people using the tools heavily already?",
+        note: "Ivan ranked adoption above both cost and quality. That changes everything.",
       },
       {
         n: 11,
-        q: "Is adoption itself still a problem, or are people using the tools heavily already?",
-        note: "Ivan ranked adoption above both cost and quality. That changes everything.",
+        q: "If they could only fix one, cost or quality, which one and why?",
+        note: "Every account gives both. Make them rank it.",
+      },
+    ],
+  },
+  {
+    heading: "The one nobody asks",
+    items: [
+      // Deliberately BEFORE the buying-process block, not dead last: asked as
+      // an interrogation coda it lands flat, asked here it defuses the old
+      // objection while there's still call time to address it.
+      {
+        n: 12,
+        q: "What happened the last time you evaluated a tool like this and didn't buy it?",
+        note: "Guidewire had a Qodo failure scar. That's the objection you'd otherwise hit blind.",
       },
     ],
   },
   {
     heading: "Buying process",
     items: [
-      { n: 12, q: "Who owns this decision, and who has to approve it?" },
-      { n: 13, q: "Has anything like this gone through InfoSec before, and who runs that?" },
-      { n: 14, q: "Is there budget for this, or does it have to come out of something else?" },
-      { n: 15, q: "What would have to be true for you to move forward after a POC?" },
-    ],
-  },
-  {
-    heading: "The one nobody asks",
-    items: [
-      {
-        n: 16,
-        q: "What happened the last time you evaluated a tool like this and didn't buy it?",
-        note: "Guidewire had a Qodo failure scar. That's the objection you'd otherwise hit blind.",
-      },
+      { n: 13, q: "Who owns this decision, and who has to approve it?" },
+      { n: 14, q: "Has anything like this gone through InfoSec before, and who runs that?" },
+      { n: 15, q: "Is there budget for this, or does it have to come out of something else?" },
+      // The closer — it tees the POC scoping call as the natural next step.
+      { n: 16, q: "What would have to be true for you to move forward after a POC?" },
     ],
   },
 ];
