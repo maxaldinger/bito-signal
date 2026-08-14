@@ -2,15 +2,14 @@
 
 // Pipeline Questions — static reference for live calls. Two columns: the
 // discovery call on the left, the POC scoping call on the right. Content is
-// Max's, verbatim (2026-08-14), including the account references — the
-// parentheticals are the reasons a question exists, learned from real deals.
+// Max's (2026-08-14), questions only — he cut the explanatory notes on
+// purpose, so don't add commentary back.
 
 import { ClipboardList, Compass, FlaskConical } from "lucide-react";
 
 interface Q {
   n: number;
   q: string;
-  note?: string;
 }
 
 interface Group {
@@ -41,7 +40,6 @@ const DISCOVERY: Group[] = [
       {
         n: 6,
         q: "What have they already built internally to solve this?",
-        note: "Navi, MeridianLink, Watermark, Kotak and redBus all had something. Finding out late is what kills these.",
       },
     ],
   },
@@ -67,12 +65,10 @@ const DISCOVERY: Group[] = [
       {
         n: 10,
         q: "Is adoption itself still a problem, or are people using the tools heavily already?",
-        note: "Ivan ranked adoption above both cost and quality. That changes everything.",
       },
       {
         n: 11,
         q: "If they could only fix one, cost or quality, which one and why?",
-        note: "Every account gives both. Make them rank it.",
       },
     ],
   },
@@ -85,7 +81,6 @@ const DISCOVERY: Group[] = [
       {
         n: 12,
         q: "What happened the last time you evaluated a tool like this and didn't buy it?",
-        note: "Guidewire had a Qodo failure scar. That's the objection you'd otherwise hit blind.",
       },
     ],
   },
@@ -110,7 +105,6 @@ const POC: Group[] = [
       {
         n: 3,
         q: "What does failure look like?",
-        note: "If they can't answer this, there are no criteria yet.",
       },
     ],
   },
@@ -125,7 +119,6 @@ const POC: Group[] = [
       {
         n: 6,
         q: "Can we run the baseline arm on the same tasks with the same model, so the only variable is us?",
-        note: "This is exactly what Kotak asked for and Bito couldn't produce.",
       },
     ],
   },
@@ -135,7 +128,6 @@ const POC: Group[] = [
       {
         n: 7,
         q: "Which repos, and are they interdependent?",
-        note: "A single clean repo understates the value.",
       },
       {
         n: 8,
@@ -152,7 +144,6 @@ const POC: Group[] = [
       {
         n: 12,
         q: "What is the start date and the end date?",
-        note: "An open-ended POC never ends.",
       },
       { n: 13, q: "When does the readout happen, and who is in the room?" },
     ],
@@ -195,12 +186,7 @@ function QuestionList({ groups }: { groups: Group[] }) {
                 <span className="mt-px w-5 shrink-0 text-right font-mono text-[11px] font-semibold text-neon-400">
                   {item.n}
                 </span>
-                <div className="min-w-0">
-                  <p className="text-sm leading-snug text-ink-100">{item.q}</p>
-                  {item.note && (
-                    <p className="mt-0.5 text-[11px] leading-snug text-ink-500">{item.note}</p>
-                  )}
-                </div>
+                <p className="min-w-0 text-sm leading-snug text-ink-100">{item.q}</p>
               </li>
             ))}
           </ol>
