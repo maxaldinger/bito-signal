@@ -5,7 +5,7 @@
 // Max's (2026-08-14), questions only — he cut the explanatory notes on
 // purpose, so don't add commentary back.
 
-import { ClipboardList, Compass, FlaskConical } from "lucide-react";
+import { ArrowUpRight, ClipboardList, Compass, FlaskConical } from "lucide-react";
 
 interface Q {
   n: number;
@@ -196,7 +196,12 @@ function QuestionList({ groups }: { groups: Group[] }) {
   );
 }
 
-export function PipelineQuestions() {
+export function PipelineQuestions({
+  onOpenAssist,
+}: {
+  /** Jump to a Sales Assist tool — "meddpicc" after discovery, "poc" after scoping. */
+  onOpenAssist: (mode: "meddpicc" | "poc") => void;
+}) {
   return (
     <div className="space-y-5">
       <div>
@@ -214,6 +219,13 @@ export function PipelineQuestions() {
             <Compass className="h-4 w-4" /> Discovery call
           </h3>
           <QuestionList groups={DISCOVERY} />
+          <button
+            type="button"
+            onClick={() => onOpenAssist("meddpicc")}
+            className="mt-5 inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-sky-300 transition-colors hover:bg-sky-500/20"
+          >
+            Score the call · MEDDPICC scorecard <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
         </section>
 
         <section className="rounded-xl border border-ink-700 bg-ink-900/60 p-5">
@@ -221,6 +233,13 @@ export function PipelineQuestions() {
             <FlaskConical className="h-4 w-4" /> POC scoping call
           </h3>
           <QuestionList groups={POC} />
+          <button
+            type="button"
+            onClick={() => onOpenAssist("poc")}
+            className="mt-5 inline-flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-wide text-violet-300 transition-colors hover:bg-violet-500/20"
+          >
+            Build the plan · POC Plan generator <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
         </section>
       </div>
 

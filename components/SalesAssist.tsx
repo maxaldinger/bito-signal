@@ -1760,8 +1760,11 @@ function Dropdown({
   );
 }
 
-export function SalesAssist() {
-  const [mode, setMode] = useState("ask");
+export function SalesAssist({ initialMode }: { initialMode?: string } = {}) {
+  // initialMode: deep links (Pipeline Questions → MEDDPICC / POC Plan) land
+  // on the right tool. Applies on mount only — the component unmounts when
+  // the tab switches away, so each arrival re-reads it.
+  const [mode, setMode] = useState(initialMode ?? "ask");
   const [tone, setTone] = useState("Direct");
   const [persona, setPersona] = useState(PERSONAS[0]);
   const ctx: Ctx = { tone, persona };

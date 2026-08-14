@@ -104,6 +104,10 @@ export default function Page() {
   const [region, setRegion] = useState<RegionId>("us");
   const regionRef = useRef<RegionId>("us");
 
+  // Sales Assist tool to land on when arriving via a deep link (Pipeline
+  // Questions → MEDDPICC / POC Plan). Applied on SalesAssist mount.
+  const [assistMode, setAssistMode] = useState<string | undefined>(undefined);
+
   // Anchored to the last SUCCESSFUL data load — a failed refresh must not
   // claim "just now". `now` ticks to re-derive the label.
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
@@ -562,6 +566,9 @@ export default function Page() {
           activeTab={tab}
           onTab={(t) => {
             setTab(t);
+            // Plain nav always lands on Sales Assist's default tool — only
+            // the Pipeline Questions deep links pick one.
+            setAssistMode(undefined);
             clearSelection();
           }}
           mobileOpen={mobileNav}
@@ -680,9 +687,15 @@ export default function Page() {
                 onRefreshIntel={(c) => getIntel(c, true)}
               />
             ) : tab === "pipeline" ? (
-              <PipelineQuestions />
+              <PipelineQuestions
+                onOpenAssist={(m) => {
+                  setAssistMode(m);
+                  setTab("assist");
+                  clearSelection();
+                }}
+              />
             ) : (
-              <SalesAssist />
+              <SalesAssist initialMode={assistMode} />
             )}
           </div>
         </main>
