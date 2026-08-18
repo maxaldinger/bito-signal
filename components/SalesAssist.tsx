@@ -1076,7 +1076,123 @@ function RoiNumber({
   );
 }
 
+// Simple view — the two numbers a rep always has on a call (headcount and
+// AI spend) plus one prefilled cost. Everything else is FIXED to Bito's
+// published math instead of being a lever: −47% token cost per task, ~5
+// planning hrs reclaimed per engineer per month (the published ~1,000
+// hrs/mo on a 200-engineer team). The every-lever version is the Advanced tab.
+const SIMPLE_TOKEN_CUT = 0.47;
+const SIMPLE_HRS_PER_ENG_MO = 5;
+
+function RoiSimple() {
+  const [engineers, setEngineers] = useState(200);
+  const [tokenSpendMo, setTokenSpendMo] = useState(3300);
+  const [costPerEng, setCostPerEng] = useState(250000);
+  const [copied, setCopied] = useState(false);
+
+  const hourly = costPerEng / WORK_HOURS;
+  const hrsPerMonth = engineers * SIMPLE_HRS_PER_ENG_MO;
+  const timeValue = hrsPerMonth * 12 * hourly;
+  const tokenSavings = tokenSpendMo * 12 * SIMPLE_TOKEN_CUT;
+  const total = timeValue + tokenSavings;
+
+  const summary =
+    `Bito AI Architect — estimated annual impact for a ${engineers}-engineer team: ${usd(total)} ` +
+    `(${usd(timeValue)} planning time reclaimed across ~${hrsPerMonth.toLocaleString()} hrs/mo + ` +
+    `${usd(tokenSavings)} token-cost savings at Bito's published −47% per task).`;
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(summary);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
+        <RoiNumber label="Engineers in scope" value={engineers} onChange={setEngineers} />
+        <RoiMoney
+          label="AI token spend / month (all coding tools)"
+          value={tokenSpendMo}
+          onChange={setTokenSpendMo}
+        />
+        <RoiMoney label="Fully-loaded engineer cost / yr" value={costPerEng} onChange={setCostPerEng} />
+      </div>
+
+      <div className="space-y-4">
+        <div className="rounded-xl border border-neon-600/40 bg-neon-500/10 p-5 shadow-glow-sm">
+          <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-neon-400">
+            estimated annual impact
+          </p>
+          <p className="mt-1 font-mono text-4xl font-extrabold text-neon-300">{usd(total)}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
+          <div>
+            <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(timeValue)}</p>
+            <p className="mt-1 text-[11px] leading-tight text-ink-500">
+              planning time reclaimed / yr (~{hrsPerMonth.toLocaleString()} hrs/mo)
+            </p>
+          </div>
+          <div>
+            <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(tokenSavings)}</p>
+            <p className="mt-1 text-[11px] leading-tight text-ink-500">
+              token savings / yr (−47% of spend)
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={copy}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200"
+        >
+          {copied ? "copied ✓" : "Copy summary"}
+        </button>
+        <p className="text-[11px] leading-relaxed text-ink-600">
+          Fixed to Bito&rsquo;s published math: −47% token cost per task, and ~{SIMPLE_HRS_PER_ENG_MO}{" "}
+          planning hrs reclaimed per engineer per month (~1,000 hrs/mo on a 200-engineer team).
+          Need the levers — epics, stories, quality uplift, Bito cost? Advanced has all of them.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function RoiTool() {
+  const [view, setView] = useState<"simple" | "advanced">("simple");
+  return (
+    <div>
+      <ToolHeader
+        title="ROI Calculator"
+        desc={
+          view === "simple"
+            ? "The two numbers you always have on a call — headcount and AI spend — against Bito's published math. Flip to Advanced for every lever."
+            : "Bito's technical-planning impact model, live. Numbers and defaults are anchored to Bito's published figures — adjust to the prospect and it recomputes as you talk."
+        }
+      />
+      <div className="mb-5 flex gap-1.5">
+        {(["simple", "advanced"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`rounded-full border px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-wide transition-colors ${
+              view === v
+                ? "border-neon-600/50 bg-neon-500/15 text-neon-300"
+                : "border-ink-700 bg-ink-950 text-ink-400 hover:text-ink-200"
+            }`}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+      {view === "simple" ? <RoiSimple /> : <RoiAdvanced />}
+    </div>
+  );
+}
+
+function RoiAdvanced() {
   const [engineers, setEngineers] = useState(200);
   const [costPerEng, setCostPerEng] = useState(250000);
   const [epicsPerMonth, setEpicsPerMonth] = useState(30);
@@ -1131,11 +1247,6 @@ function RoiTool() {
 
   return (
     <div>
-      <ToolHeader
-        title="ROI Calculator"
-        desc="Bito's technical-planning impact model, live. Numbers and defaults are anchored to Bito's published figures — adjust to the prospect and it recomputes as you talk."
-      />
-
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Inputs */}
         <div className="space-y-5 rounded-2xl border border-ink-700 bg-ink-900 p-5">
