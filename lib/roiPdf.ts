@@ -149,8 +149,8 @@ const EVIDENCE = `
       Routed through Governor, Bito&rsquo;s context-driven model router, the same session cost <b>83% less</b> —
       tokens through the model fell 73%, tool calls 91%, file reads 95% — with <b>10/10 tasks completed vs 9/10</b> for
       the baseline.</p>
-      <p class="body">Bito&rsquo;s published per-task figure is <b>−47%</b> (conservative); the heaviest
-      cross-repo work measures −68%. Quality is independently benchmarked: on SWE-Bench Pro the same agent fed
+      <p class="body">Bito&rsquo;s published per-task figure is <b>−47%</b> (conservative); testing measured
+      <b>up to −83%</b> on a full session. Quality is independently benchmarked: on SWE-Bench Pro the same agent fed
       Bito&rsquo;s code context completed <b>70.1% of tasks vs 51.9%</b> for the frontier baseline.</p>
       <div class="chips">
         <span class="chip"><b>−47%</b> token cost / task</span>
@@ -172,7 +172,7 @@ function simpleBody(d: RoiPdfSimple): string {
             <td class="num">${usd(d.spendYr)}</td>
           </tr>
           <tr>
-            <td>Token-cost cut with grounded context<span class="sub">published: −47% per task (conservative) · −68% heaviest work · −83% measured full session</span></td>
+            <td>Token-cost cut with grounded context<span class="sub">−47% conservative (published per task) · tested up to −83% on a full session</span></td>
             <td class="num">−${d.savingsPct}%</td>
           </tr>
           <tr>
