@@ -1148,8 +1148,9 @@ function RoiSimple() {
           max={90}
           suffix="%"
           presets={[
-            { label: "Typical", value: 47 },
-            { label: "Heaviest", value: 68 },
+            { label: "Conservative", value: 47 },
+            { label: "Heaviest tasks", value: 68 },
+            { label: "Measured session", value: 83 },
           ]}
         />
         <RoiSlider
@@ -1161,9 +1162,10 @@ function RoiSimple() {
           suffix="%"
         />
         <p className="text-[11px] leading-relaxed text-ink-600">
-          Published per-task figures: −47% typical, −68% on the heaviest cross-repo work. Bito
-          charges a share of what it saves — cut a $100 bill to $50 at a 10% take and the fee is
-          $5. Time savings and quality impact are in Advanced.
+          Published figures: −47% per task (conservative), −68% on the heaviest cross-repo work,
+          and −83% measured on a full session in the Governor case study ($6.81 → $1.13, 5 runs).
+          Bito charges a share of what it saves — cut a $100 bill to $50 at a 10% take and the fee
+          is $5. Time savings and quality impact are in Advanced.
         </p>
       </div>
 
@@ -1365,8 +1367,9 @@ function RoiAdvanced() {
                 max={70}
                 suffix="%"
                 presets={[
-                  { label: "Typical", value: 47 },
-                  { label: "Heaviest", value: 68 },
+                  { label: "Conservative", value: 47 },
+                  { label: "Heaviest tasks", value: 68 },
+                  { label: "Measured session", value: 83 },
                 ]}
               />
             </div>

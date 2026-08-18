@@ -172,7 +172,7 @@ function simpleBody(d: RoiPdfSimple): string {
             <td class="num">${usd(d.spendYr)}</td>
           </tr>
           <tr>
-            <td>Token-cost cut with grounded context<span class="sub">published per-task figures: −47% typical, −68% heaviest cross-repo work</span></td>
+            <td>Token-cost cut with grounded context<span class="sub">published: −47% per task (conservative) · −68% heaviest work · −83% measured full session</span></td>
             <td class="num">−${d.savingsPct}%</td>
           </tr>
           <tr>
