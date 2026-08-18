@@ -15,7 +15,8 @@ export interface RoiPdfSimple {
   savingsPct: number;
   grossSavings: number;
   newSpendYr: number;
-  /** Bito's take as % of the savings (1–10). */
+  /** Bito's take as % of the NEW spend level (1–10) — Amar's pricing: cut a
+   *  $100 bill to $60 at a 10% take and the fee is $6. */
   feePct: number;
   bitoFee: number;
   netSavings: number;
@@ -180,7 +181,7 @@ function simpleBody(d: RoiPdfSimple): string {
             <td class="num">${usd(d.newSpendYr)}</td>
           </tr>
           <tr>
-            <td>Bito&rsquo;s fee<span class="sub">${d.feePct}% of the ${usd(d.grossSavings)} saved — Bito only earns on what it saves you</span></td>
+            <td>Bito&rsquo;s fee<span class="sub">${d.feePct}% of the new ${usd(d.newSpendYr)} spend level — billed on what still flows through, not on your old bill</span></td>
             <td class="num">−${usd(d.bitoFee)}</td>
           </tr>
           <tr class="total">
@@ -260,7 +261,7 @@ export function openRoiPdf(d: RoiPdfData): boolean {
       ? frame(
           `${usd(d.netSavings)} back on the token bill`,
           "annual token-cost estimate",
-          `${d.engineers.toLocaleString()} engineers · ${usd(d.allowanceMo)}/month token allowance each · −${d.savingsPct}% build · Bito at ${d.feePct}% of savings · all figures annual`,
+          `${d.engineers.toLocaleString()} engineers · ${usd(d.allowanceMo)}/month token allowance each · −${d.savingsPct}% build · Bito at ${d.feePct}% of the new spend level · all figures annual`,
           simpleBody(d),
         )
       : frame(

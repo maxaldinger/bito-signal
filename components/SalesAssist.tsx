@@ -1081,8 +1081,8 @@ function RoiNumber({
 //   300 engineers × $1,000/mo allowance = $300K/mo = $3.6M/yr
 //   token-savings slider (depends on the build; published typical −47%,
 //   heaviest −68%) → gross savings and the brought-down-to bill
-//   Bito's take slider (1–10% OF THE SAVINGS): cut a bill $100 → $50 at a
-//   10% take and Bito charges $5.
+//   Bito's take slider (1–10% OF THE NEW SPEND LEVEL — Amar's pricing): cut
+//   a bill $100 → $60 at a 10% take and Bito charges $6, 10% of the new bill.
 function RoiSimple() {
   const [engineers, setEngineers] = useState(300);
   const [allowanceMo, setAllowanceMo] = useState(1000);
@@ -1094,7 +1094,8 @@ function RoiSimple() {
   const spendYr = engineers * allowanceMo * 12;
   const grossSavings = spendYr * (savingsPct / 100);
   const newSpendYr = spendYr - grossSavings;
-  const bitoFee = grossSavings * (feePct / 100);
+  // Fee rides the NEW spend level (what still flows through), not the savings.
+  const bitoFee = newSpendYr * (feePct / 100);
   const netSavings = grossSavings - bitoFee;
   const allInYr = newSpendYr + bitoFee;
 
@@ -1117,9 +1118,9 @@ function RoiSimple() {
 
   const summary =
     `${engineers.toLocaleString()} engineers at ${usd(allowanceMo)}/mo in tokens = ${usd(spendYr)}/yr. ` +
-    `At −${savingsPct}% that's ${usd(grossSavings)}/yr saved; Bito charges ${feePct}% of the savings ` +
-    `(${usd(bitoFee)}), so the customer keeps ${usd(netSavings)}/yr and the all-in bill drops from ` +
-    `${usd(spendYr)} to ${usd(allInYr)}.`;
+    `At −${savingsPct}% the bill drops to ${usd(newSpendYr)}; Bito charges ${feePct}% of the new spend ` +
+    `level (${usd(bitoFee)}), so the customer keeps ${usd(netSavings)}/yr and pays ${usd(allInYr)} ` +
+    `all-in, down from ${usd(spendYr)}.`;
 
   const copy = async () => {
     try {
@@ -1153,7 +1154,7 @@ function RoiSimple() {
           ]}
         />
         <RoiSlider
-          label="Bito's take (% of the savings)"
+          label="Bito's take (% of the new spend level)"
           value={feePct}
           onChange={setFeePct}
           min={1}
@@ -1162,9 +1163,9 @@ function RoiSimple() {
         />
         <p className="text-[11px] leading-relaxed text-ink-600">
           −47% is the conservative published figure; testing measured up to −83% on a full session
-          (Governor case study, $6.81 → $1.13, 5 runs). Bito charges a share of what it saves —
-          cut a $100 bill to $50 at a 10% take and the fee is $5. Time savings and quality impact
-          are in Advanced.
+          (Governor case study, $6.81 → $1.13, 5 runs). Bito bills on the reduced spend — cut a
+          $100 bill to $60 at a 10% take and the fee is $6, 10% of the new bill. Time savings and
+          quality impact are in Advanced.
         </p>
       </div>
 
@@ -1184,14 +1185,14 @@ function RoiSimple() {
           </p>
           <p className="mt-1 font-mono text-4xl font-extrabold text-neon-300">{usd(netSavings)}</p>
           <p className="mt-1.5 font-mono text-[12px] text-neon-400/90">
-            {usd(grossSavings)} saved − Bito&rsquo;s {feePct}% · all-in bill drops to {usd(allInYr)} / yr
+            {usd(grossSavings)} saved − Bito&rsquo;s {feePct}% of the new bill · all-in drops to {usd(allInYr)} / yr
           </p>
         </div>
         <div className="grid grid-cols-2 gap-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
           <div>
             <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(bitoFee)}</p>
             <p className="mt-1 text-[11px] leading-tight text-ink-500">
-              Bito makes / yr ({feePct}% of savings)
+              Bito makes / yr ({feePct}% of the new spend level)
             </p>
           </div>
           <div>
