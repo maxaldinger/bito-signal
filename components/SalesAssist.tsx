@@ -1076,30 +1076,27 @@ function RoiNumber({
   );
 }
 
-// Simple view — the two numbers a rep always has on a call (headcount and
-// AI spend) plus one prefilled cost. Everything else is FIXED to Bito's
-// published math instead of being a lever: −47% token cost per task, ~5
-// planning hrs reclaimed per engineer per month (the published ~1,000
-// hrs/mo on a 200-engineer team). The every-lever version is the Advanced tab.
+// Simple view — pure token economics, Max's math verbatim:
+//   300 engineers × $1,000/mo allowance = $300K/mo = $3.6M/yr
+//   at Bito's published −47% per task → brought down to $1,908,000
+//   → $1,692,000/yr saved.
+// Two inputs, no fully-loaded cost, no time-value model — those levers live
+// in the Advanced tab.
 const SIMPLE_TOKEN_CUT = 0.47;
-const SIMPLE_HRS_PER_ENG_MO = 5;
 
 function RoiSimple() {
-  const [engineers, setEngineers] = useState(200);
-  const [tokenSpendMo, setTokenSpendMo] = useState(3300);
-  const [costPerEng, setCostPerEng] = useState(250000);
+  const [engineers, setEngineers] = useState(300);
+  const [allowanceMo, setAllowanceMo] = useState(1000);
   const [copied, setCopied] = useState(false);
 
-  const hourly = costPerEng / WORK_HOURS;
-  const hrsPerMonth = engineers * SIMPLE_HRS_PER_ENG_MO;
-  const timeValue = hrsPerMonth * 12 * hourly;
-  const tokenSavings = tokenSpendMo * 12 * SIMPLE_TOKEN_CUT;
-  const total = timeValue + tokenSavings;
+  const spendYr = engineers * allowanceMo * 12;
+  const savings = spendYr * SIMPLE_TOKEN_CUT;
+  const newSpendYr = spendYr - savings;
 
   const summary =
-    `Bito AI Architect — estimated annual impact for a ${engineers}-engineer team: ${usd(total)} ` +
-    `(${usd(timeValue)} planning time reclaimed across ~${hrsPerMonth.toLocaleString()} hrs/mo + ` +
-    `${usd(tokenSavings)} token-cost savings at Bito's published −47% per task).`;
+    `${engineers.toLocaleString()} engineers at ${usd(allowanceMo)}/mo in tokens = ${usd(spendYr)}/yr. ` +
+    `At Bito's published −47% token cost per task, that comes down to ${usd(newSpendYr)} — ` +
+    `${usd(savings)}/yr saved.`;
 
   const copy = async () => {
     try {
@@ -1116,33 +1113,34 @@ function RoiSimple() {
       <div className="space-y-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
         <RoiNumber label="Engineers in scope" value={engineers} onChange={setEngineers} />
         <RoiMoney
-          label="AI token spend / month (all coding tools)"
-          value={tokenSpendMo}
-          onChange={setTokenSpendMo}
+          label="Token allowance / engineer / month"
+          value={allowanceMo}
+          onChange={setAllowanceMo}
         />
-        <RoiMoney label="Fully-loaded engineer cost / yr" value={costPerEng} onChange={setCostPerEng} />
+        <p className="text-[11px] leading-relaxed text-ink-600">
+          −47% is Bito&rsquo;s published token-cost cut per task — the conservative figure (the
+          heaviest cross-repo work measures −68%). Time savings and quality impact are in Advanced.
+        </p>
       </div>
 
       <div className="space-y-4">
+        <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-5">
+          <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-ink-500">
+            current token spend
+          </p>
+          <p className="mt-1 font-mono text-2xl font-extrabold text-ink-100">
+            {usd(spendYr)}<span className="text-sm font-semibold text-ink-500"> / yr</span>
+          </p>
+          <p className="mt-0.5 font-mono text-[11px] text-ink-500">{usd(engineers * allowanceMo)} / month</p>
+        </div>
         <div className="rounded-xl border border-neon-600/40 bg-neon-500/10 p-5 shadow-glow-sm">
           <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-neon-400">
-            estimated annual impact
+            saved at −47%
           </p>
-          <p className="mt-1 font-mono text-4xl font-extrabold text-neon-300">{usd(total)}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
-          <div>
-            <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(timeValue)}</p>
-            <p className="mt-1 text-[11px] leading-tight text-ink-500">
-              planning time reclaimed / yr (~{hrsPerMonth.toLocaleString()} hrs/mo)
-            </p>
-          </div>
-          <div>
-            <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(tokenSavings)}</p>
-            <p className="mt-1 text-[11px] leading-tight text-ink-500">
-              token savings / yr (−47% of spend)
-            </p>
-          </div>
+          <p className="mt-1 font-mono text-4xl font-extrabold text-neon-300">{usd(savings)}</p>
+          <p className="mt-1.5 font-mono text-[12px] text-neon-400/90">
+            spend brought down to {usd(newSpendYr)} / yr
+          </p>
         </div>
         <button
           onClick={copy}
@@ -1150,11 +1148,6 @@ function RoiSimple() {
         >
           {copied ? "copied ✓" : "Copy summary"}
         </button>
-        <p className="text-[11px] leading-relaxed text-ink-600">
-          Fixed to Bito&rsquo;s published math: −47% token cost per task, and ~{SIMPLE_HRS_PER_ENG_MO}{" "}
-          planning hrs reclaimed per engineer per month (~1,000 hrs/mo on a 200-engineer team).
-          Need the levers — epics, stories, quality uplift, Bito cost? Advanced has all of them.
-        </p>
       </div>
     </div>
   );
