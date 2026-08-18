@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { LiveCitation } from "@/lib/types";
 import { openPocPdf, type PocPlan } from "@/lib/pocPdf";
+import { openRoiPdf } from "@/lib/roiPdf";
 
 // ---------------------------------------------------------------------------
 // Modes — chat modes stream a conversation; tool modes render structured UIs.
@@ -1076,27 +1077,49 @@ function RoiNumber({
   );
 }
 
-// Simple view — pure token economics, Max's math verbatim:
+// Simple view — pure token economics, Max's math:
 //   300 engineers × $1,000/mo allowance = $300K/mo = $3.6M/yr
-//   at Bito's published −47% per task → brought down to $1,908,000
-//   → $1,692,000/yr saved.
-// Two inputs, no fully-loaded cost, no time-value model — those levers live
-// in the Advanced tab.
-const SIMPLE_TOKEN_CUT = 0.47;
-
+//   token-savings slider (depends on the build; published typical −47%,
+//   heaviest −68%) → gross savings and the brought-down-to bill
+//   Bito's take slider (1–10% OF THE SAVINGS): cut a bill $100 → $50 at a
+//   10% take and Bito charges $5.
 function RoiSimple() {
   const [engineers, setEngineers] = useState(300);
   const [allowanceMo, setAllowanceMo] = useState(1000);
+  const [savingsPct, setSavingsPct] = useState(47);
+  const [feePct, setFeePct] = useState(10);
   const [copied, setCopied] = useState(false);
+  const [pdfBlocked, setPdfBlocked] = useState(false);
 
   const spendYr = engineers * allowanceMo * 12;
-  const savings = spendYr * SIMPLE_TOKEN_CUT;
-  const newSpendYr = spendYr - savings;
+  const grossSavings = spendYr * (savingsPct / 100);
+  const newSpendYr = spendYr - grossSavings;
+  const bitoFee = grossSavings * (feePct / 100);
+  const netSavings = grossSavings - bitoFee;
+  const allInYr = newSpendYr + bitoFee;
+
+  const exportPdf = () => {
+    const ok = openRoiPdf({
+      kind: "simple",
+      engineers,
+      allowanceMo,
+      spendYr,
+      savingsPct,
+      grossSavings,
+      newSpendYr,
+      feePct,
+      bitoFee,
+      netSavings,
+      allInYr,
+    });
+    setPdfBlocked(!ok);
+  };
 
   const summary =
     `${engineers.toLocaleString()} engineers at ${usd(allowanceMo)}/mo in tokens = ${usd(spendYr)}/yr. ` +
-    `At Bito's published −47% token cost per task, that comes down to ${usd(newSpendYr)} — ` +
-    `${usd(savings)}/yr saved.`;
+    `At −${savingsPct}% that's ${usd(grossSavings)}/yr saved; Bito charges ${feePct}% of the savings ` +
+    `(${usd(bitoFee)}), so the customer keeps ${usd(netSavings)}/yr and the all-in bill drops from ` +
+    `${usd(spendYr)} to ${usd(allInYr)}.`;
 
   const copy = async () => {
     try {
@@ -1117,9 +1140,30 @@ function RoiSimple() {
           value={allowanceMo}
           onChange={setAllowanceMo}
         />
+        <RoiSlider
+          label="Token savings (depends on the build)"
+          value={savingsPct}
+          onChange={setSavingsPct}
+          min={10}
+          max={90}
+          suffix="%"
+          presets={[
+            { label: "Typical", value: 47 },
+            { label: "Heaviest", value: 68 },
+          ]}
+        />
+        <RoiSlider
+          label="Bito's take (% of the savings)"
+          value={feePct}
+          onChange={setFeePct}
+          min={1}
+          max={10}
+          suffix="%"
+        />
         <p className="text-[11px] leading-relaxed text-ink-600">
-          −47% is Bito&rsquo;s published token-cost cut per task — the conservative figure (the
-          heaviest cross-repo work measures −68%). Time savings and quality impact are in Advanced.
+          Published per-task figures: −47% typical, −68% on the heaviest cross-repo work. Bito
+          charges a share of what it saves — cut a $100 bill to $50 at a 10% take and the fee is
+          $5. Time savings and quality impact are in Advanced.
         </p>
       </div>
 
@@ -1135,19 +1179,46 @@ function RoiSimple() {
         </div>
         <div className="rounded-xl border border-neon-600/40 bg-neon-500/10 p-5 shadow-glow-sm">
           <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-neon-400">
-            saved at −47%
+            customer keeps at −{savingsPct}%
           </p>
-          <p className="mt-1 font-mono text-4xl font-extrabold text-neon-300">{usd(savings)}</p>
+          <p className="mt-1 font-mono text-4xl font-extrabold text-neon-300">{usd(netSavings)}</p>
           <p className="mt-1.5 font-mono text-[12px] text-neon-400/90">
-            spend brought down to {usd(newSpendYr)} / yr
+            {usd(grossSavings)} saved − Bito&rsquo;s {feePct}% · all-in bill drops to {usd(allInYr)} / yr
           </p>
         </div>
-        <button
-          onClick={copy}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200"
-        >
-          {copied ? "copied ✓" : "Copy summary"}
-        </button>
+        <div className="grid grid-cols-2 gap-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
+          <div>
+            <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(bitoFee)}</p>
+            <p className="mt-1 text-[11px] leading-tight text-ink-500">
+              Bito makes / yr ({feePct}% of savings)
+            </p>
+          </div>
+          <div>
+            <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(newSpendYr)}</p>
+            <p className="mt-1 text-[11px] leading-tight text-ink-500">
+              new token bill / yr (before Bito&rsquo;s fee)
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={copy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 font-mono text-xs font-medium text-ink-300 transition-colors hover:border-neon-600/40 hover:text-neon-200"
+          >
+            {copied ? "copied ✓" : "Copy summary"}
+          </button>
+          <button
+            onClick={exportPdf}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neon-600/40 bg-neon-500/10 px-3 py-2 font-mono text-xs font-semibold text-neon-300 transition-colors hover:bg-neon-500/20"
+          >
+            <FileDown className="h-4 w-4" /> Download PDF
+          </button>
+        </div>
+        {pdfBlocked && (
+          <p className="text-[11px] text-amber-300/90">
+            Your browser blocked the export tab — allow pop-ups for this site, then click Download PDF again.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1196,8 +1267,8 @@ function RoiAdvanced() {
   const [aiSpend, setAiSpend] = useState(40000);
   const [tokenCutPct, setTokenCutPct] = useState(47);
   const [bitoCost, setBitoCost] = useState(0);
-  const [period, setPeriod] = useState<"month" | "year">("year");
   const [copied, setCopied] = useState(false);
+  const [pdfBlocked, setPdfBlocked] = useState(false);
 
   // Bito's "THE MATH": planning hours reclaimed/month, valued at fully-loaded
   // senior-engineer rate, plus a quality uplift, plus token-cost savings.
@@ -1211,15 +1282,36 @@ function RoiAdvanced() {
   const roiX = bitoCost > 0 ? total / bitoCost : null;
   const paybackMonths = bitoCost > 0 && total > 0 ? (bitoCost / total) * 12 : null;
 
-  // Annual is the base; monthly divides money by 12. ROI/payback are period-independent.
-  const div = period === "month" ? 12 : 1;
-  const word = period === "month" ? "monthly" : "annual";
-
+  // Annual only — per Max, no monthly view anywhere in the calculator.
   const summary =
-    `Bito AI Architect — estimated ${word} impact for a ${engineers}-engineer team: ${usd(total / div)} ` +
-    `(${usd(planningValue / div)} technical-planning time reclaimed across ${Math.round(planningHrsPerMonth).toLocaleString()} hrs/mo` +
-    `${tokenSavings > 0 ? ` + ${usd(tokenSavings / div)} token-cost savings` : ""})` +
+    `Bito AI Architect — estimated annual impact for a ${engineers}-engineer team: ${usd(total)} ` +
+    `(${usd(planningValue)} technical-planning time reclaimed across ${Math.round(planningHrsPerMonth).toLocaleString()} hrs/mo` +
+    `${tokenSavings > 0 ? ` + ${usd(tokenSavings)} token-cost savings` : ""})` +
     (roiX ? `, ~${roiX.toFixed(1)}× ROI on ${usd(bitoCost)}/yr with payback in ${Math.round(paybackMonths!)} month${Math.round(paybackMonths!) === 1 ? "" : "s"}.` : ".");
+
+  const exportPdf = () => {
+    const ok = openRoiPdf({
+      kind: "advanced",
+      engineers,
+      costPerEng,
+      epicsPerMonth,
+      storiesPerMonth,
+      hrsPerEpic,
+      hrsPerStory,
+      qualityUpliftPct,
+      aiSpend,
+      tokenCutPct,
+      planningHrsPerMonth,
+      fteEquivalent,
+      planningValue,
+      tokenSavings,
+      total,
+      bitoCost,
+      roiX,
+      paybackMonths,
+    });
+    setPdfBlocked(!ok);
+  };
 
   const copy = async () => {
     try {
@@ -1284,33 +1376,16 @@ function RoiAdvanced() {
           </div>
         </div>
 
-        {/* Outputs */}
+        {/* Outputs — annual only */}
         <div className="space-y-4">
-          {/* Monthly / Yearly toggle */}
-          <div className="flex justify-end">
-            <div className="inline-flex rounded-lg border border-ink-700 bg-ink-900 p-0.5">
-              {(["month", "year"] as const).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
-                    period === p ? "bg-neon-500/15 text-neon-300" : "text-ink-400 hover:text-ink-200"
-                  }`}
-                >
-                  {p === "month" ? "Monthly" : "Yearly"}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="rounded-2xl border border-neon-600/40 bg-neon-500/10 p-6 shadow-glow-sm">
             <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-neon-400">
-              estimated {word} impact
+              estimated annual impact
             </p>
-            <p className="mt-1 font-mono text-4xl font-extrabold tracking-tight text-neon-200">{usd(total / div)}</p>
+            <p className="mt-1 font-mono text-4xl font-extrabold tracking-tight text-neon-200">{usd(total)}</p>
             {net !== null && (
               <p className="mt-1 text-sm text-ink-300">
-                {usd(net / div)} net of Bito ·{" "}
+                {usd(net)} net of Bito ·{" "}
                 <span className="font-semibold text-neon-300">{roiX!.toFixed(1)}× ROI</span> · payback{" "}
                 {Math.round(paybackMonths!)} mo
               </p>
@@ -1329,26 +1404,39 @@ function RoiAdvanced() {
               <p className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-400">
                 <Clock className="h-3.5 w-3.5 text-neon-400" /> planning impact
               </p>
-              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(planningValue / div)}</p>
+              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(planningValue)}</p>
               <p className="mt-0.5 text-[11px] text-ink-500">incl. {qualityUpliftPct}% quality uplift</p>
             </div>
             <div className="rounded-xl border border-ink-700 bg-ink-900 p-4">
               <p className="flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-400">
                 <TrendingUp className="h-3.5 w-3.5 text-neon-400" /> token savings
               </p>
-              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(tokenSavings / div)}</p>
+              <p className="mt-1 font-mono text-xl font-bold text-ink-100">{usd(tokenSavings)}</p>
               <p className="mt-0.5 text-[11px] text-ink-500">{tokenCutPct}% of {usd(aiSpend)}/yr</p>
             </div>
           </div>
 
           <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
             <p className="text-sm leading-relaxed text-ink-300">{summary}</p>
-            <button
-              onClick={copy}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-medium text-ink-300 hover:bg-ink-800"
-            >
-              <Copy className="h-4 w-4" /> {copied ? "Copied!" : "Copy summary"}
-            </button>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                onClick={copy}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-900 px-3 py-1.5 text-sm font-medium text-ink-300 hover:bg-ink-800"
+              >
+                <Copy className="h-4 w-4" /> {copied ? "Copied!" : "Copy summary"}
+              </button>
+              <button
+                onClick={exportPdf}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-neon-600/40 bg-neon-500/10 px-3 py-1.5 text-sm font-semibold text-neon-300 hover:bg-neon-500/20"
+              >
+                <FileDown className="h-4 w-4" /> Download PDF
+              </button>
+            </div>
+            {pdfBlocked && (
+              <p className="mt-2 text-[11px] text-amber-300/90">
+                Your browser blocked the export tab — allow pop-ups for this site, then click Download PDF again.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -1385,7 +1473,7 @@ function RoiAdvanced() {
           </div>
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-ink-500">
-          Estimate from your inputs (figures shown {word}); hourly cost = fully-loaded ÷ {WORK_HOURS}h. Model and
+          Estimate from your inputs (all figures annual); hourly cost = fully-loaded ÷ {WORK_HOURS}h. Model and
           figures mirror Bito&apos;s published math (200-eng team, $250K fully-loaded senior eng, ~1,000 hrs/mo, ~6× ROI).
         </p>
       </div>
