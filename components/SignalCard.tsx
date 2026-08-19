@@ -156,14 +156,24 @@ function StrengthBar({
   /** True when the value is the authoritative score from a generated brief. */
   fromBrief: boolean;
 }) {
+  // No brief, no score. The per-signal estimate was band-modeled and rendered
+  // "72~" across entire pages of Apollo-sweep rows — a fake number wearing a
+  // real one's clothes (Max, 2026-08-15). Until a brief has actually scored
+  // the account, say so instead.
+  if (!fromBrief) {
+    return (
+      <span
+        className="font-mono text-[10px] text-ink-600"
+        title="No score yet — run the brief and the real ICP fit (0-99) shows here"
+      >
+        unscored
+      </span>
+    );
+  }
   return (
     <div
       className="flex items-center gap-2"
-      title={
-        fromBrief
-          ? "Bito ICP fit from the generated brief (0-99)"
-          : "Preliminary ICP estimate — open the brief for the scored breakdown (0-99)"
-      }
+      title="Bito ICP fit from the generated brief (0-99)"
     >
       <div className="h-1.5 w-24 overflow-hidden rounded-full bg-ink-800">
         <div
@@ -173,7 +183,6 @@ function StrengthBar({
       </div>
       <span className="flex w-9 items-center justify-end gap-0.5 text-right font-mono text-xs font-semibold tabular-nums text-ink-300">
         {value}
-        {!fromBrief && <span className="text-[9px] font-normal text-ink-500">~</span>}
       </span>
     </div>
   );
