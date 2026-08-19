@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   X,
   Target,
@@ -1220,9 +1220,29 @@ function ApolloStakeholders({
   const poolHasMore = shownPool.length > perColumn * 2;
   const canPullMore = poolHasMore || hasMore;
 
+  // SCROLL PRESERVATION. Appending a page re-sorts the whole grid
+  // (qualified-first), which moves or unmounts the very cards the browser was
+  // using as its scroll anchor — Chrome then flings the viewport to the top
+  // of the list. So we anchor manually: note where the pull-more button sits
+  // in the viewport when it's clicked, and after the new cards commit, scroll
+  // by exactly how far it moved. The button stays under the cursor; the page
+  // stays where it was.
+  const pullAnchorRef = useRef<HTMLDivElement>(null);
+  const pendingAnchorTop = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (pendingAnchorTop.current === null) return;
+    const el = pullAnchorRef.current;
+    if (el) {
+      const moved = el.getBoundingClientRect().top - pendingAnchorTop.current;
+      if (moved !== 0) window.scrollBy(0, moved);
+    }
+    pendingAnchorTop.current = null;
+  }, [people, perColumn]);
+
   const pullMore = async () => {
     if (loadingMore) return;
     const shown = perColumn * 2;
+    pendingAnchorTop.current = pullAnchorRef.current?.getBoundingClientRect().top ?? null;
     // Pool exhausted → fetch the next Apollo page and let it render into the
     // CURRENT window. Widening here as well would dump a whole page of cards at
     // once, and every card auto-reveals an email on mount.
@@ -1333,7 +1353,7 @@ function ApolloStakeholders({
       )}
 
       {canPullMore && (
-        <div className="flex justify-center">
+        <div className="flex justify-center" ref={pullAnchorRef}>
           <button
             onClick={pullMore}
             disabled={loadingMore}
