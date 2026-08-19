@@ -7,12 +7,15 @@ import type { Segment, SignalType, SegmentId } from "./types";
 export const REGIONS = [
   { id: "us", label: "US", blurb: "US / EU headquartered companies" },
   { id: "in", label: "IN", blurb: "India HQ + India engineering arms (GCCs)" },
+  // Rest of world: the US and IN lenses already own those two markets, so
+  // GLOBAL deliberately excludes both instead of duplicating them.
+  { id: "global", label: "GLOBAL", blurb: "Headquartered outside the US and India — EU/UK, APAC, LATAM, MEA, Canada" },
 ] as const;
 
 export type RegionId = (typeof REGIONS)[number]["id"];
 
 export function isRegionId(v: unknown): v is RegionId {
-  return v === "us" || v === "in";
+  return v === "us" || v === "in" || v === "global";
 }
 
 // ---------------------------------------------------------------------------

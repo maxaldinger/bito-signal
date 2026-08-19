@@ -122,6 +122,8 @@ const BUCKET_BRIEFS: Record<SearchBucket, string> = {
 const REGION_RULES: Record<RegionId, string> = {
   us: "Prefer companies headquartered in the US/EU with English-language sources.",
   in: "ONLY companies headquartered in India — the buyer must be an Indian company an India-based sales team can call into. EXCLUDE foreign-headquartered companies even when the story is about their India engineering center or GCC (e.g. a US startup 'expanding engineering in India' does NOT qualify). Indian tech press (YourStory, Inc42, ET Tech, Moneycontrol, Entrackr) are first-class sources.",
+  global:
+    "ONLY companies headquartered OUTSIDE the United States and OUTSIDE India — EU/UK, Canada, LATAM, Japan/Korea, Southeast Asia, ANZ, Middle East, Africa. A US or Indian HQ disqualifies the signal even when the story is international; those markets have their own feeds. English-language sources preferred, but regional tech press qualifies.",
 };
 
 const sharedRules = (region: RegionId) => `Hard rules:

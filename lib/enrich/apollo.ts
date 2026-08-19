@@ -930,10 +930,13 @@ interface ApolloAccountRecord {
 }
 
 // organization_locations[] filter values per intel region (verified Apollo
-// search param: headquarters location, accepts country names).
-const REGION_LOCATION: Record<RegionId, string> = {
+// search param: headquarters location, accepts country names). GLOBAL is the
+// rest of the world: no include filter, EXCLUDE the two markets that already
+// have their own lenses.
+const REGION_LOCATION: Record<RegionId, string | null> = {
   us: "United States",
   in: "India",
+  global: null,
 };
 
 /**
@@ -965,7 +968,14 @@ export async function apolloIcpSweep(page = 1, region: RegionId = "us"): Promise
       });
       for (const r of q.ranges) qs.append("organization_num_employees_ranges[]", r);
       qs.append("q_organization_keyword_tags[]", q.keyword);
-      qs.append("organization_locations[]", REGION_LOCATION[region]);
+      const loc = REGION_LOCATION[region];
+      if (loc) {
+        qs.append("organization_locations[]", loc);
+      } else {
+        // GLOBAL: rest of world — exclude the markets with their own lenses.
+        qs.append("organization_not_locations[]", "United States");
+        qs.append("organization_not_locations[]", "India");
+      }
 
       const { status, body } = await apolloJson(
         `${BASE}/mixed_companies/search?${qs}`,

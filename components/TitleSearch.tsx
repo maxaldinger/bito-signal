@@ -94,9 +94,10 @@ export function TitleSearch({ region }: { region: RegionId }) {
   const [sizeIdx, setSizeIdx] = useState(1); // 1,000+
   const [senIdx, setSenIdx] = useState(0); // director+
   // "This region only" — the header's US/IN toggle picks WHICH country that
-  // is, this checkbox just turns the geographic filter on/off.
+  // is, this checkbox just turns the geographic filter on/off. GLOBAL has no
+  // single country, so the checkbox disappears and the search runs worldwide.
   const [regionOnly, setRegionOnly] = useState(true);
-  const regionCountry = region === "in" ? "India" : "United States";
+  const regionCountry = region === "in" ? "India" : region === "us" ? "United States" : null;
 
   const [people, setPeople] = useState<TitleSearchPerson[]>([]);
   const [page, setPage] = useState(1);
@@ -135,7 +136,7 @@ export function TitleSearch({ region }: { region: RegionId }) {
             titles,
             seniorities: SENIORITY_SETS[senIdx].values,
             employeeRanges: SIZE_BANDS[sizeIdx].ranges,
-            locations: regionOnly ? [regionCountry] : [],
+            locations: regionOnly && regionCountry ? [regionCountry] : [],
             page: toPage,
             perPage: 25,
           }),
@@ -307,15 +308,19 @@ export function TitleSearch({ region }: { region: RegionId }) {
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-ink-800 pt-3">
           <Filter label="company size" options={SIZE_BANDS.map((b) => b.label)} idx={sizeIdx} onPick={setSizeIdx} />
           <Filter label="seniority" options={SENIORITY_SETS.map((s) => s.label)} idx={senIdx} onPick={setSenIdx} />
-          <label className="flex cursor-pointer items-center gap-1.5 font-mono text-[11px] text-ink-400">
-            <input
-              type="checkbox"
-              checked={regionOnly}
-              onChange={(e) => setRegionOnly(e.target.checked)}
-              className="h-3 w-3 accent-neon-500"
-            />
-            {region === "in" ? "India" : "US"} only
-          </label>
+          {regionCountry ? (
+            <label className="flex cursor-pointer items-center gap-1.5 font-mono text-[11px] text-ink-400">
+              <input
+                type="checkbox"
+                checked={regionOnly}
+                onChange={(e) => setRegionOnly(e.target.checked)}
+                className="h-3 w-3 accent-neon-500"
+              />
+              {region === "in" ? "India" : "US"} only
+            </label>
+          ) : (
+            <span className="font-mono text-[11px] text-ink-500">worldwide</span>
+          )}
         </div>
       </form>
 

@@ -229,8 +229,12 @@ export function DirectoryView({
             <Building2 className="h-5 w-5 text-neon-400" /> Signal 2000
           </h2>
           <p className="mt-1 text-sm text-ink-300">
-            The ~2,000 largest {region === "in" ? "Indian" : "US"} companies across every sector —
-            short brief on view, full intel on demand.{" "}
+            {region === "in"
+              ? "The ~2,000 largest Indian companies across every sector"
+              : region === "global"
+                ? "The ~2,000 largest companies headquartered outside the US and India — EU/UK, APAC, LATAM, MEA"
+                : "The ~2,000 largest US companies across every sector"}{" "}
+            — short brief on view, full intel on demand.{" "}
             {entries ? `${entries.length.toLocaleString()} companies.` : ""}
           </p>
         </div>
@@ -287,7 +291,8 @@ export function DirectoryView({
       ) : entries.length === 0 ? (
         <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/50 p-12 text-center">
           <p className="text-sm text-ink-300">
-            The {region === "in" ? "India" : "US"} directory is empty.
+            The {region === "in" ? "India" : region === "global" ? "global" : "US"} directory is
+            empty.
           </p>
           {region === "us" ? (
             <>
@@ -305,7 +310,7 @@ export function DirectoryView({
             </>
           ) : (
             <p className="mt-1 text-xs text-ink-500">
-              The India list is seeded server-side (scripts/build-india-directory.mjs) — ask Max.
+              This list is seeded server-side (scripts/build-india-directory.mjs) — ask Max.
             </p>
           )}
         </div>

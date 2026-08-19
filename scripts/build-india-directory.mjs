@@ -15,7 +15,11 @@
 // from name→domain guessing; this pipeline never writes a domain Apollo
 // didn't return.
 //
-// Usage: node scripts/build-india-directory.mjs [--write] [--cap 2000]
+// Also builds the GLOBAL list (rest of world: headquartered outside the US
+// and India) with --region global — same pipeline, the location filter flips
+// to organization_not_locations and the seed comes from global-seed.json.
+//
+// Usage: node scripts/build-india-directory.mjs [--write] [--cap 2000] [--region in|global]
 
 import fs from "node:fs";
 
@@ -31,6 +35,16 @@ const H = { apikey: SVC, Authorization: `Bearer ${SVC}`, "Content-Type": "applic
 const WRITE = process.argv.includes("--write");
 const capArg = process.argv.indexOf("--cap");
 const CAP = capArg > -1 ? Number(process.argv[capArg + 1]) || 2000 : 2000;
+const regionArg = process.argv.indexOf("--region");
+const REGION = regionArg > -1 ? process.argv[regionArg + 1] : "in";
+if (REGION !== "in" && REGION !== "global") throw new Error("--region must be 'in' or 'global'");
+const SEED_FILE = REGION === "in" ? "./india-seed.json" : "./global-seed.json";
+// in     → include-filter to India.
+// global → rest of world: exclude the two markets that have their own lists.
+const LOC_PARAMS =
+  REGION === "in"
+    ? { organization_locations: ["India"] }
+    : { organization_not_locations: ["United States", "India"] };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // --- lib/companyKey.ts normCompany, replicated exactly ---
@@ -119,7 +133,7 @@ for (const band of BANDS) {
   let pages = 1;
   for (let page = 1; page <= Math.min(pages, 25); page++) {
     const body = await apolloSearch({
-      "organization_locations": ["India"],
+      ...LOC_PARAMS,
       "organization_num_employees_ranges": [band],
       page, per_page: 100,
     });
@@ -143,9 +157,9 @@ for (const band of BANDS) {
 // ---------------------------------------------------------------------------
 let seed = [];
 try {
-  seed = JSON.parse(fs.readFileSync(new URL("./india-seed.json", import.meta.url), "utf8")).companies ?? [];
+  seed = JSON.parse(fs.readFileSync(new URL(SEED_FILE, import.meta.url), "utf8")).companies ?? [];
 } catch {
-  console.log("no scripts/india-seed.json — sweep only");
+  console.log(`no scripts/${SEED_FILE.slice(2)} — sweep only`);
 }
 const haveName = new Set([...candidates.values()].map((c) => normCompany(c.name)));
 let resolved = 0, unresolvable = 0;
@@ -155,7 +169,7 @@ for (const s of seed) {
   // Domain from the agents is a HINT — verify through enrich before trusting.
   let dom = s.domain ? rootDomain(s.domain) : null;
   if (!dom) {
-    const body = await apolloSearch({ q_organization_name: s.name, "organization_locations": ["India"], page: 1, per_page: 5 });
+    const body = await apolloSearch({ q_organization_name: s.name, ...LOC_PARAMS, page: 1, per_page: 5 });
     const orgs = [...(body?.organizations ?? []), ...(body?.accounts ?? [])];
     const target = normCompany(s.name);
     const hit = orgs.find((o) => normCompany(String(o.name ?? "")) === target) ?? orgs[0];
@@ -211,7 +225,11 @@ function processOrg(c, org) {
   // sweep candidate it means a mis-tagged or shell org; drop.
   if (!employees || employees < 500) { dropped += 1; return; }
   const country = typeof org.country === "string" ? org.country : "";
-  if (country && !/india/i.test(country)) { dropped += 1; return; }
+  const wrongCountry =
+    REGION === "in"
+      ? country && !/india/i.test(country)
+      : country && /(united states|^usa?$|india)/i.test(country);
+  if (wrongCountry) { dropped += 1; return; }
   const name = (typeof org.name === "string" && org.name.trim()) || c.name;
   const industryText = [org.industry, ...(Array.isArray(org.keywords) ? org.keywords.slice(0, 12) : [])].filter(Boolean).join(" ");
   const segment = segmentOf(industryText);
