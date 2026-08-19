@@ -240,7 +240,7 @@ function processOrg(c, org) {
     company_key: normCompany(name),
     company: name,
     domain: typeof org.primary_domain === "string" && org.primary_domain ? org.primary_domain : c.domain,
-    region: "in",
+    region: REGION,
     segment,
     swe_estimate: swe ?? null,
     short_brief: brief || null,
@@ -249,7 +249,7 @@ function processOrg(c, org) {
     website_url: typeof org.website_url === "string" ? org.website_url : null,
     linkedin_url: typeof org.linkedin_url === "string" ? org.linkedin_url : null,
     strength: strengthOf(swe, segment),
-    source: "india-directory",
+    source: REGION === "in" ? "india-directory" : "global-directory",
     last_seen_at: new Date().toISOString(),
   });
 }
@@ -259,14 +259,17 @@ console.log(`${rows.length} enriched rows (${dropped} dropped: no data / <500 em
 // ---------------------------------------------------------------------------
 // 4. Dedupe, protect US rows, rank, cap, upsert.
 // ---------------------------------------------------------------------------
+// Protect BOTH other regions' rows: an upsert on company_key would otherwise
+// hijack them (the first global run wrote its rows as region='in' and merged
+// 2,000 rows into the India list — repaired by last_seen_at, lesson encoded).
 const usKeys = new Set(
-  (await (await fetch(`${U}/rest/v1/bito_directory?select=company_key&region=eq.us&limit=5000`, { headers: H })).json())
+  (await (await fetch(`${U}/rest/v1/bito_directory?select=company_key&region=neq.${REGION}&limit=8000`, { headers: H })).json())
     .map((r) => r.company_key),
 );
 const byKey = new Map();
 for (const r of rows) {
   if (!r.company_key) continue;
-  if (usKeys.has(r.company_key)) { console.log(`  key collides with a US row, skipped: ${r.company}`); continue; }
+  if (usKeys.has(r.company_key)) { console.log(`  key collides with another region's row, skipped: ${r.company}`); continue; }
   const prev = byKey.get(r.company_key);
   if (!prev || (r.estimated_employees ?? 0) > (prev.estimated_employees ?? 0)) byKey.set(r.company_key, r);
 }
@@ -286,8 +289,8 @@ if (WRITE) {
     });
     if (!res.ok) throw new Error(`upsert ${res.status}: ${await res.text()}`);
   }
-  const count = await fetch(`${U}/rest/v1/bito_directory?select=company_key&region=eq.in`, {
+  const count = await fetch(`${U}/rest/v1/bito_directory?select=company_key&region=eq.${REGION}`, {
     method: "HEAD", headers: { ...H, Prefer: "count=exact" },
   });
-  console.log(`Upserted. bito_directory region='in' now has ${count.headers.get("content-range")?.split("/")[1]} rows.`);
+  console.log(`Upserted. bito_directory region='${REGION}' now has ${count.headers.get("content-range")?.split("/")[1]} rows.`);
 }
