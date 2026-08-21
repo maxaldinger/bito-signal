@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   X,
   Target,
@@ -41,7 +41,7 @@ import {
   type ICPClass,
   type ICPReasonCode,
 } from "@/lib/icpClassifier";
-import { APPROVED_FIGURES, OUTREACH_PRODUCT } from "@/lib/outreachRules";
+import { APPROVED_FIGURES, OUTREACH_PRODUCT, bannedHits } from "@/lib/outreachRules";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
@@ -1446,6 +1446,29 @@ export function CompanyIntel({
     outreach: stripEmDashes(intel.outreach.draftMessage || intel.outreach.hook || ""),
   };
 
+  // Cached briefs generated before the Aug 3 Governor outreach spec still
+  // carry the old AI-Architect pitch — banned phrases, unapproved figures —
+  // and pushing them copies that verbatim into a HubSpot task. Detect it the
+  // same way the generators are policed (bannedHits) plus the pre-spec
+  // dm/resurface shape, and flag instead of serving it silently.
+  const outreachStale = useMemo(() => {
+    const li = (intel.linkedinOutreach ?? {}) as Record<string, unknown>;
+    const legacyShape = !!intel.linkedinOutreach && !li.inmail && !!(li.dm || li.resurface);
+    const msgText = (m: unknown): string =>
+      typeof m === "string" ? m : m && typeof m === "object" ? String((m as { body?: unknown }).body ?? "") : "";
+    const texts = [
+      typeof li.connect === "string" ? li.connect : "",
+      msgText(li.inmail),
+      msgText(li.followup2),
+      msgText(li.followup3),
+      msgText(li.dm),
+      msgText(li.resurface),
+      intel.emailOpener ?? "",
+      intel.outreach?.draftMessage ?? "",
+    ].filter(Boolean);
+    return legacyShape || texts.some((t) => bannedHits(t).length > 0);
+  }, [intel]);
+
   const copyDraft = async () => {
     if (!navigator.clipboard) {
       setCopyFailed(true);
@@ -1707,6 +1730,23 @@ export function CompanyIntel({
           <p className="mb-3 flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-neon-400/90">
             <Send className="h-3.5 w-3.5" /> outreach angle
           </p>
+          {outreachStale && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+              <p className="text-xs font-medium leading-snug text-amber-300">
+                This outreach predates the Governor spec — update the brief to regenerate it before
+                sending.
+              </p>
+              {onRefresh && (
+                <button
+                  type="button"
+                  onClick={onRefresh}
+                  className="rounded border border-amber-500/40 px-2 py-1 font-mono text-[11px] font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
+                >
+                  Update brief
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded bg-ink-800 px-2 py-0.5 font-mono text-[11px] font-semibold text-ink-300">
               {intel.outreach.channel}
