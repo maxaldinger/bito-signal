@@ -41,6 +41,7 @@ import {
   type ICPClass,
   type ICPReasonCode,
 } from "@/lib/icpClassifier";
+import { APPROVED_FIGURES, OUTREACH_PRODUCT } from "@/lib/outreachRules";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
 import {
@@ -524,10 +525,13 @@ function ApolloPersonCard({
     try {
       const who = (revealedName || person.name).split(" ")[0];
       const role = person.title || "an engineering leader";
+      // GOVERNOR-first, same product framing and approved figures as every
+      // other outreach generator (lib/outreachRules) — this button was the
+      // last one still pitching the AI Architect context story on its own.
       const content =
-        `Write a short cold outreach email from a Bito sales rep to ${who} (${role}) at ${company}. ` +
-        `Address them by first name only. Tie it to Bito AI Architect's value (the context layer that grounds their AI coding tools and reviews in their real cross-repo codebase) for an engineering team. ` +
-        `Output ONLY the email: a "Subject:" line, then the body (under 120 words, one clear CTA). ` +
+        `Write a short cold outreach email from Max Aldinger, Founding AE at Bito, to ${who} (${role}) at ${company}. ` +
+        `Address them by first name only. Cost angle first.\n\n${OUTREACH_PRODUCT}\n\n${APPROVED_FIGURES}\n\n` +
+        `Output ONLY the email: a "Subject:" line (lowercase, 2-4 plain words), then the body (under 120 words, one clear CTA, signed just "Max"). ` +
         `Plain text only — NO markdown, asterisks, bold, headings, or "---" separators. ` +
         `Do NOT add any notes, caveats, or commentary to the rep, and no placeholders like [Your name]. ` +
         `Don't invent facts; if you can't verify a detail, just leave it out. ` +
