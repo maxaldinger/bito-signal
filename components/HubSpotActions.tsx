@@ -10,6 +10,7 @@ import {
   CircleCheck,
   CircleX,
   ArrowUpRight,
+  FileText,
   X,
 } from "lucide-react";
 import {
@@ -92,6 +93,7 @@ export function HubSpotActions({
   compact = false,
   autoCheck = false,
   autoCheckDelayMs = 0,
+  proposal,
 }: {
   kind: HsKind;
   name: string;
@@ -128,10 +130,65 @@ export function HubSpotActions({
   autoCheck?: boolean;
   /** Stagger auto-checks to stay under HubSpot's ~4 req/s search limit. */
   autoCheckDelayMs?: number;
+  /** Company surfaces only: enables the "Personalize proposal" button, which
+   *  generates a tailored Governor proposal page at a public /p/<token> link.
+   *  Pass whatever account context the surface has — the generator degrades
+   *  gracefully, never invents. */
+  proposal?: {
+    context?: string;
+    sweEstimate?: number;
+    employees?: number;
+    icpTotal?: number;
+    contactName?: string;
+    contactTitle?: string;
+  };
 }) {
   const [checking, setChecking] = useState(false);
   const [check, setCheck] = useState<SearchResp | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+
+  // Personalized proposal link generation (company surfaces).
+  const [propBusy, setPropBusy] = useState(false);
+  const [propUrl, setPropUrl] = useState<string | null>(null);
+  const [propCopied, setPropCopied] = useState(false);
+  const [propErr, setPropErr] = useState<string | null>(null);
+  const makeProposal = async () => {
+    if (propBusy) return;
+    setPropBusy(true);
+    setPropErr(null);
+    try {
+      const res = await fetch("/api/proposal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company: name,
+          domain,
+          context: proposal?.context,
+          sweEstimate: proposal?.sweEstimate,
+          employees: proposal?.employees,
+          icpTotal: proposal?.icpTotal,
+          contactName: proposal?.contactName,
+          contactTitle: proposal?.contactTitle,
+        }),
+      });
+      const d = (await res.json()) as { ok?: boolean; url?: string; error?: string };
+      if (!res.ok || !d.ok || !d.url) {
+        setPropErr(d.error || `Proposal generation failed (${res.status})`);
+        return;
+      }
+      setPropUrl(d.url);
+      try {
+        await navigator.clipboard.writeText(d.url);
+        setPropCopied(true);
+      } catch {
+        /* clipboard blocked — the link chip still shows */
+      }
+    } catch (e) {
+      setPropErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPropBusy(false);
+    }
+  };
 
   // The matched record id (if any) is reused when creating the task.
   const matchedId = check?.found ? check.records[0]?.id : undefined;
@@ -288,6 +345,38 @@ export function HubSpotActions({
           >
             <Search className="h-3 w-3" /> Check in HubSpot
           </button>
+        )}
+
+        {/* Personalized proposal — company surfaces only, right next to the
+            HubSpot actions per Max. Generates the tailored Governor proposal
+            page and copies its public link. */}
+        {kind === "company" && proposal && (
+          propUrl ? (
+            <a
+              href={propUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={propCopied ? "Link copied to clipboard — click to preview" : "Click to preview the proposal"}
+              className="inline-flex items-center gap-1 rounded border border-violet-500/40 bg-violet-500/10 px-2 py-1 font-mono text-[11px] font-semibold text-violet-300 transition-colors hover:bg-violet-500/20"
+            >
+              <FileText className="h-3 w-3" /> Proposal{propCopied ? " · link copied" : ""}
+              <ArrowUpRight className="h-3 w-3" />
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={makeProposal}
+              disabled={propBusy}
+              title="Generate a Governor proposal personalized to this account, hosted at a shareable link (with Download PDF on the page)"
+              className={`${btn} hover:border-violet-500/40 hover:text-violet-300`}
+            >
+              {propBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+              {propBusy ? "Personalizing…" : "Personalize proposal"}
+            </button>
+          )
+        )}
+        {propErr && (
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-red-400">{propErr}</span>
         )}
 
         {domainMismatch && (

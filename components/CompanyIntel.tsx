@@ -1612,6 +1612,16 @@ export function CompanyIntel({
         companyAliases={companyAliases}
         domain={intel.domain}
         autoCheck
+        proposal={{
+          // The brief is the richest context any surface has — signal, summary
+          // and the motion's named contact all feed the personalization.
+          context:
+            `${intel.callHook ? `Signal: ${intel.callHook}\n` : ""}${intel.summary ?? ""}`.slice(0, 1400),
+          sweEstimate: intel.sweEstimate,
+          icpTotal: intel.icp.total,
+          contactName: intel.motion?.keyContactName,
+          contactTitle: intel.motion?.keyContactTitle,
+        }}
         defaultSubject={`SIGNAL DASH - ${intel.name}`}
         defaultBody={
           `${intel.name} — ${intel.segment.label}` +

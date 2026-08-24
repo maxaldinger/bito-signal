@@ -32,10 +32,13 @@ export async function middleware(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
 
-  // Always-open: the login page, the auth endpoints, and the cron.
+  // Always-open: the login page, the auth endpoints, the cron, and the
+  // prospect-facing proposal pages (/p/<token> — the unguessable token is the
+  // key; prospects have no login).
   if (
     pathname === "/login" ||
     pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/p/") ||
     isCronRequest(req)
   ) {
     return NextResponse.next();

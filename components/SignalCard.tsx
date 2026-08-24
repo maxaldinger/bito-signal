@@ -404,6 +404,11 @@ export function SignalCard({
           compact
           autoCheck
           autoCheckDelayMs={index * 300}
+          proposal={{
+            context: [displayTitle, displayDesc].filter(Boolean).join(" — ").slice(0, 900),
+            sweEstimate: signal.sweEstimate,
+            icpTotal: briefScore,
+          }}
           defaultSubject={`SIGNAL DASH - ${signal.account}`}
           defaultBody={
             `${signal.account} — ${segment.label}` +
