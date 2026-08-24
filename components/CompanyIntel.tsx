@@ -902,20 +902,44 @@ function ApolloPersonCard({
               const li = ctx.linkedin;
               if (!li)
                 return `${draft?.text || ctx.outreach || "—"}\n\n(Update the brief to generate the outreach set.)`;
-              // Per-person connect when it generated, else the company-level one.
-              const connect = stripEmDashes(personalConnect || li.connect);
+              // THE BRIEF WRITES ONE OUTREACH SET PER COMPANY, addressed to
+              // the signal's named contact. Pasting it verbatim under a
+              // DIFFERENT contact shipped "Hey Vishal" into Ali Zaidi's FedEx
+              // task. Guard by greeting: a wrong-named CONNECT is re-greeted
+              // (its body is company-level, so only the name is wrong), and a
+              // wrong-named InMail/follow-up gets a loud rework warning — its
+              // BODY may be about the other person's situation, so a silent
+              // name swap would still send Ali a message about Vishal's
+              // mandate.
+              const first = displayName.split(" ")[0];
+              const greetRe = /^\s*(hey|hi|hello)\s+([A-Za-z][\w'’-]*)([,.!]?)/i;
+              const greetedName = (t?: string) => t?.match(greetRe)?.[2];
+              const wrongName = (t?: string) => {
+                const g = greetedName(t);
+                return !!g && g.toLowerCase() !== first.toLowerCase();
+              };
+              // Per-person connect when it generated, else the company-level
+              // one, re-greeted to THIS contact if needed.
+              let connect = stripEmDashes(personalConnect || li.connect);
+              if (!personalConnect && wrongName(connect)) {
+                connect = connect.replace(greetRe, (_m, g, _n, p) => `${g} ${first}${p}`);
+              }
               const parts = [
                 `CONNECT (${connect.length} chars)${
                   connectGeneric ? " — GENERIC TEMPLATE, the personalized drafts kept pitching" : ""
                 }:\n${connect}`,
               ];
+              const warnFor = (t?: string) =>
+                wrongName(t)
+                  ? `\n!! WRITTEN TO ${(greetedName(t) ?? "").toUpperCase()} (the signal's named contact) — rework for ${first} before sending.`
+                  : "";
               const block = (
                 label: string,
                 m?: { subject: string; body: string },
               ) => {
                 if (!m?.body) return;
                 parts.push(
-                  `${label}\n${m.subject ? `Subject: ${m.subject}\n\n` : ""}${stripEmDashes(m.body)}`,
+                  `${label}${warnFor(m.body)}\n${m.subject ? `Subject: ${m.subject}\n\n` : ""}${stripEmDashes(m.body)}`,
                 );
               };
               block("INMAIL", li.inmail);
@@ -924,11 +948,11 @@ function ApolloPersonCard({
               // Briefs generated before the Aug 2026 restructure have no
               // subjects; render what they do have rather than dropping it.
               if (!li.inmail && (li.dm1 || li.dm)) {
-                if (li.dm1) parts.push(`1. ${stripEmDashes(li.dm1)}`);
-                if (li.dm2) parts.push(`2. ${stripEmDashes(li.dm2)}`);
-                if (li.dm3) parts.push(`3. ${stripEmDashes(li.dm3)}`);
-                if (li.dm) parts.push(`1. ${stripEmDashes(li.dm)}`);
-                if (li.resurface) parts.push(`2. ${stripEmDashes(li.resurface)}`);
+                if (li.dm1) parts.push(`1.${warnFor(li.dm1)} ${stripEmDashes(li.dm1)}`);
+                if (li.dm2) parts.push(`2.${warnFor(li.dm2)} ${stripEmDashes(li.dm2)}`);
+                if (li.dm3) parts.push(`3.${warnFor(li.dm3)} ${stripEmDashes(li.dm3)}`);
+                if (li.dm) parts.push(`1.${warnFor(li.dm)} ${stripEmDashes(li.dm)}`);
+                if (li.resurface) parts.push(`2.${warnFor(li.resurface)} ${stripEmDashes(li.resurface)}`);
                 parts.push("(Update the brief to regenerate with subjects and follow-ups.)");
               }
               return parts.join("\n\n---\n\n");
