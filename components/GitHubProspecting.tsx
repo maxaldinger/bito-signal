@@ -182,6 +182,9 @@ function ProspectCard({ p, repos, index }: { p: Prospect; repos: Map<string, Mon
   const taskBody = [
     `WHO: ${displayName} (github.com/${p.login})${p.title ? ` — ${p.title}` : ""}`,
     `COMPANY: ${p.company ?? "unresolved"}${p.headcount ? ` (~${fmtNum(p.headcount)} employees)` : ""}`,
+    // Same convention as the brief notes: a real profile URL or the word
+    // UNRESOLVED — never a search link masquerading as a resolved profile.
+    `PROFILE: ${p.linkedinUrl || "UNRESOLVED"}`,
     p.bestAction && p.bestRepo
       ? `SIGNAL: ${ACTION_LABELS[p.bestAction]} ${repoShortName(p.bestRepo)}${bestRepo ? ` — ${bestRepo.whyMatters}` : ""}`
       : "",
