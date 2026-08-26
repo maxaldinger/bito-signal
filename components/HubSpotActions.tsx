@@ -156,6 +156,16 @@ export function HubSpotActions({
     if (propBusy) return;
     setPropBusy(true);
     setPropErr(null);
+    // Open the tab NOW, inside the click's user activation — a window.open
+    // after the ~15s generation await would be popup-blocked. The tab shows a
+    // holding screen and navigates itself to the proposal when it's ready.
+    const tab = window.open("", "_blank");
+    if (tab) {
+      tab.document.write(
+        `<title>Personalizing proposal…</title><body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#46556a"><div style="text-align:center"><p style="font-size:17px;font-weight:700;color:#1a2230;margin:0 0 6px">Personalizing the proposal for ${name.replace(/</g, "&lt;")}…</p><p style="font-size:13px;margin:0">Writing the executive summary and running the numbers — this tab loads it in ~15 seconds.</p></div></body>`,
+      );
+      tab.document.close();
+    }
     try {
       const res = await fetch("/api/proposal", {
         method: "POST",
@@ -173,17 +183,22 @@ export function HubSpotActions({
       });
       const d = (await res.json()) as { ok?: boolean; url?: string; error?: string };
       if (!res.ok || !d.ok || !d.url) {
+        tab?.close();
         setPropErr(d.error || `Proposal generation failed (${res.status})`);
         return;
       }
       setPropUrl(d.url);
+      if (tab) tab.location.href = d.url;
       try {
+        // Best effort: if the new tab stole focus, some browsers refuse the
+        // write ("document is not focused") — the chip still holds the link.
         await navigator.clipboard.writeText(d.url);
         setPropCopied(true);
       } catch {
         /* clipboard blocked — the link chip still shows */
       }
     } catch (e) {
+      tab?.close();
       setPropErr(e instanceof Error ? e.message : String(e));
     } finally {
       setPropBusy(false);
