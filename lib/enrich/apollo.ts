@@ -25,6 +25,10 @@ interface ApolloOrg {
   short_description?: string;
   seo_description?: string;
   estimated_num_employees?: number;
+  /** LinkedIn-function-derived headcount per department (engineering,
+   *  information_technology, sales, …) — the measured basis for tight SWE
+   *  estimates. */
+  departmental_head_count?: Record<string, number>;
   annual_revenue?: number;
   city?: string;
   state?: string;
@@ -858,8 +862,47 @@ export interface IcpSweepOrg {
   employeeBand: string;
   /** Apollo's per-org TOTAL employee estimate, when present (not SWE count). */
   estimatedEmployees?: number;
+  /** MEASURED engineering-department headcount (LinkedIn-derived, via the free
+   *  org enrich) — preferred over the modeled share wherever present. */
+  engineeringCount?: number;
   /** Short "what the company does" blurb from Apollo, when present. */
   about?: string;
+}
+
+/** LinkedIn-derived headcount facts from the FREE organizations/enrich call.
+ *  The engineering-department count is a measured figure with provenance —
+ *  tighter than the 35%/3% share model wherever it exists. Note the caveats:
+ *  it's a FLOOR where LinkedIn coverage is thin (China, blue-collar-heavy
+ *  orgs), and "engineering" includes mechanical/industrial engineers at
+ *  manufacturers. */
+export interface OrgFacts {
+  employees?: number;
+  engineering?: number;
+  informationTechnology?: number;
+}
+
+export async function apolloOrgFacts(domain: string): Promise<OrgFacts | null> {
+  const key = process.env.APOLLO_API_KEY;
+  if (!key || !domain) return null;
+  try {
+    const { status, body } = await apolloJson(
+      `${BASE}/organizations/enrich?${new URLSearchParams({ domain })}`,
+      key,
+      "GET",
+    );
+    if (status !== 200) return null;
+    const org = (body as { organization?: ApolloOrg } | undefined)?.organization;
+    if (!org) return null;
+    const dept = org.departmental_head_count ?? {};
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
+    return {
+      employees: num(org.estimated_num_employees),
+      engineering: num(dept.engineering),
+      informationTechnology: num(dept.information_technology),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export interface IcpSweepResult {

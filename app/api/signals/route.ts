@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
-import { apolloIcpSweep, SWEEP_PAGE_SIZE, type IcpSweepOrg } from "@/lib/enrich/apollo";
+import { apolloIcpSweep, apolloOrgFacts, SWEEP_PAGE_SIZE, type IcpSweepOrg } from "@/lib/enrich/apollo";
 import { fetchHNItems } from "@/lib/sources/hn";
 import { fetchGitHubTrendingItems } from "@/lib/sources/github";
 import { fetchGdeltItems } from "@/lib/sources/gdelt";
@@ -387,6 +387,12 @@ const TECH_NATIVE_SWEEP_KEYWORDS = new Set([
 ]);
 
 function modeledSweFromOrg(org: IcpSweepOrg): number | undefined {
+  // MEASURED beats modeled: when the free org enrich returned a LinkedIn-
+  // derived engineering-department count, that IS the estimate (a floor
+  // where LinkedIn coverage is thin, but evidence rather than a share guess).
+  if (typeof org.engineeringCount === "number" && org.engineeringCount >= 5) {
+    return org.engineeringCount;
+  }
   const techNative = TECH_NATIVE_SWEEP_KEYWORDS.has(org.matchedKeyword);
   // Representative total when Apollo's per-org count is missing: tech-native
   // matches the 100-2000 band, traditional the 5,000+ band.
@@ -482,6 +488,24 @@ export async function GET(req: NextRequest) {
         { status: 502, headers: { "Cache-Control": "no-store" } },
       );
     }
+    // Tighter SWE: pull LinkedIn-derived engineering-department counts for the
+    // swept orgs (organizations/enrich, FREE) before turning them into
+    // signals — a measured engineering headcount beats the 35%/3% share model
+    // wherever it exists. Concurrency-limited; a miss leaves the model in
+    // charge for that org.
+    const enrichTargets = sweep.orgs.filter((o) => o.domain);
+    let ei = 0;
+    await Promise.all(
+      Array.from({ length: 6 }, async () => {
+        for (;;) {
+          const o = enrichTargets[ei++];
+          if (!o) return;
+          const facts = await apolloOrgFacts(o.domain!);
+          if (facts?.engineering) o.engineeringCount = facts.engineering;
+          if (facts?.employees && !o.estimatedEmployees) o.estimatedEmployees = facts.employees;
+        }
+      }),
+    );
     const icpSignals = icpSweepToSignals(sweep.orgs);
     const persisted = supabaseConfigured()
       ? (await upsertSignals(icpSignals, region)).ok

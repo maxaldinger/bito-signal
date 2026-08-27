@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
+import { apolloOrgFacts } from "@/lib/enrich/apollo";
+import { apolloOrgLookup } from "@/lib/githubProspect/enrich";
 import { SEGMENT_MAP } from "@/lib/data";
 import { CONNECT_CAP, VOICE_SPEC, enforceLinkedin } from "@/lib/outreachRules";
 import { fetchBrief, upsertBrief, supabaseConfigured } from "@/lib/supabase";
@@ -219,10 +221,30 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Measured engineering headcount (Apollo departmental counts, two FREE
+  // calls) injected as ground evidence, so the brief's SWE estimate anchors
+  // on data instead of a share-of-headcount guess. Best-effort — a miss
+  // changes nothing about the research pass.
+  let orgFactsLine = "";
+  try {
+    const look = await apolloOrgLookup(company);
+    const facts = look.ok && look.domain ? await apolloOrgFacts(look.domain) : null;
+    if (facts && (facts.engineering || facts.employees)) {
+      orgFactsLine =
+        `\nMeasured headcount evidence (Apollo, LinkedIn-derived; treat as floors where LinkedIn coverage is thin, and note "engineering" includes non-software engineers at industrial companies): ` +
+        `${facts.employees ? `~${facts.employees.toLocaleString()} total employees. ` : ""}` +
+        `${facts.engineering ? `Engineering department ~${facts.engineering.toLocaleString()}. ` : ""}` +
+        `${facts.informationTechnology ? `IT department ~${facts.informationTechnology.toLocaleString()}. ` : ""}` +
+        `Anchor sweEstimate on this evidence, reconciled with anything your research finds.`;
+    }
+  } catch {
+    /* best-effort */
+  }
+
   try {
     const result = await callClaudeWithWebSearch({
       system: SYSTEM,
-      user: `Research "${company}" and produce the lean Bito intel brief JSON. Today's date: ${new Date().toISOString().slice(0, 10)}.`,
+      user: `Research "${company}" and produce the lean Bito intel brief JSON. Today's date: ${new Date().toISOString().slice(0, 10)}.${orgFactsLine}`,
       maxSearches: 6,
       // 5000 was set when outreach was four short strings. The Aug 2026 spec
       // replaced those with a connect note plus THREE subject+body messages
