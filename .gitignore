@@ -39,3 +39,4 @@ yarn-error.log*
 
 # HubSpot CLI auth (contains the personal access key)
 hubspot.config.yml
+/1.pdf

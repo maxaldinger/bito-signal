@@ -35,12 +35,13 @@ interface GenOut {
 
 const ASSUMED_ALLOWANCE_MO = 1000;
 
-// ROI is modeled on a PILOT-SCALE cohort, not the whole org. The SWE estimate
-// is a headcount-share model (fine for sorting, absurd as an absolute at a
-// 180K-employee enterprise), and "every engineer × $1K/mo" at Comcast scale
-// produced a $684M "token spend" — one absurd number and the reader discounts
-// every real one on the page. Cap the cohort; the doc says it scales linearly.
-const ROI_COHORT_CAP = 2000;
+// ROI renders as ADOPTION TIERS (10% / 25% / 50% / full org) for estimates
+// above this, a single row below it. One flat "whole org × $1K/mo" number at
+// Comcast scale produced a $684M "token spend" that torpedoes credibility; a
+// flat 2K cap then undersold a 32,000-engineer bank. Tiers keep the pilot row
+// believable AND the full-scale row on the page, each with its assumption
+// visible.
+const ROI_TIER_THRESHOLD = 2000;
 
 export async function POST(req: NextRequest) {
   const uid = await sessionUserId();
@@ -61,17 +62,28 @@ export async function POST(req: NextRequest) {
   // have an engineer count to anchor it.
   let roi: ProposalRoi | undefined;
   if (swe) {
-    const cohort = Math.min(swe, ROI_COHORT_CAP);
-    const spendYr = cohort * ASSUMED_ALLOWANCE_MO * 12;
-    roi = {
-      engineers: cohort,
-      cappedFrom: swe > ROI_COHORT_CAP ? swe : undefined,
-      allowanceMo: ASSUMED_ALLOWANCE_MO,
-      spendYr,
-      savedAt47: Math.round(spendYr * 0.47),
-      newSpendAt47: Math.round(spendYr * 0.53),
-      savedAt83: Math.round(spendYr * 0.83),
+    const tier = (n: number, label: string) => {
+      const spendYr = n * ASSUMED_ALLOWANCE_MO * 12;
+      return {
+        engineers: n,
+        label,
+        spendYr,
+        savedAt47: Math.round(spendYr * 0.47),
+        savedAt83: Math.round(spendYr * 0.83),
+      };
     };
+    // Round tier headcounts to something a human would say (nearest 100).
+    const pctOf = (p: number) => Math.max(100, Math.round((swe * p) / 100 / 100) * 100);
+    const tiers =
+      swe > ROI_TIER_THRESHOLD
+        ? [
+            tier(pctOf(10), "pilot — 10% of engineers on agents"),
+            tier(pctOf(25), "25% of engineers"),
+            tier(pctOf(50), "50% of engineers"),
+            tier(swe, `full engineering org (~${swe.toLocaleString()} estimated)`),
+          ]
+        : [tier(swe, `~${swe.toLocaleString()} estimated engineers`)];
+    roi = { allowanceMo: ASSUMED_ALLOWANCE_MO, sweEstimate: swe, tiers };
   }
 
   const facts = [

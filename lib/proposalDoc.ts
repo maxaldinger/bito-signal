@@ -8,17 +8,31 @@
 
 import { BITO_LOGO } from "./pocPdf";
 
-export interface ProposalRoi {
-  /** The modeled cohort — capped at pilot scale, never the whole org. */
+export interface ProposalRoiTier {
   engineers: number;
-  /** Set when `engineers` was capped down from a larger SWE estimate. */
-  cappedFrom?: number;
-  /** Assumed token allowance per engineer per month (USD). */
-  allowanceMo: number;
+  label: string;
   spendYr: number;
   savedAt47: number;
-  newSpendAt47: number;
   savedAt83: number;
+}
+
+export interface ProposalRoi {
+  /** Assumed token allowance per engineer per month (USD). */
+  allowanceMo: number;
+  /** Adoption-tier table (10% / 25% / 50% / full org for big estimates, a
+   *  single row for small ones). The pilot row keeps it credible; the full
+   *  row keeps the scale story — Max's call after a flat 2K cap undersold
+   *  a 32,000-engineer bank. */
+  tiers?: ProposalRoiTier[];
+  sweEstimate?: number;
+  /** Legacy single-cohort fields — proposals stored before the tier table
+   *  still render from these. */
+  engineers?: number;
+  cappedFrom?: number;
+  spendYr?: number;
+  savedAt47?: number;
+  newSpendAt47?: number;
+  savedAt83?: number;
 }
 
 export interface ProposalFields {
@@ -56,33 +70,60 @@ export function buildProposalHtml(f: ProposalFields): string {
     .map((p) => `<p class="body">${esc(p)}</p>`)
     .join("");
 
-  const roi = f.roi
-    ? `
-    <section>
-      <div class="sec-head"><span class="bar"></span><h2>${company}&rsquo;s numbers</h2></div>
+  const roiTable = (r: NonNullable<ProposalFields["roi"]>): string => {
+    if (r.tiers?.length) {
+      const rows = r.tiers
+        .map(
+          (t) => `
+          <tr>
+            <td>${t.engineers.toLocaleString()}<span class="sub">${esc(t.label)}</span></td>
+            <td class="num">${usd(t.spendYr)}</td>
+            <td class="num big">${usd(t.savedAt47)}</td>
+            <td class="num big">${usd(t.savedAt83)}</td>
+          </tr>`,
+        )
+        .join("");
+      return `
+      <table class="cs">
+        <thead><tr><th>Engineers on coding agents</th><th class="num">Token spend / yr</th><th class="num">Saved at −47%</th><th class="num">Saved at −83%</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="note">Assumes ${usd(r.allowanceMo)} per engineer per month in agent tokens — an assumption to make the
+      math concrete; the instrumented A/B below replaces it with your measured per-task numbers. −47% is the published
+      per-task figure; −83% was measured on a full working session.</p>`;
+    }
+    // Legacy single-cohort shape (proposals stored before the tier table).
+    return `
       <table class="cs">
         <thead><tr><th></th><th class="num">Annual</th></tr></thead>
         <tbody>
           <tr>
             <td>Estimated token spend<span class="sub">${
-              f.roi.cappedFrom
-                ? `modeled on the first ${f.roi.engineers.toLocaleString()} engineers on coding agents (of ~${f.roi.cappedFrom.toLocaleString()} estimated) × ${usd(f.roi.allowanceMo)}/month — scales linearly with rollout`
-                : `${f.roi.engineers.toLocaleString()} engineers × ${usd(f.roi.allowanceMo)}/month assumed allowance`
+              r.cappedFrom
+                ? `modeled on the first ${(r.engineers ?? 0).toLocaleString()} engineers on coding agents (of ~${r.cappedFrom.toLocaleString()} estimated) × ${usd(r.allowanceMo)}/month — scales linearly with rollout`
+                : `${(r.engineers ?? 0).toLocaleString()} engineers × ${usd(r.allowanceMo)}/month assumed allowance`
             }</span></td>
-            <td class="num">${usd(f.roi.spendYr)}</td>
+            <td class="num">${usd(r.spendYr ?? 0)}</td>
           </tr>
           <tr>
-            <td>At Governor&rsquo;s published −47% per task<span class="sub">bill brought down to ${usd(f.roi.newSpendAt47)}</span></td>
-            <td class="num big">${usd(f.roi.savedAt47)} saved</td>
+            <td>At Governor&rsquo;s published −47% per task<span class="sub">bill brought down to ${usd(r.newSpendAt47 ?? 0)}</span></td>
+            <td class="num big">${usd(r.savedAt47 ?? 0)} saved</td>
           </tr>
           <tr>
             <td>At the −83% measured on a full working session</td>
-            <td class="num big">${usd(f.roi.savedAt83)} saved</td>
+            <td class="num big">${usd(r.savedAt83 ?? 0)} saved</td>
           </tr>
         </tbody>
       </table>
       <p class="note">The allowance is an assumption to make the math concrete — the instrumented A/B below replaces
-      it with your real per-task numbers.</p>
+      it with your real per-task numbers.</p>`;
+  };
+
+  const roi = f.roi
+    ? `
+    <section>
+      <div class="sec-head"><span class="bar"></span><h2>${company}&rsquo;s numbers</h2></div>
+      ${roiTable(f.roi)}
     </section>`
     : "";
 
