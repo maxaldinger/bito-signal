@@ -9,7 +9,10 @@
 import { BITO_LOGO } from "./pocPdf";
 
 export interface ProposalRoi {
+  /** The modeled cohort — capped at pilot scale, never the whole org. */
   engineers: number;
+  /** Set when `engineers` was capped down from a larger SWE estimate. */
+  cappedFrom?: number;
   /** Assumed token allowance per engineer per month (USD). */
   allowanceMo: number;
   spendYr: number;
@@ -61,7 +64,11 @@ export function buildProposalHtml(f: ProposalFields): string {
         <thead><tr><th></th><th class="num">Annual</th></tr></thead>
         <tbody>
           <tr>
-            <td>Estimated token spend today<span class="sub">${f.roi.engineers.toLocaleString()} engineers × ${usd(f.roi.allowanceMo)}/month assumed allowance</span></td>
+            <td>Estimated token spend<span class="sub">${
+              f.roi.cappedFrom
+                ? `modeled on the first ${f.roi.engineers.toLocaleString()} engineers on coding agents (of ~${f.roi.cappedFrom.toLocaleString()} estimated) × ${usd(f.roi.allowanceMo)}/month — scales linearly with rollout`
+                : `${f.roi.engineers.toLocaleString()} engineers × ${usd(f.roi.allowanceMo)}/month assumed allowance`
+            }</span></td>
             <td class="num">${usd(f.roi.spendYr)}</td>
           </tr>
           <tr>

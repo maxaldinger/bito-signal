@@ -35,6 +35,13 @@ interface GenOut {
 
 const ASSUMED_ALLOWANCE_MO = 1000;
 
+// ROI is modeled on a PILOT-SCALE cohort, not the whole org. The SWE estimate
+// is a headcount-share model (fine for sorting, absurd as an absolute at a
+// 180K-employee enterprise), and "every engineer × $1K/mo" at Comcast scale
+// produced a $684M "token spend" — one absurd number and the reader discounts
+// every real one on the page. Cap the cohort; the doc says it scales linearly.
+const ROI_COHORT_CAP = 2000;
+
 export async function POST(req: NextRequest) {
   const uid = await sessionUserId();
   if (!uid) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -54,9 +61,11 @@ export async function POST(req: NextRequest) {
   // have an engineer count to anchor it.
   let roi: ProposalRoi | undefined;
   if (swe) {
-    const spendYr = swe * ASSUMED_ALLOWANCE_MO * 12;
+    const cohort = Math.min(swe, ROI_COHORT_CAP);
+    const spendYr = cohort * ASSUMED_ALLOWANCE_MO * 12;
     roi = {
-      engineers: swe,
+      engineers: cohort,
+      cappedFrom: swe > ROI_COHORT_CAP ? swe : undefined,
       allowanceMo: ASSUMED_ALLOWANCE_MO,
       spendYr,
       savedAt47: Math.round(spendYr * 0.47),
@@ -70,7 +79,7 @@ export async function POST(req: NextRequest) {
     body.domain ? `Domain: ${body.domain}` : "",
     contactName ? `Recipient: ${contactName}${body.contactTitle ? `, ${body.contactTitle}` : ""}` : "",
     typeof body.employees === "number" ? `Total employees: ~${Math.round(body.employees).toLocaleString()}` : "",
-    swe ? `Estimated software engineers: ~${swe.toLocaleString()}` : "",
+    swe ? `Estimated software engineers: ~${swe.toLocaleString()} (rough headcount-share model — treat as an order of magnitude, never quote as fact)` : "",
     typeof body.icpTotal === "number" ? `Bito ICP fit score: ${body.icpTotal}/99` : "",
     body.context ? `What we know (signal / brief context):\n${body.context.slice(0, 1500)}` : "",
   ]
