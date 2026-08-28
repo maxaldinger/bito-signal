@@ -59,6 +59,17 @@ const usd = (n: number) =>
     ? n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
     : "—";
 
+// Headline-sized money: $944K, $25.9M, $258M.
+const usdCompact = (n: number): string => {
+  if (!isFinite(n) || n <= 0) return "";
+  if (n >= 1e6) {
+    const m = n / 1e6;
+    return `$${m >= 100 ? Math.round(m).toLocaleString("en-US") : String(Math.round(m * 10) / 10)}M`;
+  }
+  if (n >= 1e3) return `$${Math.round(n / 1e3)}K`;
+  return `$${Math.round(n)}`;
+};
+
 const dateLong = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
@@ -126,6 +137,33 @@ export function buildProposalHtml(f: ProposalFields): string {
       ${roiTable(f.roi)}
     </section>`
     : "";
+
+  // Headline: LEAD with the estimated dollar savings (Max, Aug 28) — taken
+  // from the most conservative row of the ROI table (the pilot tier at the
+  // published −47%), so the number that hooks the reader is also the easiest
+  // to defend. The "+" carries the upside (wider adoption, the measured
+  // −83%). No engineer count → no dollar to anchor, keep the percent title.
+  //
+  // TIERS ONLY, deliberately: legacy single-cohort docs stored their savedAt47
+  // on the WHOLE org, uncapped — Comcast's stored row would headline $321M,
+  // the exact credibility torpedo the tier table replaced. Legacy docs keep
+  // the percent title they were emailed with until an Update regenerates them.
+  const baseTier = f.roi?.tiers?.[0];
+  const headlineSave = baseTier?.savedAt47 ?? 0;
+  const headlineEngineers = baseTier?.engineers ?? 0;
+  const headlineScales = (f.roi?.tiers?.length ?? 0) > 1;
+  const title =
+    headlineSave > 0
+      ? `${usdCompact(headlineSave)}+ in Estimated Annual Savings on ${company}&rsquo;s Agent Token Bill`
+      : `48% Reduction in Agent Token Costs for ${company}`;
+  const subline =
+    headlineSave > 0
+      ? `Estimated at Governor&rsquo;s published −47% per-task token reduction, on ${headlineEngineers.toLocaleString()}
+    engineers on coding agents${headlineScales ? " — the table below scales it with adoption" : ""}. Governor,
+    Bito&rsquo;s context-driven model router, manages both factors of your AI bill: it injects the right code context
+    up front, then routes each request to the right model.`
+      : `Inject the right code context up front, then route each request to the right model. Governor,
+    Bito&rsquo;s context-driven model router, manages both factors of your AI bill.`;
 
   return `<!doctype html>
 <html lang="en">
@@ -197,9 +235,8 @@ export function buildProposalHtml(f: ProposalFields): string {
     <div class="rule"></div>
 
     <p class="eyebrow">prepared for ${company} · ${dateLong(f.generatedAt)}</p>
-    <h1 class="title">48% Reduction in Agent Token Costs for ${company}</h1>
-    <p class="subline">Inject the right code context up front, then route each request to the right model. Governor,
-    Bito&rsquo;s context-driven model router, manages both factors of your AI bill.</p>
+    <h1 class="title">${title}</h1>
+    <p class="subline">${subline}</p>
 
     <section>
       <div class="sec-head"><span class="bar"></span><h2>Executive summary</h2></div>

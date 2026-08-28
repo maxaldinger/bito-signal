@@ -5,6 +5,7 @@ import { Flame, ArrowRight } from "lucide-react";
 import { SEGMENT_MAP } from "@/lib/data";
 import { fmtNum } from "@/lib/format";
 import type { Signal } from "@/lib/types";
+import { useSweOverrides, companyValue } from "@/lib/clientStore";
 import { SegmentIcon } from "./SegmentIcon";
 
 export function AccountPriority({
@@ -14,6 +15,8 @@ export function AccountPriority({
   signals: Signal[];
   onSelect: (company: string) => void;
 }) {
+  // Rep-confirmed SWE counts override the modeled per-signal estimates.
+  const sweOverrides = useSweOverrides();
   const ranked = useMemo(() => {
     const map = new Map<
       string,
@@ -23,6 +26,7 @@ export function AccountPriority({
         count: number;
         strength: number;
         sweEstimate?: number;
+        sweConfirmed?: boolean;
       }
     >();
     for (const s of signals) {
@@ -32,16 +36,21 @@ export function AccountPriority({
         count: 0,
         strength: 0,
         sweEstimate: undefined as number | undefined,
+        sweConfirmed: false,
       };
       cur.count += 1;
       cur.strength = Math.max(cur.strength, s.strength);
-      if (!cur.sweEstimate && s.sweEstimate) cur.sweEstimate = s.sweEstimate;
+      const confirmed = companyValue(sweOverrides, s.account);
+      if (confirmed) {
+        cur.sweEstimate = confirmed;
+        cur.sweConfirmed = true;
+      } else if (!cur.sweEstimate && s.sweEstimate) cur.sweEstimate = s.sweEstimate;
       map.set(s.account, cur);
     }
     return [...map.values()]
       .sort((a, b) => b.strength - a.strength || b.count - a.count)
       .slice(0, 6);
-  }, [signals]);
+  }, [signals, sweOverrides]);
 
   if (ranked.length === 0) return null;
 
@@ -76,7 +85,7 @@ export function AccountPriority({
                 </span>
                 <span className="block truncate font-mono text-[11px] text-ink-500">
                   {seg.label}
-                  {a.sweEstimate ? ` · ~${fmtNum(a.sweEstimate)} SWEs` : ""}
+                  {a.sweEstimate ? ` · ${a.sweConfirmed ? "" : "~"}${fmtNum(a.sweEstimate)} SWEs` : ""}
                 </span>
               </span>
               <span className="flex shrink-0 flex-col items-end">

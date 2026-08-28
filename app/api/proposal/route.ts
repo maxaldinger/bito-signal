@@ -3,11 +3,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { adminClient, sessionUserId } from "@/lib/supabaseAuth";
 import { BITO_CONTEXT } from "@/lib/bito";
+import { normCompany } from "@/lib/companyKey";
 import type { ProposalFields, ProposalRoi } from "@/lib/proposalDoc";
 
 // POST /api/proposal — generate a personalized Governor proposal for an
 // account and store it under an unguessable token; the prospect-facing page
 // is served publicly at /p/<token> (middleware exempts that path).
+//
+// CACHED per rep + account: a repeat click returns the existing link instead
+// of generating a duplicate; `force: true` regenerates with the latest facts
+// IN PLACE (same token), so a link already emailed out shows the new content.
 //
 // The canonical sections (solution, rollout, proof points, why-Bito) are
 // FIXED copy in lib/proposalDoc.ts, and the ROI table is computed here — the
@@ -18,14 +23,21 @@ export const maxDuration = 60;
 
 interface Body {
   company?: string;
+  /** The feed's stable name for the account — the proposal-cache key. */
+  companyKey?: string;
   domain?: string;
   contactName?: string;
   contactTitle?: string;
   /** Whatever the surface knows: signal, blurb, brief summary, call hook. */
   context?: string;
   sweEstimate?: number;
+  /** True when the SWE count was confirmed by the account on a call (the
+   *  rep's manual override) — changes how the number is framed. */
+  sweConfirmed?: boolean;
   employees?: number;
   icpTotal?: number;
+  /** Regenerate even when a proposal exists — updates it at the SAME link. */
+  force?: boolean;
 }
 
 interface GenOut {
@@ -56,7 +68,59 @@ export async function POST(req: NextRequest) {
   const company = body.company?.trim();
   if (!company) return NextResponse.json({ ok: false, error: "Pass company" }, { status: 400 });
   const contactName = body.contactName?.trim() || undefined;
-  const swe = typeof body.sweEstimate === "number" && body.sweEstimate >= 20 ? Math.round(body.sweEstimate) : undefined;
+  // The >= 20 floor sanity-filters MODELED estimates; a rep-confirmed count
+  // from a call is exactly the case where a small number is trustworthy, so
+  // confirmation lowers the floor to 1 (matching what the SweChip accepts).
+  const swe =
+    typeof body.sweEstimate === "number" && body.sweEstimate >= (body.sweConfirmed === true ? 1 : 20)
+      ? Math.round(body.sweEstimate)
+      : undefined;
+  const sweConfirmed = body.sweConfirmed === true && !!swe;
+
+  // Proposal cache: one live proposal per rep + account. A repeat click
+  // returns the existing link (no duplicate doc, no duplicate spend); `force`
+  // falls through to regenerate and update that row in place.
+  const companyKey = normCompany(body.companyKey?.trim() || company);
+  const admin = adminClient();
+  const { data: existing, error: lookupError } = await admin
+    .from("bito_proposals")
+    .select("token, fields")
+    .eq("created_by", uid)
+    .eq("company_key", companyKey)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  // A failed lookup must FAIL the request — falling through would mint a
+  // duplicate proposal at a new URL and strand the link already sent out.
+  if (lookupError) {
+    return NextResponse.json(
+      { ok: false, error: `Proposal lookup failed: ${lookupError.message}` },
+      { status: 502 },
+    );
+  }
+  if (existing?.token && !body.force) {
+    const f = existing.fields as Partial<ProposalFields> | null;
+    return NextResponse.json({
+      ok: true,
+      url: `${req.nextUrl.origin}/p/${existing.token}`,
+      cached: true,
+      generatedAt: f?.generatedAt,
+    });
+  }
+
+  // Facts the CURRENT surface doesn't know must not erase what a richer one
+  // already published: an Update clicked on the feed card (which knows no
+  // contact or employee count) would otherwise strip the brief-generated
+  // proposal's "Hi <name>," greeting and employees fact from the live link.
+  const prev = (existing?.fields ?? undefined) as Partial<ProposalFields> | undefined;
+  const mergedContactName =
+    contactName ?? (typeof prev?.contactName === "string" && prev.contactName ? prev.contactName : undefined);
+  const employees =
+    typeof body.employees === "number"
+      ? Math.round(body.employees)
+      : typeof prev?.employees === "number"
+        ? prev.employees
+        : undefined;
 
   // ROI table, computed — never model-written. Only rendered when we actually
   // have an engineer count to anchor it.
@@ -80,18 +144,36 @@ export async function POST(req: NextRequest) {
             tier(pctOf(10), "pilot — 10% of engineers on agents"),
             tier(pctOf(25), "25% of engineers"),
             tier(pctOf(50), "50% of engineers"),
-            tier(swe, `full engineering org (~${swe.toLocaleString()} estimated)`),
+            tier(
+              swe,
+              sweConfirmed
+                ? `full engineering org (${swe.toLocaleString()} confirmed)`
+                : `full engineering org (~${swe.toLocaleString()} estimated)`,
+            ),
           ]
-        : [tier(swe, `~${swe.toLocaleString()} estimated engineers`)];
+        : [
+            tier(
+              swe,
+              sweConfirmed
+                ? `${swe.toLocaleString()} engineers (confirmed)`
+                : `~${swe.toLocaleString()} estimated engineers`,
+            ),
+          ];
     roi = { allowanceMo: ASSUMED_ALLOWANCE_MO, sweEstimate: swe, tiers };
   }
 
   const facts = [
     `Company: ${company}`,
     body.domain ? `Domain: ${body.domain}` : "",
-    contactName ? `Recipient: ${contactName}${body.contactTitle ? `, ${body.contactTitle}` : ""}` : "",
-    typeof body.employees === "number" ? `Total employees: ~${Math.round(body.employees).toLocaleString()}` : "",
-    swe ? `Estimated software engineers: ~${swe.toLocaleString()} (rough headcount-share model — treat as an order of magnitude, never quote as fact)` : "",
+    mergedContactName
+      ? `Recipient: ${mergedContactName}${contactName && body.contactTitle ? `, ${body.contactTitle}` : ""}`
+      : "",
+    typeof employees === "number" ? `Total employees: ~${employees.toLocaleString()}` : "",
+    swe
+      ? sweConfirmed
+        ? `Software engineers: ${swe.toLocaleString()} (confirmed by the account on a call — reliable, may be stated plainly)`
+        : `Estimated software engineers: ~${swe.toLocaleString()} (LinkedIn-derived headcount data — approximate, never quote as fact)`
+      : "",
     typeof body.icpTotal === "number" ? `Bito ICP fit score: ${body.icpTotal}/99` : "",
     body.context ? `What we know (signal / brief context):\n${body.context.slice(0, 1500)}` : "",
   ]
@@ -141,19 +223,64 @@ Return ONLY JSON: {"execSummary": ["paragraph 1", "paragraph 2"], "cta": "one cl
 
   const fields: ProposalFields = {
     company,
-    contactName,
+    contactName: mergedContactName,
     execSummary,
     cta,
     engineers: swe,
-    employees: typeof body.employees === "number" ? Math.round(body.employees) : undefined,
+    employees,
     roi,
     generatedAt: new Date().toISOString(),
   };
 
-  const token = randomBytes(16).toString("hex");
-  const { error } = await adminClient()
+  // Regenerating keeps the SAME token — the link the rep already sent out
+  // starts showing the updated content. The update matches on the KEY, not
+  // one token: pre-cache double-clicks left duplicate rows for a few accounts
+  // (two live tokens each), and updating only the newest would leave whichever
+  // link was actually emailed serving stale content forever. Matching the key
+  // converges every live link for the account onto the new content.
+  const updateAllForKey = async () => {
+    const { error } = await admin
+      .from("bito_proposals")
+      .update({
+        company,
+        contact_name: mergedContactName ?? null,
+        fields,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("created_by", uid)
+      .eq("company_key", companyKey);
+    return error;
+  };
+
+  if (existing?.token) {
+    const error = await updateAllForKey();
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 502 });
+    return NextResponse.json({ ok: true, url: `${req.nextUrl.origin}/p/${existing.token}`, updated: true });
+  }
+
+  // The lookup → generate → insert sequence spans the ~15s generation, and a
+  // second click can land in that window (the card and the open brief each
+  // mount their own button; propBusy doesn't cross instances or tabs).
+  // Re-check before inserting: if a row appeared, update it instead of
+  // minting a second link for the same account.
+  const { data: raced } = await admin
     .from("bito_proposals")
-    .insert({ token, company, contact_name: contactName ?? null, fields, created_by: uid });
+    .select("token")
+    .eq("created_by", uid)
+    .eq("company_key", companyKey)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (raced?.token) {
+    const error = await updateAllForKey();
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 502 });
+    return NextResponse.json({ ok: true, url: `${req.nextUrl.origin}/p/${raced.token}`, updated: true });
+  }
+
+  const token = randomBytes(16).toString("hex");
+  const { error } = await admin
+    .from("bito_proposals")
+    .insert({ token, company, company_key: companyKey, contact_name: mergedContactName ?? null, fields, created_by: uid });
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 502 });
 
   return NextResponse.json({ ok: true, url: `${req.nextUrl.origin}/p/${token}` });

@@ -24,6 +24,9 @@ const KINDS = {
   // Rep review verdicts on contacts ("qualified" | "excluded") — the recorded
   // outcome of the "review the profile" step the UNRESOLVED tier demands.
   contactReviews: { table: "bito_contact_reviews", key: "key", val: "verdict" },
+  // Rep-confirmed SWE headcount for an account (learned on a call). Overrides
+  // the modeled estimate wherever the account renders and feeds the proposal.
+  sweOverrides: { table: "bito_swe_overrides", key: "company_key", val: "swe" },
 } as const;
 type Kind = keyof typeof KINDS;
 
@@ -74,10 +77,13 @@ export async function POST(req: NextRequest) {
   const key = (body.key ?? "").toString().trim();
   if (!kind || !key) return NextResponse.json({ ok: false, error: "Pass kind and key" }, { status: 400 });
 
-  const numeric = kind === "scores" || kind === "sweepCursor";
+  const numeric = kind === "scores" || kind === "sweepCursor" || kind === "sweOverrides";
   const value = numeric ? Number(body.value) : String(body.value ?? "");
   if (numeric && !Number.isFinite(value as number)) {
     return NextResponse.json({ ok: false, error: "Numeric value required" }, { status: 400 });
+  }
+  if (kind === "sweOverrides" && (!Number.isInteger(value) || (value as number) < 1)) {
+    return NextResponse.json({ ok: false, error: "SWE count must be a positive integer" }, { status: 400 });
   }
   if (kind === "contactReviews" && value !== "qualified" && value !== "excluded") {
     return NextResponse.json(

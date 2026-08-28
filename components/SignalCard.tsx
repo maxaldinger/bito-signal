@@ -41,6 +41,7 @@ import {
   unmarkProspected,
   getCompanyBlurb,
   setCompanyBlurb,
+  useSweOverride,
 } from "@/lib/clientStore";
 import { HubSpotActions } from "./HubSpotActions";
 
@@ -214,6 +215,10 @@ export function SignalCard({
   // score we show — not the rougher per-signal estimate.
   const briefScore = useDeepDiveScore(signal.account);
   const score = briefScore ?? signal.strength;
+  // Rep-confirmed SWE headcount (set on the brief's chip after a call)
+  // overrides the modeled estimate here too — chip, task note, proposal.
+  const sweOverride = useSweOverride(signal.account);
+  const swe = sweOverride ?? signal.sweEstimate;
   const prospected = useIsProspected("company", signal.account);
   const prospectedAt = useProspectedAt("company", signal.account);
   // WS6: a teammate's sync shows as an attributed chip. The viewer's own sync
@@ -364,9 +369,16 @@ export function SignalCard({
       ) : null}
 
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {signal.sweEstimate ? (
-          <span className="rounded border border-ink-700 bg-ink-950 px-1.5 py-0.5 font-mono text-[11px] text-neon-300">
-            ~{fmtNum(signal.sweEstimate)} SWEs
+        {swe ? (
+          <span
+            title={sweOverride !== undefined ? "SWE count confirmed on a call" : undefined}
+            className={`rounded border px-1.5 py-0.5 font-mono text-[11px] ${
+              sweOverride !== undefined
+                ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+                : "border-ink-700 bg-ink-950 text-neon-300"
+            }`}
+          >
+            {sweOverride !== undefined ? `${fmtNum(swe)} SWEs · confirmed` : `~${fmtNum(swe)} SWEs`}
           </span>
         ) : null}
         {signal.codebaseHint ? (
@@ -406,13 +418,14 @@ export function SignalCard({
           autoCheckDelayMs={index * 300}
           proposal={{
             context: [displayTitle, displayDesc].filter(Boolean).join(" — ").slice(0, 900),
-            sweEstimate: signal.sweEstimate,
+            sweEstimate: swe,
+            sweConfirmed: sweOverride !== undefined,
             icpTotal: briefScore,
           }}
           defaultSubject={`SIGNAL DASH - ${signal.account}`}
           defaultBody={
             `${signal.account} — ${segment.label}` +
-            `${signal.sweEstimate ? `, ~${fmtNum(signal.sweEstimate)} SWEs` : ""}.\n` +
+            `${swe ? `, ${sweOverride !== undefined ? `${fmtNum(swe)} SWEs (confirmed)` : `~${fmtNum(swe)} SWEs`}` : ""}.\n` +
             `SIGNAL: ${displayTitle}\n${displayDesc}\n` +
             `${displayUrl ? `SOURCE: ${signal.source} — ${displayUrl}\n` : ""}`
           }

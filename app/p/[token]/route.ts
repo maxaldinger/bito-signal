@@ -27,8 +27,11 @@ export async function GET(
   return new NextResponse(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      // Fine to cache briefly at the CDN — the doc is immutable once created.
-      "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600",
+      // No CDN caching: proposals now update IN PLACE at the same link
+      // ("Update proposal"), and a cached copy would make the refresh look
+      // broken — the rep reloads and still sees the old numbers. One DB read
+      // per view is nothing at this traffic.
+      "Cache-Control": "no-store",
     },
   });
 }

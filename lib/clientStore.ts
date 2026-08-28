@@ -149,7 +149,7 @@ async function guardLocalOwner(): Promise<void> {
 }
 
 // ---- WS4: row-per-entry write-through for the shared caches ----
-type CacheKind = "scores" | "blurbs" | "sweepCursor" | "blacklist" | "contactReviews";
+type CacheKind = "scores" | "blurbs" | "sweepCursor" | "blacklist" | "contactReviews" | "sweOverrides";
 function pushCacheEntry(kind: CacheKind, key: string, value: unknown): void {
   if (typeof window === "undefined") return;
   void fetch("/api/cache", {
@@ -171,6 +171,10 @@ function deleteCacheEntry(kind: CacheKind, key: string): void {
  *  the server accepted the write. For entries where a silently lost write is
  *  not acceptable (review verdicts drive the credit-spending gate, and the
  *  focus-time pull is a full replace that would erase an unpersisted one). */
+// Bumped on every confirmed write; pullSharedCaches discards a snapshot that
+// was requested BEFORE the latest write (its table read may predate the
+// upsert commit, and applying it would full-replace the fresh value away).
+let sharedCacheWriteSeq = 0;
 async function writeCacheEntryConfirmed(
   method: "POST" | "DELETE",
   kind: CacheKind,
@@ -184,6 +188,7 @@ async function writeCacheEntryConfirmed(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(method === "POST" ? { kind, key, value } : { kind, key }),
     });
+    if (res.ok) sharedCacheWriteSeq++;
     return res.ok;
   } catch {
     return false;
@@ -194,6 +199,7 @@ async function writeCacheEntryConfirmed(
  *  authoritative — same posture as pullState for per-user stores. */
 async function pullSharedCaches(): Promise<void> {
   if (typeof window === "undefined") return;
+  const seqAtStart = sharedCacheWriteSeq;
   try {
     const res = await fetch("/api/cache", { cache: "no-store" });
     if (!res.ok) return;
@@ -204,13 +210,18 @@ async function pullSharedCaches(): Promise<void> {
       sweepCursor?: Record<string, number>;
       blacklist?: Record<string, string>;
       contactReviews?: Record<string, "qualified" | "excluded">;
+      sweOverrides?: Record<string, number>;
     };
     if (!d.ok) return;
+    // A confirmed write landed while this pull was in flight — the snapshot
+    // may predate it; skip applying, the next focus pull re-syncs.
+    if (seqAtStart !== sharedCacheWriteSeq) return;
     if (d.scores) scores.applyServer(d.scores);
     if (d.blurbs) companyBlurbs.applyServer(d.blurbs);
     if (d.sweepCursor) sweepCursor.applyServer(d.sweepCursor);
     if (d.blacklist) blacklist.applyServer(d.blacklist);
     if (d.contactReviews) contactReviews.applyServer(d.contactReviews);
+    if (d.sweOverrides) sweOverrides.applyServer(d.sweOverrides);
   } catch {
     /* offline — local copies serve */
   }
@@ -463,6 +474,50 @@ export function useContactReview(key: string): "qualified" | "excluded" | undefi
   const s = contactReviews.useStore();
   if (!key) return undefined;
   return s[normFor("contact", key)];
+}
+
+// ---------------- SWE headcount overrides (shared) ----------------
+// The rep-confirmed engineer count for an account, set from the brief once the
+// real number comes up on a call. Overrides the modeled estimate everywhere the
+// account renders and feeds the personalized proposal's ROI. SERVER-FIRST like
+// review verdicts: the focus-time hydration is a full replace, so an optimistic
+// value whose POST quietly failed would show in the UI, feed a proposal, then
+// vanish on the next tab focus.
+const sweOverrides = makeStore<Record<string, number>>("bito-swe-overrides", {}, undefined, false);
+
+/** Returns false when the write didn't stick — the caller says so. */
+export async function setSweOverride(company: string, swe: number): Promise<boolean> {
+  if (!company || !Number.isFinite(swe) || swe < 1) return false;
+  const k = normCompany(company);
+  const v = Math.round(swe);
+  const ok = await writeCacheEntryConfirmed("POST", "sweOverrides", k, v);
+  if (ok) sweOverrides.set({ ...sweOverrides.get(), [k]: v });
+  return ok;
+}
+
+export async function clearSweOverride(company: string): Promise<boolean> {
+  if (!company) return false;
+  const k = normCompany(company);
+  const cur = sweOverrides.get();
+  if (cur[k] === undefined) return true;
+  const ok = await writeCacheEntryConfirmed("DELETE", "sweOverrides", k);
+  if (ok) {
+    const next = { ...cur };
+    delete next[k];
+    sweOverrides.set(next);
+  }
+  return ok;
+}
+
+export function useSweOverride(company: string): number | undefined {
+  const s = sweOverrides.useStore();
+  return company ? companyValue(s, company) : undefined;
+}
+
+/** Raw override map for list views (one hook per row would break the rules of
+ *  hooks in loops — use companyValue against this instead). */
+export function useSweOverrides(): Record<string, number> {
+  return sweOverrides.useStore();
 }
 
 // ---------------- Deep-dive ICP scores ----------------

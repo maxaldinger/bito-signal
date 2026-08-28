@@ -20,6 +20,7 @@ import {
   Loader2,
   Plus,
   Minimize2,
+  Pencil,
   type LucideIcon,
 } from "lucide-react";
 
@@ -52,6 +53,9 @@ import {
   setDeepDiveScore,
   getReveal,
   mergeReveal,
+  useSweOverride,
+  setSweOverride,
+  clearSweOverride,
 } from "@/lib/clientStore";
 
 function Section({
@@ -1400,6 +1404,109 @@ function ApolloStakeholders({
   );
 }
 
+/** The SWEs chip on the brief header, editable: once the real engineer count
+ *  comes up on a call, the rep sets it here and the confirmed number overrides
+ *  the modeled estimate everywhere the account renders — chips, task notes,
+ *  and the personalized proposal's ROI. Shared with the whole team. */
+function SweChip({
+  companyKey,
+  modeled,
+  override,
+}: {
+  companyKey: string;
+  modeled?: number;
+  override?: number;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const begin = () => {
+    setDraft(String(override ?? modeled ?? ""));
+    setFailed(false);
+    setEditing(true);
+  };
+  const save = async () => {
+    const n = Math.round(Number(draft.replace(/[,\s]/g, "")));
+    if (!Number.isFinite(n) || n < 1) return;
+    setSaving(true);
+    const ok = await setSweOverride(companyKey, n);
+    setSaving(false);
+    setFailed(!ok);
+    if (ok) setEditing(false);
+  };
+  const reset = async () => {
+    setSaving(true);
+    const ok = await clearSweOverride(companyKey);
+    setSaving(false);
+    setFailed(!ok);
+    if (ok) setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded border border-sky-500/40 bg-ink-950 px-2 py-0.5 font-mono text-xs">
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          placeholder="SWE count"
+          inputMode="numeric"
+          className="w-20 bg-transparent text-ink-100 placeholder:text-ink-600 focus:outline-none"
+        />
+        <button
+          onClick={() => void save()}
+          disabled={saving}
+          title="Save — this confirmed count overrides the estimate for this account everywhere"
+          className="text-neon-300 hover:text-neon-200 disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+        </button>
+        {override !== undefined && (
+          <button
+            onClick={() => void reset()}
+            disabled={saving}
+            title="Clear the confirmed count — go back to the modeled estimate"
+            className="text-ink-500 hover:text-ink-300 disabled:opacity-50"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+        {failed && <span className="text-[10px] text-red-400">didn&apos;t save</span>}
+      </span>
+    );
+  }
+
+  const shown = override ?? modeled;
+  return (
+    <button
+      onClick={begin}
+      title={
+        override !== undefined
+          ? "SWE count confirmed on a call — click to adjust"
+          : shown
+            ? "Modeled estimate — click to set the real SWE count from a call"
+            : "Click to set the SWE count from a call"
+      }
+      className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-mono text-xs transition-colors ${
+        override !== undefined
+          ? "border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20"
+          : "border-ink-700 bg-ink-950 text-ink-300 hover:border-sky-500/40 hover:text-sky-300"
+      }`}
+    >
+      {shown
+        ? `${override !== undefined ? "" : "~"}${fmtNum(shown)} SWEs${override !== undefined ? " · confirmed" : ""}`
+        : "set SWE count"}
+      <Pencil className="h-3 w-3 opacity-60" />
+    </button>
+  );
+}
+
 export function CompanyIntel({
   intel,
   accountKey,
@@ -1436,6 +1543,12 @@ export function CompanyIntel({
   const companyTeamSync = useCompanySyncEvent(acctKey);
   const companyTeamChip = companyTeamSync && !companyTeamSync.mine ? companyTeamSync : undefined;
 
+  // Rep-confirmed SWE headcount (set via the header chip once the real number
+  // comes up on a call) overrides the modeled estimate in everything this
+  // brief feeds: chips, task notes, and the personalized proposal.
+  const sweOverride = useSweOverride(acctKey);
+  const swe = sweOverride ?? intel.sweEstimate;
+
   // On-demand sections: the brief now generates lean (summary / ICP / people /
   // motion + outreach). These heavier sections are pulled only when expanded.
   // Seed from the brief in case it already has them (older brief, or a prior
@@ -1462,7 +1575,7 @@ export function CompanyIntel({
     companyLine:
       `${intel.name} — ${intel.segment.label}` +
       `${intel.employeeBand ? `, ${intel.employeeBand} employees` : ""}` +
-      `${intel.sweEstimate ? `, ~${fmtNum(intel.sweEstimate)} SWEs` : ""}` +
+      `${swe ? `, ${sweOverride !== undefined ? `${fmtNum(swe)} SWEs (confirmed)` : `~${fmtNum(swe)} SWEs`}` : ""}` +
       `. ICP fit ${intel.icp.total}/99.${intel.oneLiner ? ` ${intel.oneLiner}` : ""}`,
     callHook: intel.callHook,
     linkedin: intel.linkedinOutreach,
@@ -1577,11 +1690,7 @@ export function CompanyIntel({
                 {intel.employeeBand} employees
               </span>
             )}
-            {intel.sweEstimate ? (
-              <span className="rounded border border-ink-700 bg-ink-950 px-2 py-0.5 font-mono text-xs text-ink-300">
-                ~{fmtNum(intel.sweEstimate)} SWEs
-              </span>
-            ) : null}
+            <SweChip companyKey={acctKey} modeled={intel.sweEstimate} override={sweOverride} />
             {intel.hq && (
               <span className="rounded border border-ink-700 bg-ink-950 px-2 py-0.5 font-mono text-xs text-ink-400">
                 {intel.hq}
@@ -1617,7 +1726,8 @@ export function CompanyIntel({
           // and the motion's named contact all feed the personalization.
           context:
             `${intel.callHook ? `Signal: ${intel.callHook}\n` : ""}${intel.summary ?? ""}`.slice(0, 1400),
-          sweEstimate: intel.sweEstimate,
+          sweEstimate: swe,
+          sweConfirmed: sweOverride !== undefined,
           icpTotal: intel.icp.total,
           contactName: intel.motion?.keyContactName,
           contactTitle: intel.motion?.keyContactTitle,
@@ -1626,7 +1736,7 @@ export function CompanyIntel({
         defaultBody={
           `${intel.name} — ${intel.segment.label}` +
           `${intel.employeeBand ? `, ${intel.employeeBand} employees` : ""}` +
-          `${intel.sweEstimate ? `, ~${fmtNum(intel.sweEstimate)} SWEs` : ""}.\n` +
+          `${swe ? `, ${sweOverride !== undefined ? `${fmtNum(swe)} SWEs (confirmed)` : `~${fmtNum(swe)} SWEs`}` : ""}.\n` +
           `${intel.oneLiner ? `${intel.oneLiner}\n` : ""}` +
           `${intel.callHook ? `\nWHAT I SAW: ${intel.callHook}\n` : ""}` +
           `\nBito ICP fit: ${intel.icp.total}/99. ${intel.summary}` +

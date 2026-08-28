@@ -11,6 +11,7 @@ import {
   CircleX,
   ArrowUpRight,
   FileText,
+  RefreshCw,
   X,
 } from "lucide-react";
 import {
@@ -137,6 +138,8 @@ export function HubSpotActions({
   proposal?: {
     context?: string;
     sweEstimate?: number;
+    /** True when the SWE count is the rep's confirmed-on-a-call override. */
+    sweConfirmed?: boolean;
     employees?: number;
     icpTotal?: number;
     contactName?: string;
@@ -147,12 +150,17 @@ export function HubSpotActions({
   const [check, setCheck] = useState<SearchResp | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  // Personalized proposal link generation (company surfaces).
+  // Personalized proposal link generation (company surfaces). Proposals are
+  // CACHED per account: the first click either generates or returns the
+  // existing link; "Update" regenerates with the latest facts at the SAME
+  // link (a copy already emailed out starts showing the new content).
   const [propBusy, setPropBusy] = useState(false);
   const [propUrl, setPropUrl] = useState<string | null>(null);
+  const [propInfo, setPropInfo] = useState<"" | "cached" | "updated">("");
+  const [propAt, setPropAt] = useState<string | null>(null);
   const [propCopied, setPropCopied] = useState(false);
   const [propErr, setPropErr] = useState<string | null>(null);
-  const makeProposal = async () => {
+  const makeProposal = async (force = false) => {
     if (propBusy) return;
     setPropBusy(true);
     setPropErr(null);
@@ -161,8 +169,11 @@ export function HubSpotActions({
     // holding screen and navigates itself to the proposal when it's ready.
     const tab = window.open("", "_blank");
     if (tab) {
+      // The non-force copy stays outcome-neutral: the server may serve the
+      // CACHED proposal instantly, and a screen claiming to be "writing the
+      // summary" over a weeks-old doc would misrepresent what happened.
       tab.document.write(
-        `<title>Personalizing proposal…</title><body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#46556a"><div style="text-align:center"><p style="font-size:17px;font-weight:700;color:#1a2230;margin:0 0 6px">Personalizing the proposal for ${name.replace(/</g, "&lt;")}…</p><p style="font-size:13px;margin:0">Writing the executive summary and running the numbers — this tab loads it in ~15 seconds.</p></div></body>`,
+        `<title>${force ? "Updating" : "Opening"} proposal…</title><body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#46556a"><div style="text-align:center"><p style="font-size:17px;font-weight:700;color:#1a2230;margin:0 0 6px">${force ? "Updating" : "Opening"} the proposal for ${name.replace(/</g, "&lt;")}…</p><p style="font-size:13px;margin:0">${force ? "Writing the executive summary and re-running the numbers — this tab loads it in ~15 seconds." : "An existing proposal loads in a moment (Update folds in the latest numbers); writing a new one takes ~15 seconds."}</p></div></body>`,
       );
       tab.document.close();
     }
@@ -172,22 +183,34 @@ export function HubSpotActions({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           company: name,
+          companyKey: companyKey || name,
           domain,
           context: proposal?.context,
           sweEstimate: proposal?.sweEstimate,
+          sweConfirmed: proposal?.sweConfirmed,
           employees: proposal?.employees,
           icpTotal: proposal?.icpTotal,
           contactName: proposal?.contactName,
           contactTitle: proposal?.contactTitle,
+          force,
         }),
       });
-      const d = (await res.json()) as { ok?: boolean; url?: string; error?: string };
+      const d = (await res.json()) as {
+        ok?: boolean;
+        url?: string;
+        error?: string;
+        cached?: boolean;
+        updated?: boolean;
+        generatedAt?: string;
+      };
       if (!res.ok || !d.ok || !d.url) {
         tab?.close();
         setPropErr(d.error || `Proposal generation failed (${res.status})`);
         return;
       }
       setPropUrl(d.url);
+      setPropInfo(d.cached ? "cached" : d.updated ? "updated" : "");
+      setPropAt(d.generatedAt ?? null);
       if (tab) tab.location.href = d.url;
       try {
         // Best effort: if the new tab stole focus, some browsers refuse the
@@ -367,22 +390,47 @@ export function HubSpotActions({
             page and copies its public link. */}
         {kind === "company" && proposal && (
           propUrl ? (
-            <a
-              href={propUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={propCopied ? "Link copied to clipboard — click to preview" : "Click to preview the proposal"}
-              className="inline-flex items-center gap-1 rounded border border-violet-500/40 bg-violet-500/10 px-2 py-1 font-mono text-[11px] font-semibold text-violet-300 transition-colors hover:bg-violet-500/20"
-            >
-              <FileText className="h-3 w-3" /> Proposal{propCopied ? " · link copied" : ""}
-              <ArrowUpRight className="h-3 w-3" />
-            </a>
+            <>
+              <a
+                href={propUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={
+                  propInfo === "cached"
+                    ? `Existing proposal${propAt ? ` from ${new Date(propAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""} — link copied. Update regenerates it with the latest info at the same link.`
+                    : propCopied
+                      ? "Link copied to clipboard — click to preview"
+                      : "Click to preview the proposal"
+                }
+                className="inline-flex items-center gap-1 rounded border border-violet-500/40 bg-violet-500/10 px-2 py-1 font-mono text-[11px] font-semibold text-violet-300 transition-colors hover:bg-violet-500/20"
+              >
+                <FileText className="h-3 w-3" /> Proposal
+                {propInfo === "cached" && propAt
+                  ? ` · ${new Date(propAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                  : propInfo === "updated"
+                    ? " · updated"
+                    : propCopied
+                      ? " · link copied"
+                      : ""}
+                <ArrowUpRight className="h-3 w-3" />
+              </a>
+              <button
+                type="button"
+                onClick={() => void makeProposal(true)}
+                disabled={propBusy}
+                title="Regenerate this proposal with the latest account info — same link"
+                className={`${btn} hover:border-violet-500/40 hover:text-violet-300`}
+              >
+                {propBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                {propBusy ? "Updating…" : "Update"}
+              </button>
+            </>
           ) : (
             <button
               type="button"
-              onClick={makeProposal}
+              onClick={() => void makeProposal()}
               disabled={propBusy}
-              title="Generate a Governor proposal personalized to this account, hosted at a shareable link (with Download PDF on the page)"
+              title="Generate a Governor proposal personalized to this account, hosted at a shareable link (with Download PDF on the page). Repeat clicks reuse the same link."
               className={`${btn} hover:border-violet-500/40 hover:text-violet-300`}
             >
               {propBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
