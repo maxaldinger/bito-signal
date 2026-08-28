@@ -514,7 +514,12 @@ export function SignalCard({
 
       {/* Full-width toggle that doubles as the divider into the in-card brief. */}
       <button
-        onClick={() => onSelect(signal.account)}
+        onClick={() => {
+          // Closing an expanded brief fully collapses the record to its slim
+          // row (Max, Aug 28) — close and collapse are one gesture.
+          if (expanded) collapseCard(signal.account);
+          onSelect(signal.account);
+        }}
         className={`mt-4 flex w-full items-center justify-center gap-1.5 rounded-lg border py-2.5 text-sm font-semibold transition-colors ${
           expanded
             ? "border-neon-600/40 bg-neon-500/10 text-neon-300 hover:bg-neon-500/20"

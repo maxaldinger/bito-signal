@@ -64,6 +64,16 @@ export function IntelExpander({
     setTimeout(onClose, 500);
   };
 
+  // Closing a card-attached brief fully collapses the record to its slim row
+  // (Max, Aug 28) — "close brief" and "collapse" are one gesture. Framed
+  // (searched/orphan) briefs have no card to collapse, so they just close.
+  // The error close below stays a plain close: collapsing a failed brief's
+  // card would bury the Retry button.
+  const closeFully = () => {
+    if (!framed) collapseCard(company);
+    close();
+  };
+
   return (
     <div ref={ref} className={`expander ${open ? "expander-open" : ""}`}>
       <div>
@@ -92,21 +102,14 @@ export function IntelExpander({
                 // back what the brief wrote — even when the research renames the
                 // company ("Anthem" → "Elevance Health (formerly Anthem, Inc.)").
                 accountKey={company}
-                onBack={close}
+                onBack={closeFully}
                 onRefresh={onRefresh}
                 // Collapse the whole record to its slim row (card-attached briefs
                 // only — orphan/searched briefs have no card to collapse).
-                onCollapse={
-                  framed
-                    ? undefined
-                    : () => {
-                        collapseCard(company);
-                        close();
-                      }
-                }
+                onCollapse={framed ? undefined : closeFully}
               />
               <button
-                onClick={close}
+                onClick={closeFully}
                 className="mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-ink-700 py-2.5 text-sm font-medium text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100"
               >
                 <ChevronUp className="h-4 w-4" /> Collapse brief
