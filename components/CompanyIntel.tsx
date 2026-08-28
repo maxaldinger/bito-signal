@@ -1562,6 +1562,10 @@ export function CompanyIntel({
     reasoning: intel.motion.reasoning ?? "",
     watchOuts: intel.motion.watchOuts ?? [],
   });
+  // Motion & outreach collapses by default like token-cost / pain-points
+  // (Max, Aug 28). The data is already in the brief — this is purely a
+  // reveal, no fetch.
+  const [motionOpen, setMotionOpen] = useState(false);
   const expandCtx = { company: intel.name, segment: intel.segment?.label, summary: intel.summary };
 
   // Cache this brief's authoritative ICP total so the signal cards can show it
@@ -1823,8 +1827,38 @@ export function CompanyIntel({
         />
       </Section>
 
-      {/* Motion + outreach — one box: how to approach, then the angle/message */}
+      {/* Motion + outreach — one box: how to approach, then the angle/message.
+          Collapsed by default like the token-cost / pain-points sections; the
+          stale-outreach flag stays visible even collapsed (it's a warning). */}
       <Section title="suggested motion & outreach" icon={Compass} iconColor="text-violet-400">
+        {!motionOpen ? (
+          <div className="space-y-3">
+            {outreachStale && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                <p className="text-xs font-medium leading-snug text-amber-300">
+                  This outreach predates the Governor spec — update the brief to regenerate it
+                  before sending.
+                </p>
+                {onRefresh && (
+                  <button
+                    type="button"
+                    onClick={onRefresh}
+                    className="rounded border border-amber-500/40 px-2 py-1 font-mono text-[11px] font-semibold text-amber-200 transition-colors hover:bg-amber-500/20"
+                  >
+                    Update brief
+                  </button>
+                )}
+              </div>
+            )}
+            <button
+              onClick={() => setMotionOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-ink-600 px-3 py-1.5 font-mono text-[11px] font-medium text-ink-300 transition-colors hover:border-neon-600/50 hover:text-neon-300"
+            >
+              <Plus className="h-3.5 w-3.5" /> Show motion &amp; outreach
+            </button>
+          </div>
+        ) : (
+          <>
         <div className="flex flex-wrap items-center gap-3">
           <MotionBadge motion={intel.motion.primary} />
           <p className="text-sm text-ink-400">recommended GTM motion for this account</p>
@@ -1922,6 +1956,8 @@ export function CompanyIntel({
             </div>
           )}
         </div>
+          </>
+        )}
       </Section>
 
       {/* Token cost exposure — pulled on demand */}
