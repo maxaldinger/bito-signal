@@ -17,8 +17,12 @@ export interface ProposalRoiTier {
 }
 
 export interface ProposalRoi {
-  /** Assumed token allowance per engineer per month (USD). */
+  /** Token allowance per engineer per month (USD) — the $500 default
+   *  assumption, or the account's real number when the rep set one. */
   allowanceMo: number;
+  /** True when allowanceMo is the account's own figure (confirmed on a
+   *  call), not the default assumption — changes the note's framing. */
+  spendConfirmed?: boolean;
   /** Adoption-tier table (10% / 25% / 50% / full org for big estimates, a
    *  single row for small ones). The pilot row keeps it credible; the full
    *  row keeps the scale story — Max's call after a flat 2K cap undersold
@@ -94,13 +98,17 @@ export function buildProposalHtml(f: ProposalFields): string {
           </tr>`,
         )
         .join("");
+      const spendLine = r.spendConfirmed
+        ? `Uses the ${usd(r.allowanceMo)} per engineer per month in agent tokens your team shared;
+      the instrumented A/B below replaces it with your measured per-task numbers.`
+        : `Assumes ${usd(r.allowanceMo)} per engineer per month in agent tokens — an assumption to make the
+      math concrete; the instrumented A/B below replaces it with your measured per-task numbers.`;
       return `
       <table class="cs">
         <thead><tr><th>Engineers on coding agents</th><th class="num">Token spend / yr</th><th class="num">Saved at −47%</th><th class="num">Saved at −83%</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <p class="note">Assumes ${usd(r.allowanceMo)} per engineer per month in agent tokens — an assumption to make the
-      math concrete; the instrumented A/B below replaces it with your measured per-task numbers. −47% is the published
+      <p class="note">${spendLine} −47% is the published
       per-task figure; −83% was measured on a full working session.</p>`;
     }
     // Legacy single-cohort shape (proposals stored before the tier table).

@@ -58,6 +58,9 @@ import {
   clearSweOverride,
   setBriefSwe,
   clearBriefSwe,
+  useSpendOverride,
+  setSpendOverride,
+  clearSpendOverride,
 } from "@/lib/clientStore";
 
 function Section({
@@ -1509,6 +1512,104 @@ function SweChip({
   );
 }
 
+/** Assumed per-engineer monthly agent-token spend, feeding the proposal ROI.
+ *  Real spend is rarely public, so this defaults to $500/mo and is editable
+ *  like the SWE count once the account shares theirs on a call. Shared with
+ *  the team. */
+const DEFAULT_SPEND_MO = 500;
+function SpendChip({ companyKey, override }: { companyKey: string; override?: number }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const begin = () => {
+    setDraft(String(override ?? DEFAULT_SPEND_MO));
+    setFailed(false);
+    setEditing(true);
+  };
+  const save = async () => {
+    const n = Math.round(Number(draft.replace(/[$,\s]/g, "")));
+    // Cap matches the proposal route's clamp — a value the route would
+    // silently drop must never save as "confirmed" here.
+    if (!Number.isFinite(n) || n < 1 || n > 100_000) {
+      setFailed(true);
+      return;
+    }
+    setSaving(true);
+    const ok = await setSpendOverride(companyKey, n);
+    setSaving(false);
+    setFailed(!ok);
+    if (ok) setEditing(false);
+  };
+  const reset = async () => {
+    setSaving(true);
+    const ok = await clearSpendOverride(companyKey);
+    setSaving(false);
+    setFailed(!ok);
+    if (ok) setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded border border-sky-500/40 bg-ink-950 px-2 py-0.5 font-mono text-xs">
+        <span className="text-ink-500">$</span>
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          placeholder="spend / eng / mo"
+          inputMode="numeric"
+          className="w-20 bg-transparent text-ink-100 placeholder:text-ink-600 focus:outline-none"
+        />
+        <button
+          onClick={() => void save()}
+          disabled={saving}
+          title="Save — the proposal ROI uses this instead of the $500/mo default"
+          className="text-neon-300 hover:text-neon-200 disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+        </button>
+        {override !== undefined && (
+          <button
+            onClick={() => void reset()}
+            disabled={saving}
+            title="Clear — go back to the $500/mo default assumption"
+            className="text-ink-500 hover:text-ink-300 disabled:opacity-50"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+        {failed && <span className="text-[10px] text-red-400">didn&apos;t save</span>}
+      </span>
+    );
+  }
+
+  const shown = override ?? DEFAULT_SPEND_MO;
+  return (
+    <button
+      onClick={begin}
+      title={
+        override !== undefined
+          ? "Token spend per engineer confirmed on a call — click to adjust"
+          : "Assumed agent token spend per engineer per month (feeds the proposal ROI) — click to set the account's real number"
+      }
+      className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-mono text-xs transition-colors ${
+        override !== undefined
+          ? "border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20"
+          : "border-ink-700 bg-ink-950 text-ink-300 hover:border-sky-500/40 hover:text-sky-300"
+      }`}
+    >
+      ${shown.toLocaleString()}/eng/mo tokens{override !== undefined ? " · confirmed" : ""}
+      <Pencil className="h-3 w-3 opacity-60" />
+    </button>
+  );
+}
+
 export function CompanyIntel({
   intel,
   accountKey,
@@ -1550,6 +1651,9 @@ export function CompanyIntel({
   // brief feeds: chips, task notes, and the personalized proposal.
   const sweOverride = useSweOverride(acctKey);
   const swe = sweOverride ?? intel.sweEstimate;
+  // Per-engineer token spend (call-confirmed) — feeds the proposal ROI in
+  // place of the $500/mo default.
+  const spendOverride = useSpendOverride(acctKey);
 
   // On-demand sections: the brief now generates lean (summary / ICP / people /
   // motion + outreach). These heavier sections are pulled only when expanded.
@@ -1709,6 +1813,7 @@ export function CompanyIntel({
               </span>
             )}
             <SweChip companyKey={acctKey} modeled={intel.sweEstimate} override={sweOverride} />
+            <SpendChip companyKey={acctKey} override={spendOverride} />
             {intel.hq && (
               <span className="rounded border border-ink-700 bg-ink-950 px-2 py-0.5 font-mono text-xs text-ink-400">
                 {intel.hq}
@@ -1746,6 +1851,7 @@ export function CompanyIntel({
             `${intel.callHook ? `Signal: ${intel.callHook}\n` : ""}${intel.summary ?? ""}`.slice(0, 1400),
           sweEstimate: swe,
           sweConfirmed: sweOverride !== undefined,
+          spendMo: spendOverride,
           icpTotal: intel.icp.total,
           contactName: intel.motion?.keyContactName,
           contactTitle: intel.motion?.keyContactTitle,

@@ -43,6 +43,7 @@ import {
   setCompanyBlurb,
   useSweOverride,
   useBriefSwe,
+  useSpendOverride,
 } from "@/lib/clientStore";
 import { HubSpotActions } from "./HubSpotActions";
 
@@ -226,6 +227,9 @@ export function SignalCard({
   const sweOverride = useSweOverride(signal.account);
   const sweFromBrief = useBriefSwe(signal.account);
   const swe = sweOverride ?? sweFromBrief ?? signal.sweEstimate;
+  // Call-confirmed per-engineer token spend — proposals made from this card
+  // use it in place of the $500/mo default (set on the brief header's chip).
+  const spendOverride = useSpendOverride(signal.account);
   const prospected = useIsProspected("company", signal.account);
   const prospectedAt = useProspectedAt("company", signal.account);
   // WS6: a teammate's sync shows as an attributed chip. The viewer's own sync
@@ -443,6 +447,7 @@ export function SignalCard({
             context: [displayTitle, displayDesc].filter(Boolean).join(" — ").slice(0, 900),
             sweEstimate: swe,
             sweConfirmed: sweOverride !== undefined,
+            spendMo: spendOverride,
             icpTotal: briefScore,
           }}
           defaultSubject={`SIGNAL DASH - ${signal.account}`}

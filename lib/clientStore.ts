@@ -156,7 +156,8 @@ type CacheKind =
   | "blacklist"
   | "contactReviews"
   | "sweOverrides"
-  | "briefSwe";
+  | "briefSwe"
+  | "spendOverrides";
 function pushCacheEntry(kind: CacheKind, key: string, value: unknown): void {
   if (typeof window === "undefined") return;
   void fetch("/api/cache", {
@@ -219,6 +220,7 @@ async function pullSharedCaches(): Promise<void> {
       contactReviews?: Record<string, "qualified" | "excluded">;
       sweOverrides?: Record<string, number>;
       briefSwe?: Record<string, number>;
+      spendOverrides?: Record<string, number>;
     };
     if (!d.ok) return;
     // A confirmed write landed while this pull was in flight — the snapshot
@@ -231,6 +233,7 @@ async function pullSharedCaches(): Promise<void> {
     if (d.contactReviews) contactReviews.applyServer(d.contactReviews);
     if (d.sweOverrides) sweOverrides.applyServer(d.sweOverrides);
     if (d.briefSwe) briefSwe.applyServer(d.briefSwe);
+    if (d.spendOverrides) spendOverrides.applyServer(d.spendOverrides);
   } catch {
     /* offline — local copies serve */
   }
@@ -527,6 +530,44 @@ export function useSweOverride(company: string): number | undefined {
  *  hooks in loops — use companyValue against this instead). */
 export function useSweOverrides(): Record<string, number> {
   return sweOverrides.useStore();
+}
+
+// ---------------- Per-engineer token spend overrides (shared) ----------------
+// The account's actual agent-token spend per engineer per month, learned on a
+// call — replaces the proposal ROI's $500/mo default assumption for that
+// account. SERVER-FIRST like SWE overrides: it feeds a cached document, so an
+// optimistic value whose POST quietly failed must never show as saved.
+const spendOverrides = makeStore<Record<string, number>>("bito-spend-overrides", {}, undefined, false);
+
+/** Returns false when the write didn't stick — the caller says so. The
+ *  100k/mo ceiling matches the proposal route's clamp so a saved value can
+ *  never be silently dropped downstream. */
+export async function setSpendOverride(company: string, spendMo: number): Promise<boolean> {
+  if (!company || !Number.isFinite(spendMo) || spendMo < 1 || spendMo > 100_000) return false;
+  const k = normCompany(company);
+  const v = Math.round(spendMo);
+  const ok = await writeCacheEntryConfirmed("POST", "spendOverrides", k, v);
+  if (ok) spendOverrides.set({ ...spendOverrides.get(), [k]: v });
+  return ok;
+}
+
+export async function clearSpendOverride(company: string): Promise<boolean> {
+  if (!company) return false;
+  const k = normCompany(company);
+  const cur = spendOverrides.get();
+  if (cur[k] === undefined) return true;
+  const ok = await writeCacheEntryConfirmed("DELETE", "spendOverrides", k);
+  if (ok) {
+    const next = { ...cur };
+    delete next[k];
+    spendOverrides.set(next);
+  }
+  return ok;
+}
+
+export function useSpendOverride(company: string): number | undefined {
+  const s = spendOverrides.useStore();
+  return company ? companyValue(s, company) : undefined;
 }
 
 // ---------------- Brief SWE estimates (shared) ----------------

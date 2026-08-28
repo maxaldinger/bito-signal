@@ -31,6 +31,9 @@ const KINDS = {
   // Apollo engineering-dept number (which counts mechanical engineers at
   // industrial firms). Sits BELOW the rep's confirmed override in precedence.
   briefSwe: { table: "bito_brief_swe", key: "company_key", val: "swe" },
+  // Per-engineer monthly token spend learned on a call — replaces the
+  // proposal ROI's $500/mo default assumption for that account.
+  spendOverrides: { table: "bito_spend_overrides", key: "company_key", val: "spend_mo" },
 } as const;
 type Kind = keyof typeof KINDS;
 
@@ -82,13 +85,25 @@ export async function POST(req: NextRequest) {
   if (!kind || !key) return NextResponse.json({ ok: false, error: "Pass kind and key" }, { status: 400 });
 
   const numeric =
-    kind === "scores" || kind === "sweepCursor" || kind === "sweOverrides" || kind === "briefSwe";
+    kind === "scores" ||
+    kind === "sweepCursor" ||
+    kind === "sweOverrides" ||
+    kind === "briefSwe" ||
+    kind === "spendOverrides";
   const value = numeric ? Number(body.value) : String(body.value ?? "");
   if (numeric && !Number.isFinite(value as number)) {
     return NextResponse.json({ ok: false, error: "Numeric value required" }, { status: 400 });
   }
-  if ((kind === "sweOverrides" || kind === "briefSwe") && (!Number.isInteger(value) || (value as number) < 1)) {
-    return NextResponse.json({ ok: false, error: "SWE count must be a positive integer" }, { status: 400 });
+  if (
+    (kind === "sweOverrides" || kind === "briefSwe" || kind === "spendOverrides") &&
+    (!Number.isInteger(value) || (value as number) < 1)
+  ) {
+    return NextResponse.json({ ok: false, error: "Value must be a positive integer" }, { status: 400 });
+  }
+  // Same ceiling the proposal route enforces — a spend the doc would silently
+  // ignore must be rejected at write time, not stored as "confirmed".
+  if (kind === "spendOverrides" && (value as number) > 100_000) {
+    return NextResponse.json({ ok: false, error: "Spend must be at most $100,000/mo" }, { status: 400 });
   }
   if (kind === "contactReviews" && value !== "qualified" && value !== "excluded") {
     return NextResponse.json(

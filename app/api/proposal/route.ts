@@ -34,6 +34,9 @@ interface Body {
   /** True when the SWE count was confirmed by the account on a call (the
    *  rep's manual override) — changes how the number is framed. */
   sweConfirmed?: boolean;
+  /** Call-confirmed per-engineer monthly token spend — replaces the $500/mo
+   *  default assumption in the ROI table. */
+  spendMo?: number;
   employees?: number;
   icpTotal?: number;
   /** Regenerate even when a proposal exists — updates it at the SAME link. */
@@ -45,7 +48,10 @@ interface GenOut {
   cta?: unknown;
 }
 
-const ASSUMED_ALLOWANCE_MO = 1000;
+// Real per-engineer token spend is rarely public — $500/mo is the fair
+// default (Max, Aug 28; was $1,000), overridden per account via the brief
+// header's spend chip once the number comes up on a call.
+const DEFAULT_ALLOWANCE_MO = 500;
 
 // ROI renders as ADOPTION TIERS (10% / 25% / 50% / full org) for estimates
 // above this, a single row below it. One flat "whole org × $1K/mo" number at
@@ -76,6 +82,11 @@ export async function POST(req: NextRequest) {
       ? Math.round(body.sweEstimate)
       : undefined;
   const sweConfirmed = body.sweConfirmed === true && !!swe;
+  const spendMo =
+    typeof body.spendMo === "number" && body.spendMo >= 1 && body.spendMo <= 100_000
+      ? Math.round(body.spendMo)
+      : undefined;
+  const allowanceMo = spendMo ?? DEFAULT_ALLOWANCE_MO;
 
   // Proposal cache: one live proposal per rep + account. A repeat click
   // returns the existing link (no duplicate doc, no duplicate spend); `force`
@@ -127,7 +138,7 @@ export async function POST(req: NextRequest) {
   let roi: ProposalRoi | undefined;
   if (swe) {
     const tier = (n: number, label: string) => {
-      const spendYr = n * ASSUMED_ALLOWANCE_MO * 12;
+      const spendYr = n * allowanceMo * 12;
       return {
         engineers: n,
         label,
@@ -159,7 +170,7 @@ export async function POST(req: NextRequest) {
                 : `~${swe.toLocaleString()} estimated engineers`,
             ),
           ];
-    roi = { allowanceMo: ASSUMED_ALLOWANCE_MO, sweEstimate: swe, tiers };
+    roi = { allowanceMo, spendConfirmed: !!spendMo, sweEstimate: swe, tiers };
   }
 
   const facts = [

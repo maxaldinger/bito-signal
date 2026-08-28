@@ -140,6 +140,9 @@ export function HubSpotActions({
     sweEstimate?: number;
     /** True when the SWE count is the rep's confirmed-on-a-call override. */
     sweConfirmed?: boolean;
+    /** Call-confirmed per-engineer monthly token spend — replaces the
+     *  proposal ROI's $500/mo default assumption. */
+    spendMo?: number;
     employees?: number;
     icpTotal?: number;
     contactName?: string;
@@ -188,6 +191,7 @@ export function HubSpotActions({
           context: proposal?.context,
           sweEstimate: proposal?.sweEstimate,
           sweConfirmed: proposal?.sweConfirmed,
+          spendMo: proposal?.spendMo,
           employees: proposal?.employees,
           icpTotal: proposal?.icpTotal,
           contactName: proposal?.contactName,
