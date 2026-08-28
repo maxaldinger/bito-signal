@@ -679,8 +679,45 @@ export async function apolloPeopleByTitle(
   }
 
   // Look up the motion's named contact by name within the org (best-effort).
+  //
+  // people/match FIRST: it is Apollo's purpose-built name+company matcher and
+  // is FREE without reveal flags. The old q_keywords people-search shape
+  // returned NOTHING for names Apollo demonstrably has (probe, Aug 28:
+  // Entergy's Andy Quick — q_keywords+org_ids found nobody, people/match
+  // found him with title and LinkedIn), which is why nearly every first-move
+  // card rendered as UNCONFIRMED with HubSpot push disabled.
+  const rootDom = (d: string) => {
+    const parts = d.toLowerCase().trim().replace(/^www\./, "").split(".").filter(Boolean);
+    return parts.length <= 2 ? parts.join(".") : parts.slice(-2).join(".");
+  };
   const findPinned = async (): Promise<EnrichContact | undefined> => {
     if (!pinName) return undefined;
+    try {
+      const mq = new URLSearchParams({ name: pinName });
+      if (orgDomain) mq.set("domain", orgDomain);
+      else mq.set("organization_name", orgName || company);
+      // No reveal_* flags — this match consumes no credits.
+      const { status, body } = await apolloJson(`${BASE}/people/match?${mq}`, key, "POST");
+      if (status === 200) {
+        const person = (body as { person?: ApolloPerson } | undefined)?.person;
+        if (person) {
+          // people/match is fuzzy — accept only a person whose employer IS
+          // this account. A wrong-company pin is worse than an unconfirmed one.
+          const pOrg = (person as { organization?: { primary_domain?: string | null; name?: string | null } })
+            .organization;
+          const pDom = str(pOrg?.primary_domain);
+          const domOk = !!orgDomain && !!pDom && rootDom(pDom) === rootDom(orgDomain);
+          const pOrgName = str(pOrg?.name);
+          const nameOk = !!pOrgName && normName(pOrgName) === normName(orgName || company);
+          if (domOk || nameOk) {
+            const c = toContact(person);
+            if (c) return c;
+          }
+        }
+      }
+    } catch {
+      /* fall through to the search shape */
+    }
     try {
       const pq = new URLSearchParams({ page: "1", per_page: "5", q_keywords: pinName });
       if (orgId) pq.append("organization_ids[]", orgId);
