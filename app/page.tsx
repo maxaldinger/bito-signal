@@ -13,6 +13,8 @@ import { PipelineQuestions } from "@/components/PipelineQuestions";
 import { PullControls } from "@/components/PullControls";
 import {
   useDeepDiveScores,
+  useSweOverrides,
+  useBriefSweMap,
   useProspectedCompanies,
   useLowPriorityCompanies,
   useHubspotPresence,
@@ -338,6 +340,12 @@ export default function Page() {
   // sort AND the "in / not in HubSpot" filter. Live results fill in as the
   // staggered per-card checks finish, so this settles over a few seconds.
   const scoresMap = useDeepDiveScores();
+  // Effective SWE = the same precedence the card chip displays (rep-confirmed
+  // override > brief-researched > raw estimate). Band counts, the band filter,
+  // and the size sort all use it so the number ON a card and the band it
+  // files under can never disagree (Donaldson: raw dept ~1.1K, brief ~120).
+  const sweOverridesMap = useSweOverrides();
+  const briefSweMap = useBriefSweMap();
   const prospectedMap = useProspectedCompanies();
   const lowPriMap = useLowPriorityCompanies();
   const presenceMap = useHubspotPresence();
@@ -367,17 +375,25 @@ export default function Page() {
     return c;
   }, [activeSignals]);
 
+  const effSwe = useCallback(
+    (s: Signal) =>
+      companyValue(sweOverridesMap, s.account) ??
+      companyValue(briefSweMap, s.account) ??
+      s.sweEstimate,
+    [sweOverridesMap, briefSweMap],
+  );
+
   const { sweBandCounts, unknownSweCount } = useMemo(() => {
     const counts = {} as Record<SweBandId, number>;
     for (const b of SWE_BANDS) counts[b.id] = 0;
     let unknown = 0;
     for (const sig of activeSignals) {
-      const band = sweBandOf(sig.sweEstimate);
+      const band = sweBandOf(effSwe(sig));
       if (band) counts[band] += 1;
       else unknown += 1;
     }
     return { sweBandCounts: counts, unknownSweCount: unknown };
-  }, [activeSignals]);
+  }, [activeSignals, effSwe]);
 
   const filtered = useMemo(() => {
     return activeSignals.filter((s) => {
@@ -385,7 +401,7 @@ export default function Page() {
       if (segments.length > 0 && !segments.includes(s.segment)) return false;
       if (types.length > 0 && !types.includes(s.type)) return false;
       if (bands.length > 0) {
-        const band = sweBandOf(s.sweEstimate);
+        const band = sweBandOf(effSwe(s));
         // A missing SWE estimate is not evidence the company is OUTSIDE the
         // band — most signals (esp. the Apollo ICP sweep) have no SWE count, so
         // hiding them would nuke the feed. Only exclude KNOWN out-of-band sizes.
@@ -406,6 +422,7 @@ export default function Page() {
     segments,
     types,
     bands,
+    effSwe,
     hubspotFilter,
     isInHubspot,
     reviewedFilter,
@@ -423,7 +440,7 @@ export default function Page() {
         case "fit":
           return scoreOf(b) - scoreOf(a);
         case "size":
-          return (b.sweEstimate ?? 0) - (a.sweEstimate ?? 0);
+          return (effSwe(b) ?? 0) - (effSwe(a) ?? 0);
         case "recent":
           return new Date(b.date).getTime() - new Date(a.date).getTime();
         case "az":
@@ -444,7 +461,7 @@ export default function Page() {
       if (low !== 0) return low;
       return cmp(a, b);
     });
-  }, [filtered, sort, scoresMap, lowPriMap, isInHubspot]);
+  }, [filtered, sort, scoresMap, effSwe, lowPriMap, isInHubspot]);
 
   // Client-side pagination over the globally sorted+filtered set.
   const pageCount = Math.max(1, Math.ceil(sortedFiltered.length / PAGE_SIZE));

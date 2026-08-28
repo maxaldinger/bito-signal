@@ -56,6 +56,8 @@ import {
   useSweOverride,
   setSweOverride,
   clearSweOverride,
+  setBriefSwe,
+  clearBriefSwe,
 } from "@/lib/clientStore";
 
 function Section({
@@ -1573,6 +1575,18 @@ export function CompanyIntel({
   useEffect(() => {
     setDeepDiveScore(acctKey, intel.icp.total);
   }, [acctKey, intel.icp.total]);
+
+  // Same for the brief's researched SWE count: it corrects the row's raw
+  // Apollo engineering-dept number (which counts mechanical engineers at
+  // industrial firms — Donaldson: dept ~1.1K vs ~120 actual software
+  // engineers). Card chips and task notes pick it up; the rep's confirmed
+  // override still outranks it. A brief WITHOUT an estimate retracts any
+  // previously cached one, so cards never quote a number the current brief
+  // no longer makes.
+  useEffect(() => {
+    if (intel.sweEstimate) setBriefSwe(acctKey, intel.sweEstimate);
+    else clearBriefSwe(acctKey);
+  }, [acctKey, intel.sweEstimate]);
 
   // Company-level context woven into each contact's HubSpot task.
   const contactCtx: ContactTaskContext = {

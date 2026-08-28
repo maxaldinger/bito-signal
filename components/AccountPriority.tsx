@@ -5,7 +5,7 @@ import { Flame, ArrowRight } from "lucide-react";
 import { SEGMENT_MAP } from "@/lib/data";
 import { fmtNum } from "@/lib/format";
 import type { Signal } from "@/lib/types";
-import { useSweOverrides, companyValue } from "@/lib/clientStore";
+import { useSweOverrides, useBriefSweMap, companyValue } from "@/lib/clientStore";
 import { SegmentIcon } from "./SegmentIcon";
 
 export function AccountPriority({
@@ -15,8 +15,9 @@ export function AccountPriority({
   signals: Signal[];
   onSelect: (company: string) => void;
 }) {
-  // Rep-confirmed SWE counts override the modeled per-signal estimates.
+  // SWE precedence: rep-confirmed override > brief-researched > per-signal.
   const sweOverrides = useSweOverrides();
+  const briefSweMap = useBriefSweMap();
   const ranked = useMemo(() => {
     const map = new Map<
       string,
@@ -41,16 +42,18 @@ export function AccountPriority({
       cur.count += 1;
       cur.strength = Math.max(cur.strength, s.strength);
       const confirmed = companyValue(sweOverrides, s.account);
+      const fromBrief = companyValue(briefSweMap, s.account);
       if (confirmed) {
         cur.sweEstimate = confirmed;
         cur.sweConfirmed = true;
-      } else if (!cur.sweEstimate && s.sweEstimate) cur.sweEstimate = s.sweEstimate;
+      } else if (fromBrief) cur.sweEstimate = fromBrief;
+      else if (!cur.sweEstimate && s.sweEstimate) cur.sweEstimate = s.sweEstimate;
       map.set(s.account, cur);
     }
     return [...map.values()]
       .sort((a, b) => b.strength - a.strength || b.count - a.count)
       .slice(0, 6);
-  }, [signals, sweOverrides]);
+  }, [signals, sweOverrides, briefSweMap]);
 
   if (ranked.length === 0) return null;
 

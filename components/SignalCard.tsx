@@ -42,6 +42,7 @@ import {
   getCompanyBlurb,
   setCompanyBlurb,
   useSweOverride,
+  useBriefSwe,
 } from "@/lib/clientStore";
 import { HubSpotActions } from "./HubSpotActions";
 
@@ -171,9 +172,11 @@ function StrengthBar({
       </span>
     );
   }
+  // A real brief-scored number gets the brief header's treatment (big, bold,
+  // neon) so a scored account reads at a glance — Max, Aug 28.
   return (
     <div
-      className="flex items-center gap-2"
+      className="flex items-center gap-2.5"
       title="Bito ICP fit from the generated brief (0-99)"
     >
       <div className="h-1.5 w-24 overflow-hidden rounded-full bg-ink-800">
@@ -182,8 +185,9 @@ function StrengthBar({
           style={{ width: `${value}%`, backgroundColor: color }}
         />
       </div>
-      <span className="flex w-9 items-center justify-end gap-0.5 text-right font-mono text-xs font-semibold tabular-nums text-ink-300">
-        {value}
+      <span className="flex items-baseline gap-0.5 font-mono">
+        <span className="text-2xl font-bold leading-none tabular-nums text-neon-400">{value}</span>
+        <span className="text-[10px] font-medium text-ink-500">/99</span>
       </span>
     </div>
   );
@@ -215,10 +219,13 @@ export function SignalCard({
   // score we show — not the rougher per-signal estimate.
   const briefScore = useDeepDiveScore(signal.account);
   const score = briefScore ?? signal.strength;
-  // Rep-confirmed SWE headcount (set on the brief's chip after a call)
-  // overrides the modeled estimate here too — chip, task note, proposal.
+  // SWE precedence: rep-confirmed override (from a call) > the brief's
+  // researched count > the row's raw estimate. The brief regularly corrects
+  // the Apollo engineering-dept number (mechanical engineers at industrial
+  // firms) — chip, task note, and proposal all use the corrected value.
   const sweOverride = useSweOverride(signal.account);
-  const swe = sweOverride ?? signal.sweEstimate;
+  const sweFromBrief = useBriefSwe(signal.account);
+  const swe = sweOverride ?? sweFromBrief ?? signal.sweEstimate;
   const prospected = useIsProspected("company", signal.account);
   const prospectedAt = useProspectedAt("company", signal.account);
   // WS6: a teammate's sync shows as an attributed chip. The viewer's own sync
@@ -282,7 +289,17 @@ export function SignalCard({
           </button>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          <span className="font-mono text-xs tabular-nums text-ink-500">{score}</span>
+          {briefScore !== undefined ? (
+            <span
+              title="Bito ICP fit from the generated brief (0-99)"
+              className="flex items-baseline gap-0.5 font-mono"
+            >
+              <span className="text-lg font-bold leading-none tabular-nums text-neon-400">{score}</span>
+              <span className="text-[10px] text-ink-500">/99</span>
+            </span>
+          ) : (
+            <span className="font-mono text-xs tabular-nums text-ink-500">{score}</span>
+          )}
           <button
             onClick={() => restoreCard(signal.account)}
             title="Restore card"
@@ -371,7 +388,13 @@ export function SignalCard({
       <div className="mt-3 flex flex-wrap gap-1.5">
         {swe ? (
           <span
-            title={sweOverride !== undefined ? "SWE count confirmed on a call" : undefined}
+            title={
+              sweOverride !== undefined
+                ? "SWE count confirmed on a call"
+                : sweFromBrief !== undefined
+                  ? "Researched by the intel brief (replaces the raw headcount estimate)"
+                  : undefined
+            }
             className={`rounded border px-1.5 py-0.5 font-mono text-[11px] ${
               sweOverride !== undefined
                 ? "border-sky-500/40 bg-sky-500/10 text-sky-300"

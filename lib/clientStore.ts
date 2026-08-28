@@ -149,7 +149,14 @@ async function guardLocalOwner(): Promise<void> {
 }
 
 // ---- WS4: row-per-entry write-through for the shared caches ----
-type CacheKind = "scores" | "blurbs" | "sweepCursor" | "blacklist" | "contactReviews" | "sweOverrides";
+type CacheKind =
+  | "scores"
+  | "blurbs"
+  | "sweepCursor"
+  | "blacklist"
+  | "contactReviews"
+  | "sweOverrides"
+  | "briefSwe";
 function pushCacheEntry(kind: CacheKind, key: string, value: unknown): void {
   if (typeof window === "undefined") return;
   void fetch("/api/cache", {
@@ -211,6 +218,7 @@ async function pullSharedCaches(): Promise<void> {
       blacklist?: Record<string, string>;
       contactReviews?: Record<string, "qualified" | "excluded">;
       sweOverrides?: Record<string, number>;
+      briefSwe?: Record<string, number>;
     };
     if (!d.ok) return;
     // A confirmed write landed while this pull was in flight — the snapshot
@@ -222,6 +230,7 @@ async function pullSharedCaches(): Promise<void> {
     if (d.blacklist) blacklist.applyServer(d.blacklist);
     if (d.contactReviews) contactReviews.applyServer(d.contactReviews);
     if (d.sweOverrides) sweOverrides.applyServer(d.sweOverrides);
+    if (d.briefSwe) briefSwe.applyServer(d.briefSwe);
   } catch {
     /* offline — local copies serve */
   }
@@ -518,6 +527,50 @@ export function useSweOverride(company: string): number | undefined {
  *  hooks in loops — use companyValue against this instead). */
 export function useSweOverrides(): Record<string, number> {
   return sweOverrides.useStore();
+}
+
+// ---------------- Brief SWE estimates (shared) ----------------
+// The researched SWE count from a generated intel brief — corrects the raw
+// Apollo engineering-dept number the rows carry (that dept count includes
+// mechanical engineers at industrial firms: Donaldson's dept says ~1.1K, the
+// brief's research says ~120 software engineers). Written when a brief lands,
+// exactly like the brief's ICP score below; the rep's call-confirmed override
+// still outranks it everywhere. Fire-and-forget like scores — a lost write is
+// benign, the next brief open re-pushes.
+const briefSwe = makeStore<Record<string, number>>("bito-brief-swe", {}, undefined, false);
+
+export function setBriefSwe(company: string, swe: number): void {
+  if (!company || !Number.isFinite(swe) || swe < 1) return;
+  const cur = briefSwe.get();
+  const k = normCompany(company);
+  const v = Math.round(swe);
+  if (cur[k] === v) return;
+  briefSwe.set({ ...cur, [k]: v });
+  pushCacheEntry("briefSwe", k, v);
+}
+
+/** A regenerated brief that no longer carries an SWE estimate must RETRACT
+ *  the old one — otherwise cards keep claiming "researched by the brief"
+ *  forever while the brief header shows nothing. */
+export function clearBriefSwe(company: string): void {
+  if (!company) return;
+  const cur = briefSwe.get();
+  const k = Object.keys(cur).find((kk) => normCompany(kk) === normCompany(company));
+  if (k === undefined) return;
+  const next = { ...cur };
+  delete next[k];
+  briefSwe.set(next);
+  deleteCacheEntry("briefSwe", k);
+}
+
+export function useBriefSwe(company: string): number | undefined {
+  const s = briefSwe.useStore();
+  return company ? companyValue(s, company) : undefined;
+}
+
+/** Raw map for list views (no hooks in loops — use companyValue against it). */
+export function useBriefSweMap(): Record<string, number> {
+  return briefSwe.useStore();
 }
 
 // ---------------- Deep-dive ICP scores ----------------

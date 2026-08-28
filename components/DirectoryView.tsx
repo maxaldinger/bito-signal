@@ -14,7 +14,13 @@ import {
 } from "lucide-react";
 import type { DirectoryEntry, Signal, BriefState } from "@/lib/types";
 import type { RegionId } from "@/lib/data";
-import { useBlacklist, companyInMap } from "@/lib/clientStore";
+import {
+  useBlacklist,
+  companyInMap,
+  companyValue,
+  useSweOverrides,
+  useBriefSweMap,
+} from "@/lib/clientStore";
 import { SignalCard } from "./SignalCard";
 import { NotAFitList } from "./SignalFeed";
 import { IntelExpander } from "./IntelExpander";
@@ -181,9 +187,19 @@ export function DirectoryView({
     }
   };
 
+  // The size sort uses the same SWE precedence the cards display (confirmed
+  // override > brief-researched > raw row estimate) so a corrected account
+  // doesn't rank by the number its chip no longer shows.
+  const sweOverridesMap = useSweOverrides();
+  const briefSweMap = useBriefSweMap();
+
   const filtered = useMemo(() => {
     if (!entries) return [];
     const q = query.trim().toLowerCase();
+    const effSwe = (e: DirectoryEntry) =>
+      companyValue(sweOverridesMap, e.company) ??
+      companyValue(briefSweMap, e.company) ??
+      e.sweEstimate;
     // Same "Not a fit" blacklist the feed honors — a blacklisted company
     // disappears here too (restorable via the list at the bottom).
     const list = entries.filter(
@@ -193,10 +209,10 @@ export function DirectoryView({
     );
     const sorted = [...list];
     if (sort === "fit") sorted.sort((a, b) => b.strength - a.strength);
-    else if (sort === "size") sorted.sort((a, b) => (b.sweEstimate ?? 0) - (a.sweEstimate ?? 0));
+    else if (sort === "size") sorted.sort((a, b) => (effSwe(b) ?? 0) - (effSwe(a) ?? 0));
     else sorted.sort((a, b) => a.company.localeCompare(b.company));
     return sorted;
-  }, [entries, query, sort, blacklistMap]);
+  }, [entries, query, sort, blacklistMap, sweOverridesMap, briefSweMap]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
