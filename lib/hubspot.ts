@@ -742,3 +742,206 @@ async function createNote(
     return { error: isTimeout(e) ? "note create timed out after 15s" : "note create failed" };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Enrollment suppression — SEQUENCER_ROADMAP.md, "three states, not binary".
+//
+// Prospecting into open accounts is DELIBERATE (Amar runs Wells Fargo while Max
+// opens parallel threads; Guidewire is in POC and still gets multi-threaded), so
+// an open opportunity is a warning, never a block. Only a live thread with THIS
+// person blocks.
+//
+// Read from HubSpot rather than the dashboard's own sync events: Amar sends by
+// hand and never touches this app, so his activity is visible only in the CRM.
+// ---------------------------------------------------------------------------
+
+/** How recently someone must have been contacted to count as a live thread. */
+const ACTIVE_THREAD_DAYS = 30;
+
+export interface HsSuppression {
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  /** block = live thread with this person. warn = open opp at the account. */
+  verdict: "block" | "warn" | "allow";
+  reason?: string;
+  contactId?: string;
+  contactUrl?: string;
+  /** ISO timestamp of the last logged sales activity on the contact. */
+  lastActivityAt?: string;
+  lastActivityOwner?: string;
+  openDeals?: { name: string; stage: string; owner?: string }[];
+}
+
+async function ownerName(id: string | undefined, key: string): Promise<string | undefined> {
+  if (!id) return undefined;
+  try {
+    const { status, body } = await hsFetch(`/crm/v3/owners/${encodeURIComponent(id)}`, { method: "GET" }, key);
+    if (status !== 200) return undefined;
+    const o = body as { firstName?: string; lastName?: string; email?: string };
+    return [o.firstName, o.lastName].filter(Boolean).join(" ") || o.email || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function hubspotSuppression(
+  opts: { email?: string; companyDomain?: string },
+  ctx?: HsAuthContext
+): Promise<HsSuppression> {
+  const fail = (configured: boolean, error: string): HsSuppression => ({
+    configured,
+    ok: false,
+    error,
+    // A FAILED check is not an all-clear. The caller decides what to do with an
+    // unknown, but it must never read as "allow".
+    verdict: "block",
+    reason: "HubSpot suppression check failed — cannot confirm this contact is safe to enroll",
+  });
+
+  const auth = await resolveAccessToken(ctx);
+  if (!auth.ok) return fail(auth.configured, auth.error);
+  const key = auth.token;
+  const pid = await portalId(key);
+
+  // 1. BLOCK — is this person already in a live thread with someone here?
+  let contactId: string | undefined;
+  let lastActivityAt: string | undefined;
+  let lastActivityOwner: string | undefined;
+  if (opts.email) {
+    try {
+      const { status, body } = await hsFetch(
+        "/crm/v3/objects/contacts/search",
+        {
+          method: "POST",
+          body: {
+            filterGroups: [{ filters: [{ propertyName: "email", operator: "EQ", value: opts.email }] }],
+            properties: [
+              "email",
+              "notes_last_contacted",
+              "hs_last_sales_activity_timestamp",
+              "hubspot_owner_id",
+            ],
+            limit: 1,
+          },
+        },
+        key
+      );
+      if (status !== 200) return fail(true, statusError(status, "contact suppression search"));
+      const hit = (body as { results?: HsObject[] } | undefined)?.results?.[0];
+      if (hit) {
+        contactId = hit.id;
+        const p = hit.properties ?? {};
+        // Either property can be null; take the more recent of the two.
+        const stamps = [p.notes_last_contacted, p.hs_last_sales_activity_timestamp]
+          .filter((v): v is string => typeof v === "string" && v.length > 0)
+          .map((v) => new Date(v).getTime())
+          .filter((n) => Number.isFinite(n));
+        const newest = stamps.length ? Math.max(...stamps) : 0;
+        if (newest > 0) {
+          lastActivityAt = new Date(newest).toISOString();
+          const ageDays = (Date.now() - newest) / 86_400_000;
+          if (ageDays <= ACTIVE_THREAD_DAYS) {
+            lastActivityOwner = await ownerName(p.hubspot_owner_id ?? undefined, key);
+            return {
+              configured: true,
+              ok: true,
+              verdict: "block",
+              reason:
+                `Live thread: last contacted ${Math.round(ageDays)} day(s) ago` +
+                `${lastActivityOwner ? ` by ${lastActivityOwner}` : ""}`,
+              contactId,
+              contactUrl: recordUrl(pid, OBJ_CONTACT, contactId),
+              lastActivityAt,
+              lastActivityOwner,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      return fail(true, isTimeout(e) ? "HubSpot suppression check timed out" : "HubSpot suppression check failed");
+    }
+  }
+
+  // 2. WARN — net-new contact at an account with an open opportunity.
+  const openDeals: { name: string; stage: string; owner?: string }[] = [];
+  const domain = rootDomain(opts.companyDomain);
+  if (domain) {
+    try {
+      const co = await hsFetch(
+        "/crm/v3/objects/companies/search",
+        {
+          method: "POST",
+          body: {
+            filterGroups: [{ filters: [{ propertyName: "domain", operator: "EQ", value: domain }] }],
+            properties: ["name", "domain"],
+            limit: 1,
+          },
+        },
+        key
+      );
+      const companyId = (co.body as { results?: HsObject[] } | undefined)?.results?.[0]?.id;
+      if (co.status === 200 && companyId) {
+        const deals = await hsFetch(
+          "/crm/v3/objects/deals/search",
+          {
+            method: "POST",
+            body: {
+              filterGroups: [
+                {
+                  filters: [
+                    { propertyName: "associations.company", operator: "EQ", value: companyId },
+                    { propertyName: "hs_is_closed", operator: "EQ", value: "false" },
+                  ],
+                },
+              ],
+              properties: ["dealname", "dealstage", "hubspot_owner_id"],
+              limit: 5,
+            },
+          },
+          key
+        );
+        if (deals.status === 200) {
+          const rows = (deals.body as { results?: HsObject[] } | undefined)?.results ?? [];
+          for (const d of rows) {
+            const p = d.properties ?? {};
+            openDeals.push({
+              name: p.dealname ?? "(unnamed deal)",
+              stage: p.dealstage ?? "unknown stage",
+              owner: await ownerName(p.hubspot_owner_id ?? undefined, key),
+            });
+          }
+        }
+      }
+    } catch {
+      // A deal lookup failure downgrades to "allow with no warning" rather than
+      // blocking: the BLOCK check above already passed, and multi-threading an
+      // open account is explicitly sanctioned. Surfaced as a note, not an error.
+    }
+  }
+
+  if (openDeals.length > 0) {
+    const d = openDeals[0];
+    return {
+      configured: true,
+      ok: true,
+      verdict: "warn",
+      reason:
+        `Open opportunity at this account: "${d.name}" (${d.stage})` +
+        `${d.owner ? ` owned by ${d.owner}` : ""}`,
+      contactId,
+      contactUrl: contactId ? recordUrl(pid, OBJ_CONTACT, contactId) : undefined,
+      lastActivityAt,
+      openDeals,
+    };
+  }
+
+  return {
+    configured: true,
+    ok: true,
+    verdict: "allow",
+    contactId,
+    contactUrl: contactId ? recordUrl(pid, OBJ_CONTACT, contactId) : undefined,
+    lastActivityAt,
+  };
+}
