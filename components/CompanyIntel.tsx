@@ -45,6 +45,7 @@ import {
 import { APPROVED_FIGURES, OUTREACH_PRODUCT, bannedHits } from "@/lib/outreachRules";
 import { fmtUSD, fmtNum, fmtDate, stripEmDashes, stripMarkdown } from "@/lib/format";
 import { HubSpotActions } from "./HubSpotActions";
+import { SequenceActions } from "./SequenceActions";
 import {
   useIsProspected,
   useProspectedAt,
@@ -968,6 +969,34 @@ function ApolloPersonCard({
             })()
           }
         />
+        )}
+        {/* Sequencing sits next to the HubSpot push and inherits the same
+            gates: a screened title or an unconfirmed name can't be enrolled
+            either. Email-only in Phase 1, so a contact with no company address
+            says so instead of offering a dead button. */}
+        {gate.hubspotTask && !unconfirmed && (
+          <div className="mt-2">
+            <SequenceActions
+              compact
+              prospect={{
+                email: companyEmail,
+                name: displayName,
+                title: person.title,
+                company,
+                companyDomain: domain,
+                country: revealedCountry ?? person.country,
+                linkedinUrl: profileUrl,
+                apolloPersonId: person.apolloId,
+                classification:
+                  effective === "QUALIFIED"
+                    ? "qualified"
+                    : effective === "ROUTER"
+                      ? "router"
+                      : "unresolved",
+                sourceSection: "signal_feed",
+              }}
+            />
+          </div>
         )}
       </div>
       </div>
