@@ -39,6 +39,15 @@ create table if not exists public.bito_prospects (
   evidence_depth text check (evidence_depth in ('title_only','profile_verified')),
   source_section text check (source_section in ('signal_feed','signal_2000','github','title_search')),
 
+  -- A reply or bounce on ANY channel stops outreach to this person for good.
+  -- This has to live on the prospect, not the enrollment: a stopped enrollment
+  -- drops out of the one-active index, so without this flag the same person
+  -- re-enrolls the next time they surface in another section.
+  do_not_contact boolean not null default false,
+  dnc_reason text check (dnc_reason in ('replied','bounced','manual')),
+  dnc_channel text,
+  dnc_at timestamptz,
+
   created_by uuid references auth.users(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -56,6 +65,8 @@ create unique index if not exists bito_prospects_email_uniq
 create unique index if not exists bito_prospects_apollo_uniq
   on public.bito_prospects (apollo_person_id) where apollo_person_id is not null;
 create index if not exists bito_prospects_company_key on public.bito_prospects (company_key);
+create index if not exists bito_prospects_dnc
+  on public.bito_prospects (id) where do_not_contact;
 
 alter table public.bito_prospects enable row level security;
 
