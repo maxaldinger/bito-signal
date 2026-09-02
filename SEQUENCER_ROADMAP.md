@@ -94,7 +94,8 @@ Ships first, runs live on Max's contacts before anything else starts.
 - Connect accounts (Max, Amar). Store `unipile_account_id` per user.
 - Invite, message, and profile-fetch endpoints wired as channels.
 - Webhooks → Vercel route handler → write to `event` → drive state transitions. Nothing else mutates enrollment state.
-- Per-account daily action budget with a hard stop. Counter in `account_action_budget`, checked before every LinkedIn action. Invites, messages, and profile fetches all draw from the same pool.
+- Per-account action budget with a hard stop, **daily and weekly** (Max, Aug 28 — LinkedIn's invitation cap is weekly, ~100, so a daily counter alone cannot express "wait until the following week"). Counter in `account_action_budget`, checked before every LinkedIn action. Invites, messages, and profile fetches all draw from the same pool.
+- Hitting a cap **defers, it does not stop**. Push `next_action_at` to the start of the next window and leave the enrollment `active`; `stopped` is terminal and would require manual re-enrollment. Sequences resume themselves the following week.
 - Reconnection flow. Sessions drop. When one does, surface it as a task in the dashboard, don't let sequences fail silently for a week.
 - Watch acceptance rate against the manual baseline. LinkedIn throttles invite allowance based on acceptance, silently. Falling acceptance is the real cost of bad targeting, not a ban.
 
