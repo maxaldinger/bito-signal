@@ -41,6 +41,9 @@ export interface ProposalRoi {
 
 export interface ProposalFields {
   company: string;
+  /** Recorded for the rep (which contact the doc was generated around) but
+   *  deliberately NOT rendered: one proposal link goes to several people at
+   *  the account, so a "Hi Rick," greeting is wrong for everyone else. */
   contactName?: string;
   /** Model-personalized executive-summary paragraphs (2-3). */
   execSummary: string[];
@@ -79,7 +82,6 @@ const dateLong = (iso: string) =>
 
 export function buildProposalHtml(f: ProposalFields): string {
   const company = esc(f.company);
-  const first = f.contactName ? esc(f.contactName.split(" ")[0]) : "";
   const exec = (f.execSummary ?? [])
     .slice(0, 3)
     .map((p) => `<p class="body">${esc(p)}</p>`)
@@ -248,7 +250,6 @@ export function buildProposalHtml(f: ProposalFields): string {
 
     <section>
       <div class="sec-head"><span class="bar"></span><h2>Executive summary</h2></div>
-      ${first ? `<p class="body">Hi ${first},</p>` : ""}
       ${exec}
     </section>
 
