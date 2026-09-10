@@ -1038,7 +1038,9 @@ function RoiMoney({
 }) {
   return (
     <label className="block">
-      <span className={roiLabel}>{label}</span>
+      {/* The label is optional: in range mode the heading sits above the pair
+          of fields, so an empty span here would just add dead space. */}
+      {label ? <span className={roiLabel}>{label}</span> : null}
       <div className="flex items-center rounded-lg border border-ink-700 bg-ink-950 px-2.5 focus-within:border-neon-600/50">
         <span className="font-mono text-sm text-ink-500">$</span>
         <input
@@ -1085,25 +1087,53 @@ function RoiNumber({
 //   a bill $100 → $60 at a 10% take and Bito charges $6, 10% of the new bill.
 function RoiSimple() {
   const [engineers, setEngineers] = useState(300);
+  // EXACT when the account has told you their real per-engineer spend; RANGE
+  // for the usual first call, where quoting one invented number is the fastest
+  // way to lose the room. Range exports a column per point instead.
+  const [allowanceMode, setAllowanceMode] = useState<"exact" | "range">("exact");
   const [allowanceMo, setAllowanceMo] = useState(1000);
+  const [allowanceLow, setAllowanceLow] = useState(500);
+  const [allowanceHigh, setAllowanceHigh] = useState(1500);
   const [savingsPct, setSavingsPct] = useState(47);
   const [feePct, setFeePct] = useState(10);
   const [copied, setCopied] = useState(false);
   const [pdfBlocked, setPdfBlocked] = useState(false);
 
-  const spendYr = engineers * allowanceMo * 12;
-  const grossSavings = spendYr * (savingsPct / 100);
-  const newSpendYr = spendYr - grossSavings;
-  // Fee rides the NEW spend level (what still flows through), not the savings.
-  const bitoFee = newSpendYr * (feePct / 100);
-  const netSavings = grossSavings - bitoFee;
-  const allInYr = newSpendYr + bitoFee;
+  // One allowance -> the whole line of numbers. Fee rides the NEW spend level
+  // (what still flows through), never the savings.
+  const modelFor = (mo: number) => {
+    const spend = engineers * mo * 12;
+    const gross = spend * (savingsPct / 100);
+    const newSpend = spend - gross;
+    const fee = newSpend * (feePct / 100);
+    return {
+      allowanceMo: mo,
+      spendYr: spend,
+      grossSavings: gross,
+      newSpendYr: newSpend,
+      bitoFee: fee,
+      netSavings: gross - fee,
+      allInYr: newSpend + fee,
+    };
+  };
+
+  // Three points across the band: the two ends the rep picked and the midpoint.
+  // Sorted so a low/high entered backwards still reads correctly.
+  const [lo, hi] = allowanceLow <= allowanceHigh
+    ? [allowanceLow, allowanceHigh]
+    : [allowanceHigh, allowanceLow];
+  const scenarios = [lo, Math.round((lo + hi) / 2), hi].map(modelFor);
+  const ranged = allowanceMode === "range";
+  // The single-number view, and the midpoint's numbers in range mode — what the
+  // headline cards and the copied summary quote.
+  const mid = ranged ? scenarios[1] : modelFor(allowanceMo);
+  const { spendYr, grossSavings, newSpendYr, bitoFee, netSavings, allInYr } = mid;
 
   const exportPdf = () => {
     const ok = openRoiPdf({
       kind: "simple",
       engineers,
-      allowanceMo,
+      allowanceMo: mid.allowanceMo,
       spendYr,
       savingsPct,
       grossSavings,
@@ -1112,15 +1142,19 @@ function RoiSimple() {
       bitoFee,
       netSavings,
       allInYr,
+      scenarios: ranged ? scenarios : undefined,
     });
     setPdfBlocked(!ok);
   };
 
-  const summary =
-    `${engineers.toLocaleString()} engineers at ${usd(allowanceMo)}/mo in tokens = ${usd(spendYr)}/yr. ` +
-    `At −${savingsPct}% the bill drops to ${usd(newSpendYr)}; Bito charges ${feePct}% of the new spend ` +
-    `level (${usd(bitoFee)}), so the customer keeps ${usd(netSavings)}/yr and pays ${usd(allInYr)} ` +
-    `all-in, down from ${usd(spendYr)}.`;
+  const summary = ranged
+    ? `${engineers.toLocaleString()} engineers at ${usd(lo)}–${usd(hi)}/mo in tokens = ${usd(scenarios[0].spendYr)}–${usd(scenarios[2].spendYr)}/yr. ` +
+      `At −${savingsPct}%, after Bito's ${feePct}% of the new spend level, the customer keeps ` +
+      `${usd(scenarios[0].netSavings)}–${usd(scenarios[2].netSavings)}/yr.`
+    : `${engineers.toLocaleString()} engineers at ${usd(allowanceMo)}/mo in tokens = ${usd(spendYr)}/yr. ` +
+      `At −${savingsPct}% the bill drops to ${usd(newSpendYr)}; Bito charges ${feePct}% of the new spend ` +
+      `level (${usd(bitoFee)}), so the customer keeps ${usd(netSavings)}/yr and pays ${usd(allInYr)} ` +
+      `all-in, down from ${usd(spendYr)}.`;
 
   const copy = async () => {
     try {
@@ -1136,11 +1170,35 @@ function RoiSimple() {
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="space-y-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
         <RoiNumber label="Engineers in scope" value={engineers} onChange={setEngineers} />
-        <RoiMoney
-          label="Token allowance / engineer / month"
-          value={allowanceMo}
-          onChange={setAllowanceMo}
-        />
+        <div>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className={roiLabel}>Token allowance / engineer / month</span>
+            <div className="flex shrink-0 rounded-md border border-ink-700 p-0.5">
+              {(["exact", "range"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setAllowanceMode(m)}
+                  className={`rounded px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                    allowanceMode === m
+                      ? "bg-neon-500/15 text-neon-300"
+                      : "text-ink-500 hover:text-ink-300"
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+          {ranged ? (
+            <div className="grid grid-cols-2 gap-3">
+              <RoiMoney label="Low" value={allowanceLow} onChange={setAllowanceLow} />
+              <RoiMoney label="High" value={allowanceHigh} onChange={setAllowanceHigh} />
+            </div>
+          ) : (
+            <RoiMoney label="" value={allowanceMo} onChange={setAllowanceMo} />
+          )}
+        </div>
         <RoiSlider
           label="Token savings (depends on the build)"
           value={savingsPct}
@@ -1175,33 +1233,71 @@ function RoiSimple() {
             current token spend
           </p>
           <p className="mt-1 font-mono text-2xl font-extrabold text-ink-100">
-            {usd(spendYr)}<span className="text-sm font-semibold text-ink-500"> / yr</span>
+            {ranged ? `${usd(scenarios[0].spendYr)} – ${usd(scenarios[2].spendYr)}` : usd(spendYr)}
+            <span className="text-sm font-semibold text-ink-500"> / yr</span>
           </p>
-          <p className="mt-0.5 font-mono text-[11px] text-ink-500">{usd(engineers * allowanceMo)} / month</p>
+          <p className="mt-0.5 font-mono text-[11px] text-ink-500">
+            {ranged
+              ? `${usd(engineers * lo)} – ${usd(engineers * hi)} / month`
+              : `${usd(engineers * allowanceMo)} / month`}
+          </p>
         </div>
         <div className="rounded-xl border border-neon-600/40 bg-neon-500/10 p-5 shadow-glow-sm">
           <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-neon-400">
             customer keeps at −{savingsPct}%
           </p>
-          <p className="mt-1 font-mono text-4xl font-extrabold text-neon-300">{usd(netSavings)}</p>
+          <p className={`mt-1 font-mono font-extrabold text-neon-300 ${ranged ? "text-3xl" : "text-4xl"}`}>
+            {ranged
+              ? `${usd(scenarios[0].netSavings)} – ${usd(scenarios[2].netSavings)}`
+              : usd(netSavings)}
+          </p>
           <p className="mt-1.5 font-mono text-[12px] text-neon-400/90">
-            {usd(grossSavings)} saved − Bito&rsquo;s {feePct}% of the new bill · all-in drops to {usd(allInYr)} / yr
+            {ranged
+              ? `across ${usd(lo)}–${usd(hi)} / engineer / month · after Bito's ${feePct}% of the new bill`
+              : `${usd(grossSavings)} saved − Bito's ${feePct}% of the new bill · all-in drops to ${usd(allInYr)} / yr`}
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
-          <div>
-            <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(bitoFee)}</p>
-            <p className="mt-1 text-[11px] leading-tight text-ink-500">
-              Bito makes / yr ({feePct}% of the new spend level)
-            </p>
+        {ranged ? (
+          // The three points that get exported — what you see is the table the
+          // prospect receives.
+          <div className="overflow-x-auto rounded-xl border border-ink-700 bg-ink-900/60 p-5">
+            <table className="w-full text-left font-mono text-[11px]">
+              <thead>
+                <tr className="text-ink-500">
+                  <th className="pb-2 font-semibold uppercase tracking-wider">/ eng / mo</th>
+                  <th className="pb-2 text-right font-semibold uppercase tracking-wider">spend / yr</th>
+                  <th className="pb-2 text-right font-semibold uppercase tracking-wider">bito fee</th>
+                  <th className="pb-2 text-right font-semibold uppercase tracking-wider">they keep</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scenarios.map((x, i) => (
+                  <tr key={i} className="border-t border-ink-800">
+                    <td className="py-1.5 text-ink-200">{usd(x.allowanceMo)}</td>
+                    <td className="py-1.5 text-right text-ink-400">{usd(x.spendYr)}</td>
+                    <td className="py-1.5 text-right text-ink-400">{usd(x.bitoFee)}</td>
+                    <td className="py-1.5 text-right font-bold text-neon-300">{usd(x.netSavings)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div>
-            <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(newSpendYr)}</p>
-            <p className="mt-1 text-[11px] leading-tight text-ink-500">
-              new token bill / yr (before Bito&rsquo;s fee)
-            </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 rounded-xl border border-ink-700 bg-ink-900/60 p-5">
+            <div>
+              <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(bitoFee)}</p>
+              <p className="mt-1 text-[11px] leading-tight text-ink-500">
+                Bito makes / yr ({feePct}% of the new spend level)
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-xl font-extrabold leading-none text-ink-100">{usd(newSpendYr)}</p>
+              <p className="mt-1 text-[11px] leading-tight text-ink-500">
+                new token bill / yr (before Bito&rsquo;s fee)
+              </p>
+            </div>
           </div>
-        </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={copy}

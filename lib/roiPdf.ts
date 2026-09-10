@@ -6,9 +6,24 @@
 
 import { BITO_LOGO } from "./pocPdf";
 
+/** One point inside a token-allowance RANGE. When the rep doesn't know the
+ *  real per-engineer spend (the usual case on a first call), the estimate is
+ *  quoted as a band instead of a single invented number, and the export
+ *  becomes a column per point. */
+export interface RoiScenario {
+  allowanceMo: number;
+  spendYr: number;
+  grossSavings: number;
+  newSpendYr: number;
+  bitoFee: number;
+  netSavings: number;
+  allInYr: number;
+}
+
 export interface RoiPdfSimple {
   kind: "simple";
   engineers: number;
+  /** The single allowance, or the MIDPOINT when `scenarios` is set. */
   allowanceMo: number;
   spendYr: number;
   /** Token-savings % chosen for this build (published: 47 typical, 68 heaviest). */
@@ -22,6 +37,9 @@ export interface RoiPdfSimple {
   netSavings: number;
   /** New token bill + Bito's fee — the customer's all-in cost. */
   allInYr: number;
+  /** Low / mid / high points across the chosen allowance range. Present only
+   *  in range mode; the document then prints a column per point. */
+  scenarios?: RoiScenario[];
 }
 
 export interface RoiPdfAdvanced {
@@ -161,7 +179,59 @@ const EVIDENCE = `
       </div>
     </section>`;
 
+// Range mode: one COLUMN per allowance point, line items as rows. Reads as a
+// band the prospect can locate themselves inside of, instead of a single
+// number they'll immediately argue with.
+function simpleRangeBody(d: RoiPdfSimple, sc: RoiScenario[]): string {
+  const cols = sc.map((x) => `<th class="num">${usd(x.allowanceMo)}/mo</th>`).join("");
+  const row = (
+    label: string,
+    sub: string,
+    pick: (x: RoiScenario) => string,
+    cls = "num",
+  ) => `
+          <tr>
+            <td>${label}${sub ? `<span class="sub">${sub}</span>` : ""}</td>
+            ${sc.map((x) => `<td class="${cls}">${pick(x)}</td>`).join("")}
+          </tr>`;
+  return `
+    <section>
+      <div class="sec-head"><span class="bar"></span><h2>The math</h2></div>
+      <table class="cs">
+        <thead><tr><th>Per engineer, per month</th>${cols}</tr></thead>
+        <tbody>
+          ${row(
+            "Current token spend",
+            `${d.engineers.toLocaleString()} engineers &times; the allowance above`,
+            (x) => usd(x.spendYr),
+          )}
+          ${row(
+            "Token bill brought down to",
+            `at &minus;${d.savingsPct}% &mdash; &minus;47% is the published per-task figure, &minus;83% was measured on a full session`,
+            (x) => usd(x.newSpendYr),
+          )}
+          ${row(
+            "Bito&rsquo;s fee",
+            `${d.feePct}% of the new spend level &mdash; billed on what still flows through, not on the old bill`,
+            (x) => `&minus;${usd(x.bitoFee)}`,
+          )}
+          <tr class="total">
+            <td>You keep, per year</td>
+            ${sc.map((x) => `<td class="num big">${usd(x.netSavings)}</td>`).join("")}
+          </tr>
+        </tbody>
+      </table>
+      <p class="note">Quoted as a range because per-engineer token spend varies with how heavily each team leans on
+      coding agents. Pick the column that matches your own usage; all-in cost after Bito runs
+      ${usd(sc[0].allInYr)} to ${usd(sc[sc.length - 1].allInYr)}/yr across the band.</p>
+    </section>
+    ${EVIDENCE}
+    <p class="note">Estimate from the stated headcount and per-engineer token allowance only. Time savings and
+    quality impact (planning hours reclaimed, review time, defect rates) are additional and not included in this figure.</p>`;
+}
+
 function simpleBody(d: RoiPdfSimple): string {
+  if (d.scenarios && d.scenarios.length > 0) return simpleRangeBody(d, d.scenarios);
   return `
     <section>
       <div class="sec-head"><span class="bar"></span><h2>The math</h2></div>
@@ -259,9 +329,15 @@ export function openRoiPdf(d: RoiPdfData): boolean {
   const html =
     d.kind === "simple"
       ? frame(
-          `${usd(d.netSavings)} back on the token bill`,
+          d.scenarios && d.scenarios.length > 0
+            ? `${usd(d.scenarios[0].netSavings)} – ${usd(d.scenarios[d.scenarios.length - 1].netSavings)} back on the token bill`
+            : `${usd(d.netSavings)} back on the token bill`,
           "annual token-cost estimate",
-          `${d.engineers.toLocaleString()} engineers · ${usd(d.allowanceMo)}/month token allowance each · −${d.savingsPct}% build · Bito at ${d.feePct}% of the new spend level · all figures annual`,
+          `${d.engineers.toLocaleString()} engineers · ${
+            d.scenarios && d.scenarios.length > 0
+              ? `${usd(d.scenarios[0].allowanceMo)}–${usd(d.scenarios[d.scenarios.length - 1].allowanceMo)}/month token allowance each`
+              : `${usd(d.allowanceMo)}/month token allowance each`
+          } · −${d.savingsPct}% build · Bito at ${d.feePct}% of the new spend level · all figures annual`,
           simpleBody(d),
         )
       : frame(
