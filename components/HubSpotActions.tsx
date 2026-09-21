@@ -20,12 +20,7 @@ import {
   getLastDueDate,
   setLastDueDate,
 } from "@/lib/clientStore";
-import type { PositioningMode, ProposalResearch } from "@/lib/proposalGen";
-
-const POSITIONING_LABEL: Record<PositioningMode, string> = {
-  operational: "Operational",
-  cost: "Cost",
-};
+import type { ProposalResearch } from "@/lib/proposalGen";
 
 type HsKind = "company" | "contact";
 type HsTaskType = "CALL" | "EMAIL" | "TODO";
@@ -173,22 +168,12 @@ export function HubSpotActions({
   const [propAt, setPropAt] = useState<string | null>(null);
   const [propCopied, setPropCopied] = useState(false);
   const [propErr, setPropErr] = useState<string | null>(null);
-  // Which narrative to generate. Operational by default (Max, Sep 21): lead
-  // with their engineering environment, economics second. `propMode` is the
-  // narrative the LIVE link currently carries, so switching the toggle after
-  // a proposal exists is a visible, confirmed regeneration, never a silent one.
-  const [positioning, setPositioning] = useState<PositioningMode>("operational");
-  const [propMode, setPropMode] = useState<PositioningMode | null>(null);
+  // Every generation produces BOTH narratives (Operational and ROI) as tabs
+  // on the one page. `propDual` is false only for a cached link generated
+  // before the tabs existed — Update brings it up to both.
+  const [propDual, setPropDual] = useState<boolean | null>(null);
   const makeProposal = async (force = false) => {
     if (propBusy) return;
-    // Regenerating in a different narrative replaces the document at a link
-    // that may already be in a prospect's inbox. Ask, before the tab opens.
-    if (force && propMode && propMode !== positioning) {
-      const ok = window.confirm(
-        `Regenerate as ${POSITIONING_LABEL[positioning]} Focused? This replaces the current ${POSITIONING_LABEL[propMode]} Focused proposal at the same link.`,
-      );
-      if (!ok) return;
-    }
     setPropBusy(true);
     setPropErr(null);
     // Open the tab NOW, inside the click's user activation — a window.open
@@ -200,7 +185,7 @@ export function HubSpotActions({
       // CACHED proposal instantly, and a screen claiming to be "writing the
       // summary" over a weeks-old doc would misrepresent what happened.
       tab.document.write(
-        `<title>${force ? "Updating" : "Opening"} proposal…</title><body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#46556a"><div style="text-align:center"><p style="font-size:17px;font-weight:700;color:#1a2230;margin:0 0 6px">${force ? "Updating" : "Opening"} the proposal for ${name.replace(/</g, "&lt;")}…</p><p style="font-size:13px;margin:0">${force ? "Writing the executive summary and re-running the numbers — this tab loads it in ~15 seconds." : "An existing proposal loads in a moment (Update folds in the latest numbers); writing a new one takes ~15 seconds."}</p></div></body>`,
+        `<title>${force ? "Updating" : "Opening"} proposal…</title><body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#46556a"><div style="text-align:center"><p style="font-size:17px;font-weight:700;color:#1a2230;margin:0 0 6px">${force ? "Updating" : "Opening"} the proposal for ${name.replace(/</g, "&lt;")}…</p><p style="font-size:13px;margin:0">${force ? "Writing both narratives (Operational and ROI) and re-running the numbers — this tab loads it in ~20 seconds." : "An existing proposal loads in a moment (Update folds in the latest numbers); writing a new one takes ~20 seconds."}</p></div></body>`,
       );
       tab.document.close();
     }
@@ -221,7 +206,6 @@ export function HubSpotActions({
           contactName: proposal?.contactName,
           contactTitle: proposal?.contactTitle,
           research: proposal?.research,
-          positioningMode: positioning,
           force,
         }),
       });
@@ -232,7 +216,7 @@ export function HubSpotActions({
         cached?: boolean;
         updated?: boolean;
         generatedAt?: string;
-        positioningMode?: PositioningMode;
+        dual?: boolean;
       };
       if (!res.ok || !d.ok || !d.url) {
         tab?.close();
@@ -242,9 +226,7 @@ export function HubSpotActions({
       setPropUrl(d.url);
       setPropInfo(d.cached ? "cached" : d.updated ? "updated" : "");
       setPropAt(d.generatedAt ?? null);
-      // The server reports the narrative the link carries (a stored doc with
-      // no mode is cost — that's how it was generated).
-      setPropMode(d.positioningMode ?? (d.cached ? "cost" : positioning));
+      setPropDual(d.dual ?? true);
       if (tab) tab.location.href = d.url;
       try {
         // Best effort: if the new tab stole focus, some browsers refuse the
@@ -430,30 +412,10 @@ export function HubSpotActions({
           purpose: the HubSpot status above changes width when the auto-check
           resolves ("checking HubSpot…" → "In HubSpot: <name> ↗"), and while
           these controls shared that row the shift slid the HubSpot link under
-          a cursor aimed at the positioning toggle — a click meant for "Cost"
-          opened HubSpot instead (Max, Sep 21). The toggle picks the narrative:
-          Operational leads with their engineering environment, Cost leads with
-          the modeled economics. */}
+          a cursor aimed at these buttons (Max, Sep 21). Every generation
+          produces both narratives; the page's Operational | ROI tabs switch. */}
       {kind === "company" && proposal && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span
-            className="inline-flex items-center rounded border border-ink-700 p-0.5"
-            title="Proposal positioning. Operational: lead with their engineering environment, economics second. Cost: lead with the quantified business case."
-          >
-            {(["operational", "cost"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setPositioning(m)}
-                disabled={propBusy}
-                className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider transition-colors disabled:opacity-50 ${
-                  positioning === m ? "bg-violet-500/15 text-violet-300" : "text-ink-500 hover:text-ink-300"
-                }`}
-              >
-                {POSITIONING_LABEL[m]}
-              </button>
-            ))}
-          </span>
           {propUrl ? (
             <>
               <a
@@ -479,37 +441,25 @@ export function HubSpotActions({
                       : ""}
                 <ArrowUpRight className="h-3 w-3" />
               </a>
-              {/* Which narrative the live link carries — so a cached Cost doc
-                  is never mistaken for the Operational one just selected. */}
-              {propMode && (
+              {/* A link from before the tabs existed carries one narrative;
+                  say so, since Update is what brings it up to both. */}
+              {propDual === false && (
                 <span
-                  className={`font-mono text-[10px] ${propMode === positioning ? "text-ink-500" : "text-amber-300/90"}`}
-                  title={
-                    propMode === positioning
-                      ? "The live proposal was generated in this positioning"
-                      : `The live proposal is ${POSITIONING_LABEL[propMode]} Focused — Update regenerates it as ${POSITIONING_LABEL[positioning]} Focused (asks first)`
-                  }
+                  className="font-mono text-[10px] text-amber-300/90"
+                  title="This proposal was generated before the Operational | ROI tabs — Update regenerates it with both"
                 >
-                  Positioning: {POSITIONING_LABEL[propMode]}
+                  single narrative
                 </span>
               )}
               <button
                 type="button"
                 onClick={() => void makeProposal(true)}
                 disabled={propBusy}
-                title={
-                  propMode && propMode !== positioning
-                    ? `Regenerate as ${POSITIONING_LABEL[positioning]} Focused at the same link (asks for confirmation)`
-                    : "Regenerate this proposal with the latest account info — same link"
-                }
+                title="Regenerate this proposal with the latest account info — both narratives, same link"
                 className={`${btn} hover:border-violet-500/40 hover:text-violet-300`}
               >
                 {propBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                {propBusy
-                  ? "Updating…"
-                  : propMode && propMode !== positioning
-                    ? `Regenerate as ${POSITIONING_LABEL[positioning]}`
-                    : "Update"}
+                {propBusy ? "Updating…" : "Update"}
               </button>
             </>
           ) : (
@@ -517,7 +467,7 @@ export function HubSpotActions({
               type="button"
               onClick={() => void makeProposal()}
               disabled={propBusy}
-              title="Generate a Governor proposal personalized to this account, hosted at a shareable link (with Download PDF on the page). Repeat clicks reuse the same link."
+              title="Generate a Governor proposal personalized to this account — Operational and ROI narratives as tabs on one shareable link, with Download PDF on the page. Repeat clicks reuse the same link."
               className={`${btn} hover:border-violet-500/40 hover:text-violet-300`}
             >
               {propBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}

@@ -44,15 +44,31 @@ export interface ProposalRoi {
  *  environment and treats economics as a secondary section. */
 export type PositioningMode = "cost" | "operational";
 
+/** The personalized text for ONE narrative. A dual document stores one per
+ *  mode under `narratives`; single-mode and legacy documents store the same
+ *  shape flattened at the top level of ProposalFields. */
+export interface ProposalNarrative {
+  headline?: string;
+  subtitle?: string;
+  execSummary: string[];
+  environment?: string[];
+  cta: string;
+}
+
 export interface ProposalFields {
   company: string;
   /** Recorded for the rep (which contact the doc was generated around) but
    *  deliberately NOT rendered: one proposal link goes to several people at
    *  the account, so a "Hi Rick," greeting is wrong for everyone else. */
   contactName?: string;
-  /** Absent on proposals stored before the toggle existed. Those render in
-   *  the ORIGINAL layout (cost-led, original section order) so links already
-   *  sent out never change under the reader. */
+  /** DUAL documents (Sep 21 on): both narratives generated together and
+   *  rendered as tabs on one page — Operational | ROI. When present, the
+   *  flattened top-level fields mirror the default tab. */
+  narratives?: { operational: ProposalNarrative; cost: ProposalNarrative };
+  /** For a dual document: the DEFAULT tab. For a single-narrative document
+   *  (the brief window when only one was generated): its layout. Absent on
+   *  proposals stored before the toggle existed — those render in the
+   *  ORIGINAL layout so links already sent out never change under the reader. */
   positioningMode?: PositioningMode;
   /** Model-written in OPERATIONAL mode only. Cost mode computes its headline
    *  from the ROI table and never lets the model write a number. */
@@ -155,11 +171,39 @@ const STYLE_BLOCK = `  :root {
  *  here as well as in the generator, so a stored field can't sneak one in. */
 const carriesMoneyOrPct = (t: string) => /\$|\b\d+(?:\.\d+)?\s?%|\b\d+(?:\.\d+)?\s?[MK]\b/i.test(t);
 
-export function buildProposalHtml(f: ProposalFields): string {
+type Layout = "legacy" | PositioningMode;
+
+interface Pane {
+  key: Layout;
+  label: string;
+  title: string;
+  subline: string;
+  body: string;
+}
+
+// Tab bar for dual documents. `.toolbar .tab` outranks the existing
+// `.toolbar button` rule so the tabs don't inherit the blue print button.
+const TAB_STYLE = `
+  .toolbar.tabbed { justify-content: space-between; align-items: center; }
+  .tabs { display: flex; gap: 6px; }
+  .toolbar .tab { font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: #fff; color: var(--ink-3); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; }
+  .toolbar .tab:hover { color: var(--ink); background: #fff; }
+  .toolbar .tab.active { color: var(--brand); border-color: var(--brand-bright); background: var(--tint); }
+  .pane[hidden] { display: none; }
+  @media print { .tabs { display: none !important; } .pane[hidden] { display: none !important; } }
+`;
+
+// Switches panes; #roi / #operational in the URL opens that tab directly, so
+// a link can be sent pointing at either narrative. Printing prints only the
+// visible pane.
+const TAB_SCRIPT = `<script>(function(){var tabs=document.querySelectorAll('.tab'),panes=document.querySelectorAll('.pane');function show(k){tabs.forEach(function(t){t.classList.toggle('active',t.getAttribute('data-pane')===k)});panes.forEach(function(p){p.hidden=p.getAttribute('data-pane')!==k});try{history.replaceState(null,'',k==='cost'?'#roi':'#operational')}catch(e){}}tabs.forEach(function(t){t.addEventListener('click',function(){show(t.getAttribute('data-pane'))})});if(location.hash==='#roi')show('cost');else if(location.hash==='#operational')show('operational')})();</script>`;
+
+/** Render ONE narrative into a titled document body. `layout` decides the
+ *  headline source and the section order; `n` supplies the personalized
+ *  text; `f` supplies the computed ROI and the company. */
+function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Omit<Pane, "key" | "label"> {
   const company = esc(f.company);
-  // Three layouts, one renderer: "legacy" is a stored doc with no mode.
-  const layout: "legacy" | PositioningMode = f.positioningMode ?? "legacy";
-  const exec = (f.execSummary ?? [])
+  const exec = (n.execSummary ?? [])
     .slice(0, 3)
     .map((p) => `<p class="body">${esc(p)}</p>`)
     .join("");
@@ -243,22 +287,18 @@ export function buildProposalHtml(f: ProposalFields): string {
     up front, then routes each request to the right model.`
       : `Inject the right code context up front, then route each request to the right model. Governor,
     Bito&rsquo;s context-driven model router, manages both factors of your AI bill.`;
-  const opHeadlineRaw = (f.headline ?? "").trim();
+  const opHeadlineRaw = (n.headline ?? "").trim();
   const opTitle =
     opHeadlineRaw && !carriesMoneyOrPct(opHeadlineRaw)
       ? esc(opHeadlineRaw)
       : `Giving Coding Agents System-Level Context Across ${company}&rsquo;s Codebase`;
-  const opSubtitleRaw = (f.subtitle ?? "").trim();
+  const opSubtitleRaw = (n.subtitle ?? "").trim();
   const opSubline = opSubtitleRaw
     ? esc(opSubtitleRaw)
     : `Governor, Bito&rsquo;s context-driven model router, grounds every agent request in your actual service
     architecture before it runs, then routes it to the right model.`;
   const title = layout === "operational" ? opTitle : costTitle;
   const subline = layout === "operational" ? opSubline : costSubline;
-  const docTitle =
-    layout === "operational"
-      ? `Governor proposal — prepared for ${company}`
-      : `Cutting agent token costs — prepared for ${company}`;
 
   // ---- Sections ------------------------------------------------------------
   const sec = (heading: string, inner: string) => `
@@ -270,10 +310,10 @@ export function buildProposalHtml(f: ProposalFields): string {
   const execSection = sec("Executive summary", exec);
 
   const environmentSection =
-    f.environment && f.environment.length > 0
+    n.environment && n.environment.length > 0
       ? sec(
           "Your engineering environment",
-          f.environment
+          n.environment
             .slice(0, 2)
             .map((p) => `<p class="body">${esc(p)}</p>`)
             .join(""),
@@ -355,7 +395,7 @@ export function buildProposalHtml(f: ProposalFields): string {
       Bito&rsquo;s foundation, and Governor is where the context engine, the routing, and every future optimization
       live together.</p>`;
 
-  const nextSection = sec("Next steps", `<div class="cta">${esc(f.cta)}</div>`);
+  const nextSection = sec("Next steps", `<div class="cta">${esc(n.cta)}</div>`);
 
   // The economics: primary in cost mode, explicitly secondary in operational.
   const roiSection = (heading: string, intro: string) =>
@@ -409,18 +449,12 @@ export function buildProposalHtml(f: ProposalFields): string {
     ].join("");
   }
 
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="robots" content="noindex" />
-<title>${docTitle}</title>
-<style>
-${STYLE_BLOCK}</style>
-</head>
-<body>
-  <div class="toolbar"><button onclick="window.print()">Download PDF</button></div>
+  return { title, subline, body };
+}
+
+function sheet(p: Pane, f: ProposalFields): string {
+  const company = esc(f.company);
+  return `
   <div class="sheet">
     <header class="letterhead">
       ${BITO_LOGO}
@@ -429,15 +463,67 @@ ${STYLE_BLOCK}</style>
     <div class="rule"></div>
 
     <p class="eyebrow">prepared for ${company} · ${dateLong(f.generatedAt)}</p>
-    <h1 class="title">${title}</h1>
-    <p class="subline">${subline}</p>
-${body}
+    <h1 class="title">${p.title}</h1>
+    <p class="subline">${p.subline}</p>
+${p.body}
 
     <div class="foot">
       <span>Bito · bito.ai</span>
       <span>Prepared for ${company} · ${dateLong(f.generatedAt)}</span>
     </div>
-  </div>
-</body>
+  </div>`;
+}
+
+function frame(docTitle: string, f: ProposalFields, panes: Pane[], active: Layout): string {
+  const tabbed = panes.length > 1;
+  const toolbar = tabbed
+    ? `<div class="toolbar tabbed"><div class="tabs" role="tablist">${panes
+        .map(
+          (p) =>
+            `<button type="button" role="tab" class="tab${p.key === active ? " active" : ""}" data-pane="${p.key}">${p.label}</button>`,
+        )
+        .join("")}</div><button type="button" onclick="window.print()">Download PDF</button></div>`
+    : `<div class="toolbar"><button onclick="window.print()">Download PDF</button></div>`;
+  const content = tabbed
+    ? panes
+        .map((p) => `<div class="pane" data-pane="${p.key}"${p.key === active ? "" : " hidden"}>${sheet(p, f)}</div>`)
+        .join("")
+    : sheet(panes[0], f);
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>${docTitle}</title>
+<style>
+${STYLE_BLOCK}${tabbed ? TAB_STYLE : ""}</style>
+</head>
+<body>
+  ${toolbar}${content}
+${tabbed ? TAB_SCRIPT : ""}</body>
 </html>`;
+}
+
+export function buildProposalHtml(f: ProposalFields): string {
+  const company = esc(f.company);
+
+  // DUAL document: both narratives on one page, Operational | ROI tabs.
+  if (f.narratives) {
+    const active: Layout = f.positioningMode === "cost" ? "cost" : "operational";
+    const panes: Pane[] = [
+      { key: "operational", label: "Operational", ...renderPane("operational", f.narratives.operational, f) },
+      { key: "cost", label: "ROI", ...renderPane("cost", f.narratives.cost, f) },
+    ];
+    return frame(`Governor proposal — prepared for ${company}`, f, panes, active);
+  }
+
+  // Single narrative: a stored mode, or the original layout when there is none.
+  const layout: Layout = f.positioningMode ?? "legacy";
+  const pane: Pane = { key: layout, label: "", ...renderPane(layout, f, f) };
+  const docTitle =
+    layout === "operational"
+      ? `Governor proposal — prepared for ${company}`
+      : `Cutting agent token costs — prepared for ${company}`;
+  return frame(docTitle, f, [pane], layout);
 }

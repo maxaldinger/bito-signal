@@ -3,12 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminClient, sessionUserId } from "@/lib/supabaseAuth";
 import { normCompany } from "@/lib/companyKey";
 import type { ProposalFields } from "@/lib/proposalDoc";
-import {
-  DEFAULT_POSITIONING,
-  generateProposalFields,
-  parsePositioningMode,
-  type ProposalResearch,
-} from "@/lib/proposalGen";
+import { generateProposalFields, type ProposalResearch } from "@/lib/proposalGen";
 
 // POST /api/proposal — generate a personalized Governor proposal for an
 // account and store it under an unguessable token; the prospect-facing page
@@ -18,10 +13,9 @@ import {
 // of generating a duplicate; `force: true` regenerates with the latest facts
 // IN PLACE (same token), so a link already emailed out shows the new content.
 //
-// POSITIONING: one generation pipeline (lib/proposalGen.ts), two narratives.
-// `positioningMode` decides which research leads the prompt, what the model
-// writes, and the section order the renderer uses. New proposals default to
-// operational; stored proposals with no mode render as they always did.
+// POSITIONING: one generation pipeline (lib/proposalGen.ts), BOTH narratives
+// every time — Operational and ROI, rendered as tabs on the one page.
+// Stored proposals with no narratives render as they always did.
 export const maxDuration = 60;
 
 interface Body {
@@ -35,8 +29,6 @@ interface Body {
   context?: string;
   /** Structured research from the surface (the brief fills most of it). */
   research?: ProposalResearch;
-  /** "cost" | "operational" — anything else falls back to the default. */
-  positioningMode?: string;
   sweEstimate?: number;
   /** True when the SWE count was confirmed by the account on a call (the
    *  rep's manual override) — changes how the number is framed. */
@@ -68,7 +60,6 @@ export async function POST(req: NextRequest) {
   const company = body.company?.trim();
   if (!company) return NextResponse.json({ ok: false, error: "Pass company" }, { status: 400 });
   const contactName = body.contactName?.trim() || undefined;
-  const positioningMode = parsePositioningMode(body.positioningMode) ?? DEFAULT_POSITIONING;
   // The >= 20 floor sanity-filters MODELED estimates; a rep-confirmed count
   // from a call is exactly the case where a small number is trustworthy, so
   // confirmation lowers the floor to 1 (matching what the SweChip accepts).
@@ -111,9 +102,9 @@ export async function POST(req: NextRequest) {
       url: `${req.nextUrl.origin}/p/${existing.token}`,
       cached: true,
       generatedAt: f?.generatedAt,
-      // A stored doc with no mode was generated cost-first; say so, so the
-      // UI can show the rep what narrative the live link carries.
-      positioningMode: f?.positioningMode ?? "cost",
+      // Docs generated before the tabs existed carry one narrative; the UI
+      // can offer Update to get both.
+      dual: !!f?.narratives,
     });
   }
 
@@ -134,7 +125,6 @@ export async function POST(req: NextRequest) {
   const gen = await generateProposalFields({
     company,
     domain: body.domain?.trim() || undefined,
-    positioningMode,
     context: body.context,
     research: body.research,
     contactName: mergedContactName,
@@ -172,12 +162,7 @@ export async function POST(req: NextRequest) {
   if (existing?.token) {
     const error = await updateAllForKey();
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 502 });
-    return NextResponse.json({
-      ok: true,
-      url: `${req.nextUrl.origin}/p/${existing.token}`,
-      updated: true,
-      positioningMode,
-    });
+    return NextResponse.json({ ok: true, url: `${req.nextUrl.origin}/p/${existing.token}`, updated: true, dual: true });
   }
 
   // The lookup → generate → insert sequence spans the ~15s generation, and a
@@ -196,12 +181,7 @@ export async function POST(req: NextRequest) {
   if (raced?.token) {
     const error = await updateAllForKey();
     if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 502 });
-    return NextResponse.json({
-      ok: true,
-      url: `${req.nextUrl.origin}/p/${raced.token}`,
-      updated: true,
-      positioningMode,
-    });
+    return NextResponse.json({ ok: true, url: `${req.nextUrl.origin}/p/${raced.token}`, updated: true, dual: true });
   }
 
   const token = randomBytes(16).toString("hex");
@@ -210,5 +190,5 @@ export async function POST(req: NextRequest) {
     .insert({ token, company, company_key: companyKey, contact_name: mergedContactName ?? null, fields, created_by: uid });
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 502 });
 
-  return NextResponse.json({ ok: true, url: `${req.nextUrl.origin}/p/${token}`, positioningMode });
+  return NextResponse.json({ ok: true, url: `${req.nextUrl.origin}/p/${token}`, dual: true });
 }

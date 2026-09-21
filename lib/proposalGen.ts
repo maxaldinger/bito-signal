@@ -1,31 +1,25 @@
-// Proposal generation — the one pipeline behind both positioning modes.
+// Proposal generation — one pipeline, both narratives.
 //
-// Same account research, same model call, same document renderer. What the
-// mode changes: which facts lead the prompt, what the model is told it is
-// writing for, which fields it writes (operational mode writes the headline;
-// cost mode never lets the model near a number), and — in lib/proposalDoc.ts
-// — the section order. Extracted from the route so the generator can be run
-// against a stored brief without an HTTP session
-// (scripts/proposal-positioning-check.mts).
+// Every proposal is generated TWICE from the same account research, in
+// parallel: an OPERATIONAL narrative (leads with the account's engineering
+// environment, economics secondary) and a COST narrative (leads with the
+// modeled economics). The page renders both as tabs (lib/proposalDoc.ts).
+// What differs per narrative: which facts lead the prompt, what the model is
+// told it is writing for, which fields it writes (operational writes the
+// headline; cost never lets the model near a number), and the section order.
+// Extracted from the route so it can run against a stored brief without an
+// HTTP session (scripts/proposal-positioning-check.mts).
 
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import { stripEmDashes } from "@/lib/format";
-import type { PositioningMode, ProposalFields, ProposalRoi } from "@/lib/proposalDoc";
+import type { PositioningMode, ProposalFields, ProposalNarrative, ProposalRoi } from "@/lib/proposalDoc";
 
-export type { PositioningMode };
-
-/** New proposals default to the operational narrative (Max, Sep 21). Stored
- *  proposals with no mode are treated as cost — that is how they were made. */
-export const DEFAULT_POSITIONING: PositioningMode = "operational";
-
-export function parsePositioningMode(v: unknown): PositioningMode | undefined {
-  return v === "cost" || v === "operational" ? v : undefined;
-}
+export type { PositioningMode, ProposalNarrative };
 
 /** Structured research a surface can hand the generator. Every field is
  *  optional; the brief fills most of them, a feed card fills two or three.
- *  The generator orders them by mode priority and NEVER fills gaps itself. */
+ *  The generator orders them by narrative priority and NEVER fills gaps. */
 export interface ProposalResearch {
   /** The brief's executive summary. */
   summary?: string;
@@ -53,7 +47,6 @@ export interface ProposalResearch {
 export interface GenerateInput {
   company: string;
   domain?: string;
-  positioningMode: PositioningMode;
   /** Legacy free-text context (feed cards still send this). */
   context?: string;
   research?: ProposalResearch;
@@ -188,11 +181,11 @@ function factBlocks(input: GenerateInput): Record<string, string> {
   };
 }
 
-/** Facts in the mode's priority order (Max's positioning spec, Sep 21). */
-export function buildFacts(input: GenerateInput): string {
+/** Facts in the narrative's priority order (Max's positioning spec, Sep 21). */
+export function buildFacts(input: GenerateInput, mode: PositioningMode): string {
   const b = factBlocks(input);
   const order =
-    input.positioningMode === "operational"
+    mode === "operational"
       ? // 1 architecture · 2-4 services / languages / cloud (carried inside the
         // architecture and summary text) · 5 AI adoption (signal, pains) · 6 org
         // · 7-8 platform / modernization initiatives · 9 complexity (in
@@ -277,53 +270,70 @@ const paras = (v: unknown, max: number): string[] =>
         .slice(0, max)
     : [];
 
-export type GenerateResult = { ok: true; fields: ProposalFields } | { ok: false; error: string };
+type NarrativeResult = { ok: true; narrative: ProposalNarrative } | { ok: false; error: string };
 
-export async function generateProposalFields(input: GenerateInput): Promise<GenerateResult> {
-  const mode = input.positioningMode;
-  const roi = computeRoi(input.swe, input.sweConfirmed, input.allowanceMo, input.spendConfirmed);
-
+/** One narrative, validated. Exported so the check script can exercise a
+ *  single mode; the route always generates both. */
+export async function generateNarrative(input: GenerateInput, mode: PositioningMode): Promise<NarrativeResult> {
   let gen: GenOut | null = null;
   try {
     const result = await callClaudeWithWebSearch({
       system: buildSystemPrompt(mode, input.company),
-      user: `Account facts, in priority order:\n\n${buildFacts(input)}\n\nWrite the JSON now.`,
+      user: `Account facts, in priority order:\n\n${buildFacts(input, mode)}\n\nWrite the JSON now.`,
       webSearch: false,
       maxTokens: mode === "operational" ? 1800 : 1500,
     });
     gen = extractJSON<GenOut>(result.text);
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Generation failed" };
+    return { ok: false, error: `${mode}: ${e instanceof Error ? e.message : "Generation failed"}` };
   }
 
   const execSummary = paras(gen?.execSummary, 3);
   const cta = typeof gen?.cta === "string" ? stripEmDashes(gen.cta).trim() : "";
   if (execSummary.length < 2 || !cta) {
-    return { ok: false, error: "The generator returned an unusable draft — try again" };
+    return { ok: false, error: `${mode}: the generator returned an unusable draft — try again` };
   }
+
+  const narrative: ProposalNarrative = { execSummary, cta };
+  if (mode === "operational") {
+    // The headline is the narrative's whole point: a model draft carrying a
+    // figure is dropped for the safe generic form, never passed through.
+    const headline = typeof gen?.headline === "string" ? stripEmDashes(gen.headline).trim() : "";
+    const subtitle = typeof gen?.subtitle === "string" ? stripEmDashes(gen.subtitle).trim() : "";
+    if (headline && headline.length <= 120 && !carriesMoneyOrPct(headline)) narrative.headline = headline;
+    if (subtitle && subtitle.length <= 240 && !carriesMoneyOrPct(subtitle)) narrative.subtitle = subtitle;
+  } else {
+    const environment = paras(gen?.environment, 2);
+    if (environment.length > 0) narrative.environment = environment;
+  }
+  return { ok: true, narrative };
+}
+
+export type GenerateResult = { ok: true; fields: ProposalFields } | { ok: false; error: string };
+
+/** Both narratives, in parallel, as one document. Either failing fails the
+ *  whole generation: the page promises both tabs. */
+export async function generateProposalFields(input: GenerateInput): Promise<GenerateResult> {
+  const roi = computeRoi(input.swe, input.sweConfirmed, input.allowanceMo, input.spendConfirmed);
+  const [op, co] = await Promise.all([generateNarrative(input, "operational"), generateNarrative(input, "cost")]);
+  if (!op.ok) return { ok: false, error: op.error };
+  if (!co.ok) return { ok: false, error: co.error };
 
   const fields: ProposalFields = {
     company: input.company,
     contactName: input.contactName,
-    positioningMode: mode,
-    execSummary,
-    cta,
+    narratives: { operational: op.narrative, cost: co.narrative },
+    // Operational is the default tab; the flattened fields mirror it for any
+    // reader that predates `narratives`.
+    positioningMode: "operational",
+    headline: op.narrative.headline,
+    subtitle: op.narrative.subtitle,
+    execSummary: op.narrative.execSummary,
+    cta: op.narrative.cta,
     engineers: input.swe,
     employees: input.employees,
     roi,
     generatedAt: new Date().toISOString(),
   };
-
-  if (mode === "operational") {
-    // The headline is the mode's whole point: a model draft carrying a figure
-    // is dropped for the safe generic form, never passed through.
-    const headline = typeof gen?.headline === "string" ? stripEmDashes(gen.headline).trim() : "";
-    const subtitle = typeof gen?.subtitle === "string" ? stripEmDashes(gen.subtitle).trim() : "";
-    if (headline && headline.length <= 120 && !carriesMoneyOrPct(headline)) fields.headline = headline;
-    if (subtitle && subtitle.length <= 240 && !carriesMoneyOrPct(subtitle)) fields.subtitle = subtitle;
-  } else {
-    const environment = paras(gen?.environment, 2);
-    if (environment.length > 0) fields.environment = environment;
-  }
   return { ok: true, fields };
 }
