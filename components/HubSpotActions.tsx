@@ -338,7 +338,7 @@ export function HubSpotActions({
             name match  → "Possible match" + Confirm. Never a green badge; this
                           is the Rich Sauser -> Sarah Rich collision.
             no match    → "Not in HubSpot" + Create. */}
-      <div className={`flex flex-wrap items-center gap-2 ${compact ? "" : ""}`}>
+      <div className="flex min-h-7 flex-wrap items-center gap-2">
         {checking ? (
           <span className="inline-flex items-center gap-1 font-mono text-[11px] text-ink-500">
             <Loader2 className="h-3 w-3 animate-spin" /> checking HubSpot…
@@ -419,12 +419,23 @@ export function HubSpotActions({
           </button>
         )}
 
-        {/* Personalized proposal — company surfaces only, right next to the
-            HubSpot actions per Max. Generates the tailored Governor proposal
-            page and copies its public link. The positioning toggle picks the
-            narrative: Operational leads with their engineering environment,
-            Cost leads with the modeled economics. */}
-        {kind === "company" && proposal && (
+        {domainMismatch && (
+          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-400/90">
+            email domain ≠ company
+          </span>
+        )}
+      </div>
+
+      {/* Personalized proposal — company surfaces only. Its OWN row, on
+          purpose: the HubSpot status above changes width when the auto-check
+          resolves ("checking HubSpot…" → "In HubSpot: <name> ↗"), and while
+          these controls shared that row the shift slid the HubSpot link under
+          a cursor aimed at the positioning toggle — a click meant for "Cost"
+          opened HubSpot instead (Max, Sep 21). The toggle picks the narrative:
+          Operational leads with their engineering environment, Cost leads with
+          the modeled economics. */}
+      {kind === "company" && proposal && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <span
             className="inline-flex items-center rounded border border-ink-700 p-0.5"
             title="Proposal positioning. Operational: lead with their engineering environment, economics second. Cost: lead with the quantified business case."
@@ -443,9 +454,7 @@ export function HubSpotActions({
               </button>
             ))}
           </span>
-        )}
-        {kind === "company" && proposal && (
-          propUrl ? (
+          {propUrl ? (
             <>
               <a
                 href={propUrl}
@@ -514,18 +523,12 @@ export function HubSpotActions({
               {propBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
               {propBusy ? "Personalizing…" : "Personalize proposal"}
             </button>
-          )
-        )}
-        {propErr && (
-          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-red-400">{propErr}</span>
-        )}
-
-        {domainMismatch && (
-          <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-400/90">
-            email domain ≠ company
-          </span>
-        )}
-      </div>
+          )}
+          {propErr && (
+            <span className="inline-flex items-center gap-1 font-mono text-[11px] text-red-400">{propErr}</span>
+          )}
+        </div>
+      )}
 
       {modalOpen && (
         <TaskModal
