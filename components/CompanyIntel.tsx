@@ -1884,6 +1884,23 @@ export function CompanyIntel({
           icpTotal: intel.icp.total,
           contactName: intel.motion?.keyContactName,
           contactTitle: intel.motion?.keyContactTitle,
+          // Structured research: the ICP rationale and the Kubernetes evidence
+          // are the densest architecture text the brief produces, and are what
+          // the operational narrative leads with.
+          research: {
+            summary: intel.summary,
+            signal: intel.callHook,
+            oneLiner: intel.oneLiner,
+            segment: intel.segment?.label,
+            hq: intel.hq,
+            employeeBand: intel.employeeBand,
+            icpRationale: intel.icp?.rationale,
+            kubernetesEvidence: intel.icp?.kubernetes?.detected ? intel.icp.kubernetes.evidence : undefined,
+            onboardingDrivers: intel.onboarding?.drivers,
+            painPoints: painPoints.map((p) => ({ title: p.title, evidence: p.evidence })),
+            whyBito,
+            citations: (intel.citations ?? []).map((c) => c.title).filter(Boolean),
+          },
         }}
         defaultSubject={`SIGNAL DASH - ${intel.name}`}
         defaultBody={

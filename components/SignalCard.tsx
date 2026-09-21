@@ -449,6 +449,13 @@ export function SignalCard({
             sweConfirmed: sweOverride !== undefined,
             spendMo: spendOverride,
             icpTotal: briefScore,
+            research: {
+              signal: displayTitle,
+              summary: displayDesc,
+              segment: segment.label,
+              codebaseHint: signal.codebaseHint,
+              tags: signal.tags,
+            },
           }}
           defaultSubject={`SIGNAL DASH - ${signal.account}`}
           defaultBody={

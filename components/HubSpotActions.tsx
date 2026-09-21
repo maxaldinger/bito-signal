@@ -20,6 +20,12 @@ import {
   getLastDueDate,
   setLastDueDate,
 } from "@/lib/clientStore";
+import type { PositioningMode, ProposalResearch } from "@/lib/proposalGen";
+
+const POSITIONING_LABEL: Record<PositioningMode, string> = {
+  operational: "Operational",
+  cost: "Cost",
+};
 
 type HsKind = "company" | "contact";
 type HsTaskType = "CALL" | "EMAIL" | "TODO";
@@ -147,6 +153,10 @@ export function HubSpotActions({
     icpTotal?: number;
     contactName?: string;
     contactTitle?: string;
+    /** Structured research for the generator — the brief fills most of it,
+     *  a feed card fills two or three fields. Ordered by positioning mode
+     *  server-side. */
+    research?: ProposalResearch;
   };
 }) {
   const [checking, setChecking] = useState(false);
@@ -163,8 +173,22 @@ export function HubSpotActions({
   const [propAt, setPropAt] = useState<string | null>(null);
   const [propCopied, setPropCopied] = useState(false);
   const [propErr, setPropErr] = useState<string | null>(null);
+  // Which narrative to generate. Operational by default (Max, Sep 21): lead
+  // with their engineering environment, economics second. `propMode` is the
+  // narrative the LIVE link currently carries, so switching the toggle after
+  // a proposal exists is a visible, confirmed regeneration, never a silent one.
+  const [positioning, setPositioning] = useState<PositioningMode>("operational");
+  const [propMode, setPropMode] = useState<PositioningMode | null>(null);
   const makeProposal = async (force = false) => {
     if (propBusy) return;
+    // Regenerating in a different narrative replaces the document at a link
+    // that may already be in a prospect's inbox. Ask, before the tab opens.
+    if (force && propMode && propMode !== positioning) {
+      const ok = window.confirm(
+        `Regenerate as ${POSITIONING_LABEL[positioning]} Focused? This replaces the current ${POSITIONING_LABEL[propMode]} Focused proposal at the same link.`,
+      );
+      if (!ok) return;
+    }
     setPropBusy(true);
     setPropErr(null);
     // Open the tab NOW, inside the click's user activation — a window.open
@@ -196,6 +220,8 @@ export function HubSpotActions({
           icpTotal: proposal?.icpTotal,
           contactName: proposal?.contactName,
           contactTitle: proposal?.contactTitle,
+          research: proposal?.research,
+          positioningMode: positioning,
           force,
         }),
       });
@@ -206,6 +232,7 @@ export function HubSpotActions({
         cached?: boolean;
         updated?: boolean;
         generatedAt?: string;
+        positioningMode?: PositioningMode;
       };
       if (!res.ok || !d.ok || !d.url) {
         tab?.close();
@@ -215,6 +242,9 @@ export function HubSpotActions({
       setPropUrl(d.url);
       setPropInfo(d.cached ? "cached" : d.updated ? "updated" : "");
       setPropAt(d.generatedAt ?? null);
+      // The server reports the narrative the link carries (a stored doc with
+      // no mode is cost — that's how it was generated).
+      setPropMode(d.positioningMode ?? (d.cached ? "cost" : positioning));
       if (tab) tab.location.href = d.url;
       try {
         // Best effort: if the new tab stole focus, some browsers refuse the
@@ -391,7 +421,29 @@ export function HubSpotActions({
 
         {/* Personalized proposal — company surfaces only, right next to the
             HubSpot actions per Max. Generates the tailored Governor proposal
-            page and copies its public link. */}
+            page and copies its public link. The positioning toggle picks the
+            narrative: Operational leads with their engineering environment,
+            Cost leads with the modeled economics. */}
+        {kind === "company" && proposal && (
+          <span
+            className="inline-flex items-center rounded border border-ink-700 p-0.5"
+            title="Proposal positioning. Operational: lead with their engineering environment, economics second. Cost: lead with the quantified business case."
+          >
+            {(["operational", "cost"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setPositioning(m)}
+                disabled={propBusy}
+                className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider transition-colors disabled:opacity-50 ${
+                  positioning === m ? "bg-violet-500/15 text-violet-300" : "text-ink-500 hover:text-ink-300"
+                }`}
+              >
+                {POSITIONING_LABEL[m]}
+              </button>
+            ))}
+          </span>
+        )}
         {kind === "company" && proposal && (
           propUrl ? (
             <>
@@ -418,15 +470,37 @@ export function HubSpotActions({
                       : ""}
                 <ArrowUpRight className="h-3 w-3" />
               </a>
+              {/* Which narrative the live link carries — so a cached Cost doc
+                  is never mistaken for the Operational one just selected. */}
+              {propMode && (
+                <span
+                  className={`font-mono text-[10px] ${propMode === positioning ? "text-ink-500" : "text-amber-300/90"}`}
+                  title={
+                    propMode === positioning
+                      ? "The live proposal was generated in this positioning"
+                      : `The live proposal is ${POSITIONING_LABEL[propMode]} Focused — Update regenerates it as ${POSITIONING_LABEL[positioning]} Focused (asks first)`
+                  }
+                >
+                  Positioning: {POSITIONING_LABEL[propMode]}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => void makeProposal(true)}
                 disabled={propBusy}
-                title="Regenerate this proposal with the latest account info — same link"
+                title={
+                  propMode && propMode !== positioning
+                    ? `Regenerate as ${POSITIONING_LABEL[positioning]} Focused at the same link (asks for confirmation)`
+                    : "Regenerate this proposal with the latest account info — same link"
+                }
                 className={`${btn} hover:border-violet-500/40 hover:text-violet-300`}
               >
                 {propBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                {propBusy ? "Updating…" : "Update"}
+                {propBusy
+                  ? "Updating…"
+                  : propMode && propMode !== positioning
+                    ? `Regenerate as ${POSITIONING_LABEL[positioning]}`
+                    : "Update"}
               </button>
             </>
           ) : (
