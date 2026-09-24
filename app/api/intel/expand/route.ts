@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
-import { BITO_CONTEXT } from "@/lib/bito";
+import { bitoContextFor, type BitoProduct } from "@/lib/bito";
 import { fetchBrief, upsertBrief, supabaseConfigured } from "@/lib/supabase";
 import type { CompanyIntel } from "@/lib/types";
 
@@ -11,7 +11,8 @@ import type { CompanyIntel } from "@/lib/types";
 export const maxDuration = 120;
 
 interface SectionCfg {
-  instruction: string;
+  /** Per-product instruction; Governor is the default focus. */
+  instruction: string | ((product: BitoProduct) => string);
   schema: string;
   maxSearches: number;
   // Merge the parsed result into the cached brief.
@@ -20,8 +21,10 @@ interface SectionCfg {
 
 const SECTIONS: Record<string, SectionCfg> = {
   whyBito: {
-    instruction:
-      "Give 3-4 evidence-tied reasons THIS company is a fit for Bito AI Architect — each grounded in a specific, real fact about them (scale, stack, AI-tooling, cross-repo complexity). No generic claims.",
+    instruction: (product) =>
+      product === "ai_architect"
+        ? "Give 3-4 evidence-tied reasons THIS company is a fit for Bito AI Architect (context layer, code review, design and scoping) — each grounded in a specific, real fact about them (scale, stack, review load, cross-repo complexity). No generic claims."
+        : "Give 3-4 evidence-tied reasons THIS company is a fit for Governor — each grounded in a specific, real fact about them (coding-agent and harness adoption, model providers or gateways, agent token spend, engineering scale, cross-repo complexity) and each stated as a consequence for cost per successful task, task time, tool calls, or task success across their agents and models. Architecture facts explain why the context lever matters; they are never a standalone context-layer pitch. Say which lever (context up front, or model routing) each reason rests on. No generic claims.",
     schema: `{"whyBito":["evidence-tied reason","...","..."]}`,
     maxSearches: 2,
     merge: (intel, p) => {
@@ -29,8 +32,10 @@ const SECTIONS: Record<string, SectionCfg> = {
     },
   },
   painPoints: {
-    instruction:
-      "Identify up to 4 likely engineering pain points for this company that Bito addresses, each grounded in a specific evidenced fact. For each: a short title, severity (HIGH|MEDIUM|LOW), a category, the evidence, and how Bito solves it.",
+    instruction: (product) =>
+      product === "ai_architect"
+        ? "Identify up to 4 likely engineering pain points for this company that Bito AI Architect addresses, each grounded in a specific evidenced fact. For each: a short title, severity (HIGH|MEDIUM|LOW), a category, the evidence, and which AI Architect capability (context layer, code review, design and scoping) solves it."
+        : "Identify up to 4 likely engineering pain points for this company that Governor addresses, each grounded in a specific evidenced fact. For each: a short title, severity (HIGH|MEDIUM|LOW), a category, the evidence, and how Governor solves it — naming the lever: context up front (fewer turns, tool calls and tokens per task; higher task success) or model routing (price per token, one model policy). Never attribute the published context figures to routing.",
     schema: `{"painPoints":[{"title":"","severity":"HIGH|MEDIUM|LOW","category":"","evidence":"specific fact/quote","bitoSolution":"how Bito addresses it"}]}`,
     maxSearches: 3,
     merge: (intel, p) => {
@@ -51,7 +56,7 @@ const SECTIONS: Record<string, SectionCfg> = {
   },
   tokenCost: {
     instruction:
-      "Estimate this company's monthly AI dev-tooling spend using REAL public anchors (Copilot Business ~$19/seat/mo, Copilot Enterprise ~$39, Cursor Business ~$40) times an evidenced engineering-seat estimate. State every assumption in notes. Estimates only — never present as fact. bitoOffsetUsd = the slice Bito could offset.",
+      "Estimate this company's monthly AI dev-tooling spend using REAL public anchors (Copilot Business ~$19/seat/mo, Copilot Enterprise ~$39, Cursor Business ~$40) times an evidenced engineering-seat estimate. This is a MODELED estimate: state every assumption in notes and label it as modeled, never as the company's known spend. bitoOffsetUsd = the slice Governor's CONTEXT lever could offset, modeled from the published ~47% token-cost-per-task figure applied to the agent-token portion only; say so in notes, and never attribute it to routing (routing lowers price per token and has no published benchmark).",
     schema: `{"tokenCost":{"estimatedMonthlyUsd":number,"estimatedSeats":number,"perSeatUsd":number,"notes":"assumptions, anchors used","bitoOffsetUsd":number or null}}`,
     maxSearches: 2,
     merge: (intel, p) => {
@@ -80,7 +85,14 @@ const SECTIONS: Record<string, SectionCfg> = {
 };
 
 export async function POST(req: NextRequest) {
-  let body: { company?: string; segment?: string; summary?: string; section?: string };
+  let body: {
+    company?: string;
+    segment?: string;
+    summary?: string;
+    section?: string;
+    /** The brief's product focus; Governor when absent (older briefs). */
+    productFocus?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -92,13 +104,17 @@ export async function POST(req: NextRequest) {
   if (!company) return NextResponse.json({ error: "company is required" }, { status: 400 });
   if (!cfg) return NextResponse.json({ error: "unknown section" }, { status: 400 });
 
-  const system = `${BITO_CONTEXT}
+  const product: BitoProduct = body.productFocus === "ai_architect" ? "ai_architect" : "governor";
+  const instruction = typeof cfg.instruction === "function" ? cfg.instruction(product) : cfg.instruction;
+  const system = `${bitoContextFor(product)}
 
-You are Bito's GTM analyst. For the company below, produce ONLY the requested section as JSON — grounded in real, web-verified facts. Context you already have:
+You are Bito's GTM analyst. For the company below, produce ONLY the requested section as JSON — grounded in real, web-verified facts. The brief this section belongs to pitches ${
+    product === "ai_architect" ? "AI Architect" : "Governor"
+  }; stay on that product. Keep measured results, modeled estimates and customer assumptions visibly distinct. Context you already have:
 COMPANY: ${company}${body.segment ? ` (${body.segment})` : ""}
 SUMMARY: ${body.summary || "(none provided — research the company)"}
 
-TASK: ${cfg.instruction}
+TASK: ${instruction}
 
 Respond with ONLY this JSON shape, no prose, no code fences:
 ${cfg.schema}`;

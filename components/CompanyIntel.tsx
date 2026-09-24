@@ -102,7 +102,7 @@ function ExpandButton({
 }: {
   label: string;
   section: string;
-  ctx: { company: string; segment?: string; summary?: string };
+  ctx: { company: string; segment?: string; summary?: string; productFocus?: string };
   onData: (data: Record<string, unknown>) => void;
   subtle?: boolean;
 }) {
@@ -1701,7 +1701,14 @@ export function CompanyIntel({
   // (Max, Aug 28). The data is already in the brief — this is purely a
   // reveal, no fetch.
   const [motionOpen, setMotionOpen] = useState(false);
-  const expandCtx = { company: intel.name, segment: intel.segment?.label, summary: intel.summary };
+  // productFocus rides along so an on-demand section pitches the same
+  // product the brief does (Governor unless the brief chose AI Architect).
+  const expandCtx = {
+    company: intel.name,
+    segment: intel.segment?.label,
+    summary: intel.summary,
+    productFocus: intel.productFocus,
+  };
 
   // Cache this brief's authoritative ICP total so the signal cards can show it
   // instead of their rougher per-signal estimate.

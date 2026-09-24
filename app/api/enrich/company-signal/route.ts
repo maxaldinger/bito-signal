@@ -18,11 +18,11 @@ function clean(s: unknown): string {
   return typeof s === "string" ? stripEmDashes(s.replace(/\s+/g, " ").trim()) : "";
 }
 
-const SIGNAL_SYSTEM = `You are a GTM research analyst for Bito AI Architect — "the context layer" that pre-indexes an org's whole codebase (architecture, dependencies, API contracts, standards) and grounds AI coding agents, IDEs, and code reviews in it. Bito's ICP is software-heavy companies (roughly 50-500 engineers) with active, complex, multi-repo codebases adopting AI coding tools.
+const SIGNAL_SYSTEM = `You are a GTM research analyst for Bito. Bito sells Governor — the layer between a team's coding harnesses (Claude Code, Cursor, Copilot) and their model providers, which hands agents the right code up front and routes each request to the appropriate model to cut cost per task and hold quality — powered by AI Architect, its cross-repo context engine. Bito's ICP is software-heavy companies (roughly 50-500 engineers, larger orgs qualify) with active, complex, multi-repo codebases running coding agents and AI coding tools at scale.
 
 Using web search, do TWO things for the given company:
 
-1. SIGNAL — find the SINGLE most relevant, RECENT (last ~6 months) buying signal: concrete public evidence of growing need for grounded AI-assisted development. Good signals: an engineering hiring wave, funding earmarked for scaling engineering, public commentary on AI dev-tool adoption or cost, a major open-source release, or an acquisition creating cross-codebase integration work. It MUST be real and citable. If you cannot find a concrete, recent, cited signal, return null — never invent one. Pick the type from: hiring, funding, ai, oss, ma.
+1. SIGNAL — find the SINGLE most relevant, RECENT (last ~6 months) buying signal: concrete public evidence of growing coding-agent usage, agent or model spend, or need for grounded AI-assisted development. Good signals: an engineering hiring wave, funding earmarked for scaling engineering, public commentary on AI dev-tool or agent adoption, token cost, or model selection, a model gateway or AI platform build-out, a major open-source release, or an acquisition creating cross-codebase integration work. It MUST be real and citable. If you cannot find a concrete, recent, cited signal, return null — never invent one. Pick the type from: hiring, funding, ai, oss, ma.
 
 2. DESCRIPTION — a 2-3 sentence factual description of what the company does.
 

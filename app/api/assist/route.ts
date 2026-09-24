@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "@/lib/anthropic";
-import { BITO_CONTEXT } from "@/lib/bito";
+import { BITO_CONTEXT, bitoContextFor } from "@/lib/bito";
 
 // Sales Assist — two kinds of modes:
 //  - chat modes (ask / email / objections / research): free-form answers,
@@ -158,18 +158,21 @@ export async function POST(req: NextRequest) {
   const personaLine = persona
     ? ` TARGET PERSONA: the rep is selling to a ${persona} — frame value for that role.`
     : "";
+  // The POC plan is explicitly an AI Architect document, so it keeps AI
+  // Architect in front; everything else gets the Governor-first context.
+  const productCtx = mode === "poc" ? bitoContextFor("ai_architect") : BITO_CONTEXT;
   const system =
     cfg.type === "text"
       ? `You are an expert AI sales engineer for Bito, helping Bito's own reps sell.
 
-${BITO_CONTEXT}
+${productCtx}
 
 TASK: ${cfg.instruction}
 TONE: ${tone}.${personaLine}
 FORMAT: clean plain text — SHORT CAPS headings and "- " bullets where structure helps. Be specific to Bito, never generic. Never fabricate prospect facts; if you didn't find it, say so.`
       : `You are an expert AI sales engineer for Bito.
 
-${BITO_CONTEXT}
+${productCtx}
 
 TASK: ${cfg.instruction}
 TONE: ${tone}.${personaLine}

@@ -196,6 +196,12 @@ export interface LiveCitation {
 export interface CompanyIntel {
   name: string;
   domain?: string;
+  /** Which product the brief pitches. Governor by default; AI Architect only
+   *  when the evidence is specifically about review / design / scoping, or
+   *  the rep pinned it. Absent on briefs generated before Sep 24 2026 (those
+   *  were written against an AI Architect product sheet). */
+  productFocus?: "governor" | "ai_architect";
+  focusReason?: string;
   segment: Segment;
   oneLiner: string;            // what the company does
   hq?: string;

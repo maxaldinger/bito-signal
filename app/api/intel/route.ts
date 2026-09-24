@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
-import { BITO_CONTEXT } from "@/lib/bito";
+import { bitoContextFor, type BitoProduct } from "@/lib/bito";
 import { apolloOrgFacts } from "@/lib/enrich/apollo";
 import { apolloOrgLookup } from "@/lib/githubProspect/enrich";
 import { SEGMENT_MAP } from "@/lib/data";
@@ -57,14 +57,39 @@ const VALID_STAKEHOLDER_TYPES: Stakeholder["type"][] = [
   "influencer",
 ];
 
-const SYSTEM = `${BITO_CONTEXT}
+// Which product the brief is about. Governor unless the rep pinned AI
+// Architect, or the evidence is specifically about review / design / scoping.
+const VALID_PRODUCTS: BitoProduct[] = ["governor", "ai_architect"];
+
+// POSITIONING (Max, Sep 24 2026). Capital One's brief was branded Governor
+// but substantively pitched AI Architect: every narrative field was about
+// cross-repo context and agents "flying blind", routing never appeared, and
+// the InMail's mechanism was "we pre-index across all the repos". This block
+// makes a Governor brief about Governor, and keeps an AI Architect brief about
+// AI Architect when that is genuinely what the account needs.
+const POSITIONING = `PRODUCT FOCUS
+The brief pitches exactly one product, recorded in "productFocus". Default: "governor". Every narrative field — summary, icp.rationale, callHook, motion.firstMove, outreach, linkedinOutreach, emailOpener — is about the product in focus.
+
+When the focus is GOVERNOR, the brief must:
+- Lead with Governor's value as the layer between the team's coding harnesses and their model providers: context optimization and model routing, together, improve cost, speed and task quality.
+- Explain the two levers as DISTINCT contributions and say which does what: (1) cutting unnecessary token consumption by handing the agent the right code up front (fewer turns, fewer tool calls, fewer tokens per task, higher task success), and (2) routing each request to the appropriate model under one centralized policy (lower price per token, consistent model selection, governance). Never blur them into one claim.
+- Position AI Architect as the engine behind Governor's context lever. Name it as the engine where useful; it is not the product being pitched.
+- Build the business case on cost per successful task, task time, tool calls / reasoning turns, and task success maintained or improved.
+- Stay customer-specific: use their architecture, integrations and scale to explain WHY the levers matter for THEM. Architectural complexity is evidence for the context lever's value, never a reason to turn the brief into a context-layer pitch. Every consequence is stated in Governor terms: what it does to cost per task, task time, tool calls and quality across their agents and their model mix.
+- Keep three things visibly distinct: MEASURED results (the published figures — all measured on the context lever with the model held constant), MODELED savings (spend assumptions and estimates), and CUSTOMER ASSUMPTIONS (what you inferred about them). Never attribute context-engine benchmark gains to routing; routing's benefit is price per token and model policy and has no published benchmark. Never invent capabilities, integrations or numbers.
+
+Choose "ai_architect" only when the evidence is specifically about code review, design and scoping, or architectural governance WITHOUT an agentic-coding cost or model-usage angle, or when the request pins it. Then keep the brief about AI Architect (context layer, review, design/scoping) and mention Governor at most once. Put a one-sentence "focusReason" either way.`;
+
+const buildSystem = (product: BitoProduct) => `${bitoContextFor(product)}
+
+${POSITIONING}
 
 You are Bito's senior GTM analyst. Given a target company, research it on the live web and produce a TIGHT, evidence-grounded sales intel brief — only the fields in the schema below, no extra sections.
 
 Research checklist (use web_search for each):
 1. What the company does, HQ, headcount band, engineering headcount estimate (LinkedIn pages, about pages, recent press).
 2. Engineering organization: team structure, monorepo/polyrepo hints, languages, open-source footprint, engineering blog posts.
-3. Recent signals: hiring, funding, M&A, scaling pain, AI tooling adoption or commentary.
+3. Recent signals: hiring, funding, M&A, scaling pain, AI tooling adoption or commentary — and specifically for Governor: coding agents and harnesses in use (Claude Code, Cursor, Copilot agent mode, Codex), model providers or gateways (Bedrock, Azure OpenAI, Vertex, LiteLLM, Portkey, an internal gateway), who owns the AI platform or the AI tooling bill, and any public commentary on agent token cost or model selection.
 4. Named engineering leaders where public (CTO, VP Eng, Head of Platform/DevEx, staff engineers who write/talk publicly).
 5. Kubernetes / distributed-systems evidence: job postings mentioning "Kubernetes" or "K8s"; Platform Engineer / SRE / DevOps roles listing K8s as a requirement; GitHub repos containing Helm charts or k8s manifests; tech-blog content referencing Kubernetes or microservices architecture.
 
@@ -79,7 +104,7 @@ ${VOICE_SPEC}
 
 PER-TOUCH STRUCTURE (jobs and caps are fixed; the voice above governs how they read):
 - connect: AT MOST three short sentences, HARD CAP 300 characters including spaces, and well under it is better. Open "Hey [First],". NO subject, NO signature, NO pitch, NO mechanism, NO proof figure, NO numbers, NO diagnosis of their problem, NO restatement of their architecture. It ASKS how they're handling coding agents against their specific thing, says in one clause that this is what Max works on, and stops. See the CONNECT REQUESTS block above for the calibration examples; do not model it on the InMail example. If nothing better fits, this template is acceptable: "Hey [First], curious how you're handling coding agents across [their specific thing]. That's what I work on at Bito. Would be good to connect."
-- inmail: 4 short paragraphs MAX, with a subject. Paragraph 1: the specific hook, ONE sentence, no bio restatement. Paragraph 2: the mechanism, plainly — an agent only sees the repo it's working in, so anything crossing a service boundary is a guess followed by turns of reading code to un-guess it. Tie that to THEIR actual architecture. Paragraph 3: what Governor does plus ONE approved figure. Paragraph 4: base URL change, run it on their own work. Close "Let me know if it's worth a look." Sign "Max".
+- inmail: 4 short paragraphs MAX, with a subject. Paragraph 1: the specific hook, ONE sentence, no bio restatement. Paragraph 2: the mechanism, plainly, in Governor's terms: an agent only sees the repo it's working in, so anything crossing a service boundary is a guess followed by turns of reading code to un-guess it, and every one of those turns goes to whatever model the harness defaults to. Tie that to THEIR actual architecture and model mix. Paragraph 3: what Governor does — hands the agent the right code up front (fewer turns and tool calls per task) and routes each request to the model that clears the quality bar at the lowest price — plus ONE approved figure, attributed to the context lever. Paragraph 4: base URL change, run it on their own work. Close "Let me know if it's worth a look." Sign "Max". (When productFocus is ai_architect, paragraph 3 is what AI Architect does instead and the base-URL line becomes connecting the context layer to their tools.)
 - followup2 (send +5 business days if no reply): 3 paragraphs max, with a DIFFERENT subject. A new angle, not a restatement. Either a different approved figure or the methodology sentence. Never "circling back" or "following up".
 - followup3 (send +10 business days if no reply): 2 short paragraphs, with its own subject. Reference a genuinely new external event ONLY if one exists in the signal and is verifiable. If none exists, make it a clean permission-to-close: ask whether this sits with someone else in the org. That question gets answered more often than the pitch does.
 
@@ -100,6 +125,8 @@ Output ONLY one JSON object — no prose, no code fences:
 {
   "name": "Canonical Company Name",
   "domain": "company.com",
+  "productFocus": "governor|ai_architect",
+  "focusReason": "one sentence: why this product is the one to pitch here",
   "segment": "${SEGMENT_ENUM}",
   "oneLiner": "what they do, one line",
   "hq": "City, Country",
@@ -127,6 +154,8 @@ Output ONLY one JSON object — no prose, no code fences:
 interface ModelIntel {
   name?: string;
   domain?: string;
+  productFocus?: string;
+  focusReason?: string;
   segment?: string;
   oneLiner?: string;
   hq?: string;
@@ -211,6 +240,13 @@ export async function GET(req: NextRequest) {
   // Cache-first: a previously generated brief returns instantly. ?fresh=1
   // (the "Update brief" button) skips the cache and regenerates.
   const fresh = req.nextUrl.searchParams.get("fresh") === "1";
+  // ?product=ai_architect pins the brief to AI Architect (a brief explicitly
+  // meant for it keeps that focus). Anything else: Governor leads and the
+  // model may still choose AI Architect from the evidence.
+  const productParam = req.nextUrl.searchParams.get("product")?.trim();
+  const pinned: BitoProduct | undefined = (VALID_PRODUCTS as string[]).includes(productParam ?? "")
+    ? (productParam as BitoProduct)
+    : undefined;
   if (!fresh && supabaseConfigured()) {
     const cached = await fetchBrief(company);
     if (cached) {
@@ -243,8 +279,12 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await callClaudeWithWebSearch({
-      system: SYSTEM,
-      user: `Research "${company}" and produce the lean Bito intel brief JSON. Today's date: ${new Date().toISOString().slice(0, 10)}.${orgFactsLine}`,
+      system: buildSystem(pinned ?? "governor"),
+      user:
+        `Research "${company}" and produce the lean Bito intel brief JSON. Today's date: ${new Date().toISOString().slice(0, 10)}.${orgFactsLine}` +
+        (pinned
+          ? `\nPRODUCT FOCUS PINNED BY THE REP: ${pinned}. Keep the whole brief about that product.`
+          : ""),
       maxSearches: 6,
       // 5000 was set when outreach was four short strings. The Aug 2026 spec
       // replaced those with a connect note plus THREE subject+body messages
@@ -338,6 +378,14 @@ export async function GET(req: NextRequest) {
     const intel: CompanyIntel = {
       name: String(parsed.name),
       domain: parsed.domain ? String(parsed.domain) : undefined,
+      // A pin outranks the model's choice; otherwise the model's choice,
+      // defaulting to Governor if it returned something invalid.
+      productFocus:
+        pinned ??
+        ((VALID_PRODUCTS as string[]).includes(String(parsed.productFocus))
+          ? (parsed.productFocus as BitoProduct)
+          : "governor"),
+      focusReason: parsed.focusReason ? String(parsed.focusReason).slice(0, 300) : undefined,
       segment: SEGMENT_MAP[segmentId],
       oneLiner: String(parsed.oneLiner || ""),
       hq: parsed.hq ? String(parsed.hq) : undefined,
