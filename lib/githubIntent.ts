@@ -190,5 +190,13 @@ export async function githubIntentSignals(region: RegionId): Promise<{
       date: lastDate.toISOString().slice(0, 10),
     });
   }
-  return { configured: true, ok: true, signals, qualifying: companies.size };
+  // Two domains can resolve to one Apollo name; a batch upsert that hits the
+  // same (account, type) twice fails whole, so keep the stronger row.
+  const byAccount = new Map<string, Signal>();
+  for (const s of signals) {
+    const k = s.account.toLowerCase();
+    const prev = byAccount.get(k);
+    if (!prev || s.strength > prev.strength) byAccount.set(k, s);
+  }
+  return { configured: true, ok: true, signals: [...byAccount.values()], qualifying: companies.size };
 }
