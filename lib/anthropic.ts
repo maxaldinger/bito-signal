@@ -8,9 +8,16 @@ import type { LiveCitation } from "./types";
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+// Sep 2026 list prices, per MTok in/out: Sonnet 5 $2/$10, Sonnet 4.6 $3/$15,
+// Haiku 4.5 $1/$5; web search is $10 per 1,000 searches on top. Sonnet 5 is
+// the cheapest Sonnet-class model and the current one, so it is the default
+// for the research-grade calls (briefs, on-demand sections, proposals, rep
+// chat). Its tokenizer counts ~30% more tokens than 4.6 for the same text, so
+// the net saving on tokens is ~13%; the larger saving is the prompt caching
+// below. ANTHROPIC_MODEL overrides this (a stale override pins the old price).
+const DEFAULT_MODEL = "claude-sonnet-5";
 // Cheaper, faster model for high-volume, structured, low/no-search calls
-// (signal grading, structured extraction from notes). ~3x cheaper than Sonnet.
+// (signal grading, card signals and blurbs, ICP classification, openers).
 // Override with ANTHROPIC_MODEL_FAST; callers opt in via opts.model = FAST_MODEL.
 export const FAST_MODEL = process.env.ANTHROPIC_MODEL_FAST?.trim() || "claude-haiku-4-5";
 
@@ -38,6 +45,30 @@ export interface AnthropicCallOptions {
   // model can browse, summarize, and emit structured JSON in one shot.
   maxTokens?: number;
   temperature?: number;
+  /**
+   * Prompt caching (top-level automatic cache_control). Default: ON whenever
+   * web search is on. With a cache marker present the API also places a
+   * breakpoint after every server-tool result, so each search iteration reads
+   * the growing prefix at 0.1x instead of re-buying it at full price; without
+   * the marker there is no such breakpoint, and a six-search brief pays for
+   * its context seven times over. Default OFF for single-shot no-search calls,
+   * where a 5-minute cache write costs 1.25x and nothing follows to read it.
+   */
+  cache?: boolean;
+}
+
+/** Token accounting for one call, as billed (see the pricing note above). */
+export interface AnthropicUsage {
+  model: string;
+  /** Input tokens bought at the base price (not served from cache). */
+  inputTokens: number;
+  /** Tokens written to the prompt cache this call (1.25x base). */
+  cacheWriteTokens: number;
+  /** Tokens read from the prompt cache (0.1x base). */
+  cacheReadTokens: number;
+  outputTokens: number;
+  searches: number;
+  ms: number;
 }
 
 export interface AnthropicCallResult {
@@ -49,6 +80,7 @@ export interface AnthropicCallResult {
   /** true when the response was cut off (stop_reason max_tokens / pause_turn). */
   truncated: boolean;
   stopReason: string | null;
+  usage: AnthropicUsage;
   raw: unknown;              // pass-through for debugging
 }
 
@@ -160,6 +192,10 @@ interface AnthropicResponse {
   content?: AnthropicContentBlock[];
   stop_reason?: string;
   usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
     server_tool_use?: { web_search_requests?: number };
   };
 }
@@ -212,16 +248,32 @@ export async function callClaudeWithWebSearch(
     messages,
   };
   if (opts.webSearch !== false) body.tools = [tool];
+  const cache = opts.cache ?? opts.webSearch !== false;
+  if (cache) body.cache_control = { type: "ephemeral" };
 
-  const res = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const post = (b: Record<string, unknown>) =>
+    fetch(ENDPOINT, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(b),
+    });
+
+  const t0 = Date.now();
+  let res = await post(body);
+  if (res.status === 400 && cache) {
+    // A model or API version that rejects the top-level cache marker must
+    // still answer: retry once without caching rather than fail the call.
+    const errText = await res.clone().text().catch(() => "");
+    if (/cache_control/i.test(errText)) {
+      const uncached = { ...body };
+      delete uncached.cache_control;
+      res = await post(uncached);
+    }
+  }
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
@@ -240,10 +292,18 @@ export async function callClaudeWithWebSearch(
   }
 
   const data: AnthropicResponse = await res.json();
-  return extractFromResponse(data);
+  const out = extractFromResponse(data, model, Date.now() - t0);
+  // One line per call in the function logs, so spend can be reviewed by route
+  // and the cache confirmed to be engaging (cacheRead > 0 on search calls).
+  // Never logs prompt content.
+  const u = out.usage;
+  console.log(
+    `[anthropic] ${u.model} in=${u.inputTokens} cacheWrite=${u.cacheWriteTokens} cacheRead=${u.cacheReadTokens} out=${u.outputTokens} searches=${u.searches} stop=${out.stopReason ?? "?"} ${u.ms}ms`,
+  );
+  return out;
 }
 
-function extractFromResponse(data: AnthropicResponse): AnthropicCallResult {
+function extractFromResponse(data: AnthropicResponse, model: string, ms: number): AnthropicCallResult {
   const blocks = Array.isArray(data.content) ? data.content : [];
 
   // 1. Concatenate the model's spoken text (cite markup stripped — see
@@ -308,13 +368,23 @@ function extractFromResponse(data: AnthropicResponse): AnthropicCallResult {
   }
 
   const stopReason = data.stop_reason ?? null;
+  const searches = data.usage?.server_tool_use?.web_search_requests ?? 0;
   return {
     text,
     citations: Array.from(citationMap.values()),
-    searchCount: data.usage?.server_tool_use?.web_search_requests ?? 0,
+    searchCount: searches,
     searchErrors,
     truncated: stopReason === "max_tokens" || stopReason === "pause_turn",
     stopReason,
+    usage: {
+      model,
+      inputTokens: data.usage?.input_tokens ?? 0,
+      cacheWriteTokens: data.usage?.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: data.usage?.cache_read_input_tokens ?? 0,
+      outputTokens: data.usage?.output_tokens ?? 0,
+      searches,
+      ms,
+    },
     raw: data,
   };
 }

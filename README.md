@@ -3,8 +3,9 @@
 Live sales-intelligence dashboard for [Bito](https://bito.ai) — AI code review for
 SWE-heavy companies with large, complex codebases.
 
-Every signal and every intel brief is generated **live** by Anthropic
-`claude-sonnet-4-20250514` with the `web_search` server tool. There is no static
+Every signal and every intel brief is generated **live** by Anthropic Claude
+(`claude-sonnet-5` for research-grade calls, `claude-haiku-4-5` for grading and
+enrichment) with the `web_search` server tool. There is no static
 data, no seeded companies, no canned briefs. An optional enrichment layer adds
 firmographics, contacts and real codebase stats from Apollo, Hunter, GitHub,
 Proxycurl and Crunchbase.
@@ -22,7 +23,7 @@ Proxycurl and Crunchbase.
 
 | Route | Method | Purpose |
 | --- | --- | --- |
-| `/api/signals?type=X` | GET | Bucket scan. Default: FREE discovery — structured sources (GDELT, Hacker News, GitHub, TechCrunch RSS, Apollo) fetch raw candidates, one no-search Claude call grades them (zero billed searches). `&deep=1` opts into the claude-sonnet-4 + web_search deep scan. |
+| `/api/signals?type=X` | GET | Bucket scan. Default: FREE discovery — structured sources (GDELT, Hacker News, GitHub, TechCrunch RSS, Apollo) fetch raw candidates, one no-search Claude call grades them (zero billed searches). `&deep=1` opts into the Sonnet + web_search deep scan. |
 | `/api/intel?company=X` | GET | Full intel brief for one company |
 | `/api/assist` | POST | Sales assist chat (`{mode, tone, persona, messages}`) |
 | `/api/enrich?company=X[&domain=Y][&github=org][&linkedin=url]` | GET | Orchestrator — fans out to all configured providers, merges a rollup |
@@ -48,7 +49,8 @@ npm run dev
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | **Yes** | Web search must be enabled for the workspace (Anthropic Console → Settings → Privacy). |
-| `ANTHROPIC_MODEL` | No | Defaults to `claude-sonnet-4-20250514`. |
+| `ANTHROPIC_MODEL` | No | Research-grade model. Defaults to `claude-sonnet-5` ($2/$10 per MTok); a stale override pins an older, dearer model. |
+| `ANTHROPIC_MODEL_FAST` | No | Grading/enrichment model. Defaults to `claude-haiku-4-5` ($1/$5 per MTok). |
 | `ANTHROPIC_WEB_SEARCH_MAX` | No | Searches per request (default 5). |
 | `APOLLO_API_KEY` | No | Firmographics, tech stack, people. People search requires a **master** API key on current Apollo plans; with a scoped key you still get org data. |
 | `HUNTER_API_KEY` | No | Email pattern + finder + verification. |

@@ -138,7 +138,7 @@ function BriefSkeleton({ company }: { company: string }) {
         researching {company} live — {LOADING_LINES[lineIdx]}
       </p>
       <p className="font-mono text-xs text-ink-500">
-        claude-sonnet-4.6 + web_search · typically 30-60s
+        Claude + web_search · typically 30-60s
       </p>
       {Array.from({ length: 3 }).map((_, i) => (
         <div key={i} className="rounded-lg border border-ink-700 bg-ink-900 p-5">

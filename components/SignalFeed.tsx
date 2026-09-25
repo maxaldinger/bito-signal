@@ -238,7 +238,7 @@ export function SignalFeed({
         <h2 className="text-xl font-bold text-ink-50">Signal Feed</h2>
         <p className="mt-1 text-sm text-ink-300">
           Live buying signals across SWE-heavy companies — hiring, OSS, M&A, funding,
-          AI-tooling spend. Generated fresh by claude-sonnet-4.6 + web search.
+          AI-tooling spend. Generated fresh by Claude + web search.
         </p>
       </div>
 
@@ -478,7 +478,7 @@ export function SignalFeed({
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-500" />
         <span>
           Signals are generated live by{" "}
-          <span className="font-mono text-ink-400">claude-sonnet-4.6</span> +{" "}
+          <span className="font-mono text-ink-400">Claude</span> +{" "}
           <span className="font-mono text-ink-400">web_search</span> and the Apollo ICP
           sweep{cacheMode ? ", then cached in Supabase — each pull adds new results and refreshes repeat sightings" : ""}.
           Strength is an ICP-fit estimate, and sources are linked on each card. Verify
