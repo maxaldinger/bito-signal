@@ -51,6 +51,7 @@ npm run dev
 | `ANTHROPIC_API_KEY` | **Yes** | Web search must be enabled for the workspace (Anthropic Console → Settings → Privacy). |
 | `ANTHROPIC_MODEL` | No | Research-grade model. Defaults to `claude-sonnet-5` ($2/$10 per MTok); a stale override pins an older, dearer model. |
 | `ANTHROPIC_MODEL_FAST` | No | Grading/enrichment model. Defaults to `claude-haiku-4-5` ($1/$5 per MTok). |
+| `ANTHROPIC_EFFORT` | No | `low` / `medium` / `high` for models that take it (Sonnet 5, Sonnet 4.6). Defaults to `medium`. Thinking is always sent as disabled on models that think by default. |
 | `ANTHROPIC_WEB_SEARCH_MAX` | No | Searches per request (default 5). |
 | `APOLLO_API_KEY` | No | Firmographics, tech stack, people. People search requires a **master** API key on current Apollo plans; with a scoped key you still get org data. |
 | `HUNTER_API_KEY` | No | Email pattern + finder + verification. |

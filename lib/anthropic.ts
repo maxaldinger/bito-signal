@@ -21,6 +21,30 @@ const DEFAULT_MODEL = "claude-sonnet-5";
 // Override with ANTHROPIC_MODEL_FAST; callers opt in via opts.model = FAST_MODEL.
 export const FAST_MODEL = process.env.ANTHROPIC_MODEL_FAST?.trim() || "claude-haiku-4-5";
 
+export type Effort = "low" | "medium" | "high";
+const EFFORTS: readonly Effort[] = ["low", "medium", "high"];
+// Effort (output_config.effort) applies to every output token and, in a
+// tool loop, to how many tool calls the model makes. Sonnet 5 defaults to
+// high; medium is its documented cost step-down and matches Sonnet 4.6 at
+// high, the level every prompt here was written against. ANTHROPIC_EFFORT
+// overrides it (low = fewer, terser searches and output).
+const DEFAULT_EFFORT: Effort = (() => {
+  const e = process.env.ANTHROPIC_EFFORT?.trim().toLowerCase();
+  return (EFFORTS as readonly string[]).includes(e ?? "") ? (e as Effort) : "medium";
+})();
+
+// Per-model request shape (Sep 2026 docs). A wrong guess is not fatal: a 400
+// that names one of these fields is retried once without it (see below).
+// Sonnet 5, Opus 4.7+ and the Fable/Mythos line reject any non-default
+// temperature on every request; Haiku 4.5, Sonnet 4.6/4.5, Opus 4.6/4.5 accept it.
+const acceptsTemperature = (m: string) => /haiku|sonnet-4|opus-4-[56](?:-|$)/i.test(m);
+// Sonnet 5 and Opus 5 think by default (billed as output tokens) and accept
+// thinking: disabled. Opus 5.5 / Fable / Mythos cannot switch it off.
+const thinksByDefault = (m: string) => /^claude-(?:sonnet-5|opus-5)(?:-\d{8})?$/i.test(m);
+// Effort is supported on Sonnet 5, Sonnet 4.6, Opus 4.5+, Fable and Mythos; not Haiku.
+const acceptsEffort = (m: string) => /sonnet-5|sonnet-4-6|opus-(?:4-[5-8]|5)|fable|mythos/i.test(m);
+const OPTIONAL_FIELDS = ["cache_control", "output_config", "thinking", "temperature"] as const;
+
 export interface AnthropicCallOptions {
   system: string;
   user: string;
@@ -44,7 +68,11 @@ export interface AnthropicCallOptions {
   // Token cap for the model's reasoning + output. Defaults are generous so the
   // model can browse, summarize, and emit structured JSON in one shot.
   maxTokens?: number;
+  /** Sampling temperature. Sent only to models that accept one (see
+   *  acceptsTemperature); Sonnet 5 rejects it, so there it is silently omitted. */
   temperature?: number;
+  /** Effort level for models that support it (default: ANTHROPIC_EFFORT or medium). */
+  effort?: Effort;
   /**
    * Prompt caching (top-level automatic cache_control). Default: ON whenever
    * web search is on. With a cache marker present the API also places a
@@ -69,6 +97,10 @@ export interface AnthropicUsage {
   outputTokens: number;
   searches: number;
   ms: number;
+  /** "off" when thinking was explicitly disabled, "default" otherwise. */
+  thinking: "off" | "default";
+  /** Effort sent, or undefined on models that do not take it. */
+  effort?: Effort;
 }
 
 export interface AnthropicCallResult {
@@ -243,10 +275,16 @@ export async function callClaudeWithWebSearch(
   const body: Record<string, unknown> = {
     model,
     max_tokens: opts.maxTokens ?? 4096,
-    temperature: opts.temperature ?? 0.4,
     system: opts.system,
     messages,
   };
+  if (acceptsTemperature(model)) body.temperature = opts.temperature ?? 0.4;
+  // Reasoning off: nothing here needs a scratchpad (research extraction into
+  // a fixed schema, grading, drafting), and thinking tokens bill as output.
+  const thinkingOff = thinksByDefault(model);
+  if (thinkingOff) body.thinking = { type: "disabled" };
+  const effort = acceptsEffort(model) ? (opts.effort ?? DEFAULT_EFFORT) : undefined;
+  if (effort) body.output_config = { effort };
   if (opts.webSearch !== false) body.tools = [tool];
   const cache = opts.cache ?? opts.webSearch !== false;
   if (cache) body.cache_control = { type: "ephemeral" };
@@ -264,14 +302,16 @@ export async function callClaudeWithWebSearch(
 
   const t0 = Date.now();
   let res = await post(body);
-  if (res.status === 400 && cache) {
-    // A model or API version that rejects the top-level cache marker must
-    // still answer: retry once without caching rather than fail the call.
+  if (res.status === 400) {
+    // A model that rejects one of the optional knobs (a different default via
+    // ANTHROPIC_MODEL, an API change) must still answer: drop exactly the
+    // fields the error names and retry once, rather than fail the call.
     const errText = await res.clone().text().catch(() => "");
-    if (/cache_control/i.test(errText)) {
-      const uncached = { ...body };
-      delete uncached.cache_control;
-      res = await post(uncached);
+    const dropped = OPTIONAL_FIELDS.filter((k) => k in body && new RegExp(k, "i").test(errText));
+    if (dropped.length) {
+      const retry = { ...body };
+      for (const k of dropped) delete retry[k];
+      res = await post(retry);
     }
   }
 
@@ -292,18 +332,24 @@ export async function callClaudeWithWebSearch(
   }
 
   const data: AnthropicResponse = await res.json();
-  const out = extractFromResponse(data, model, Date.now() - t0);
+  const out = extractFromResponse(data, model, Date.now() - t0, thinkingOff ? "off" : "default", effort);
   // One line per call in the function logs, so spend can be reviewed by route
   // and the cache confirmed to be engaging (cacheRead > 0 on search calls).
   // Never logs prompt content.
   const u = out.usage;
   console.log(
-    `[anthropic] ${u.model} in=${u.inputTokens} cacheWrite=${u.cacheWriteTokens} cacheRead=${u.cacheReadTokens} out=${u.outputTokens} searches=${u.searches} stop=${out.stopReason ?? "?"} ${u.ms}ms`,
+    `[anthropic] ${u.model} think=${u.thinking} effort=${u.effort ?? "-"} in=${u.inputTokens} cacheWrite=${u.cacheWriteTokens} cacheRead=${u.cacheReadTokens} out=${u.outputTokens} searches=${u.searches} stop=${out.stopReason ?? "?"} ${u.ms}ms`,
   );
   return out;
 }
 
-function extractFromResponse(data: AnthropicResponse, model: string, ms: number): AnthropicCallResult {
+function extractFromResponse(
+  data: AnthropicResponse,
+  model: string,
+  ms: number,
+  thinking: "off" | "default",
+  effort: Effort | undefined,
+): AnthropicCallResult {
   const blocks = Array.isArray(data.content) ? data.content : [];
 
   // 1. Concatenate the model's spoken text (cite markup stripped — see
@@ -384,6 +430,8 @@ function extractFromResponse(data: AnthropicResponse, model: string, ms: number)
       outputTokens: data.usage?.output_tokens ?? 0,
       searches,
       ms,
+      thinking,
+      effort,
     },
     raw: data,
   };
