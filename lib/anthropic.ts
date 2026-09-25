@@ -174,8 +174,66 @@ function balancedSpans(s: string): string[] {
   return spans.sort((a, b) => b.len - a.len).map((x) => x.text);
 }
 
+/** Minimal, string-aware repair for model JSON: escapes raw control
+ *  characters (newline, tab, ...) that sit INSIDE string literals, and drops
+ *  trailing commas before } or ]. Both are invalid JSON that a model emits
+ *  occasionally; neither changes the meaning of a well-formed document, which
+ *  passes through unchanged. */
+function repairJSON(s: string): string {
+  let out = "";
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        out += ch;
+      } else if (ch === "\\") {
+        esc = true;
+        out += ch;
+      } else if (ch === '"') {
+        inStr = false;
+        out += ch;
+      } else if (ch < " ") {
+        out += ch === "\n" ? "\\n" : ch === "\r" ? "\\r" : ch === "\t" ? "\\t" : `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+      } else {
+        out += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      out += ch;
+      continue;
+    }
+    if (ch === ",") {
+      // Trailing comma: the next non-space character closes the container.
+      let j = i + 1;
+      while (j < s.length && /\s/.test(s[j])) j++;
+      if (s[j] === "}" || s[j] === "]") continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function tryParse<T>(s: string): T | undefined {
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    /* fall through to the repaired form */
+  }
+  try {
+    return JSON.parse(repairJSON(s)) as T;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Pull the model's JSON out of a response that may carry prose around it.
- *  Tries the whole string, then every balanced span largest-first. */
+ *  Tries the whole string, then every balanced span largest-first; each
+ *  candidate is tried as-is and then once repaired (see repairJSON). */
 export function extractJSON<T = unknown>(text: string): T | null {
   if (!text) return null;
   const candidate = text
@@ -183,19 +241,30 @@ export function extractJSON<T = unknown>(text: string): T | null {
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```$/i, "")
     .trim();
-  try {
-    return JSON.parse(candidate) as T;
-  } catch {
-    /* fall through */
-  }
+  const whole = tryParse<T>(candidate);
+  if (whole !== undefined) return whole;
   for (const span of balancedSpans(candidate)) {
-    try {
-      return JSON.parse(span) as T;
-    } catch {
-      /* try the next span */
-    }
+    const parsed = tryParse<T>(span);
+    if (parsed !== undefined) return parsed;
   }
   return null;
+}
+
+/** For logs when extractJSON returns null: whether the text holds a JSON
+ *  attempt at all, and if so the parse error and ~80 characters around it. */
+export function diagnoseJSON(text: string): { attempted: boolean; detail: string } {
+  const spans = balancedSpans(text.trim());
+  const largest = spans[0];
+  if (!largest || largest.length < 200) return { attempted: false, detail: "no JSON object in the text" };
+  try {
+    JSON.parse(repairJSON(largest));
+    return { attempted: true, detail: "largest span parses after repair" };
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    const pos = Number(msg.match(/position (\d+)/)?.[1]);
+    const ctx = Number.isFinite(pos) ? JSON.stringify(largest.slice(Math.max(0, pos - 40), pos + 40)) : "";
+    return { attempted: true, detail: `${msg}${ctx ? ` near ${ctx}` : ""}` };
+  }
 }
 
 interface AnthropicContentBlock {
@@ -354,13 +423,24 @@ function extractFromResponse(
 
   // 1. Concatenate the model's spoken text (cite markup stripped — see
   //    stripCiteMarkup; it would otherwise leak into UI strings and JSON).
-  const text = stripCiteMarkup(
-    blocks
-      .filter((b) => b.type === "text" && typeof b.text === "string")
-      .map((b) => b.text as string)
-      .join("\n")
-      .trim(),
-  );
+  //    Consecutive text blocks are ONE continuous text that the API split at
+  //    citation boundaries ("Based on the search results, " + the cited
+  //    span), so they join with no separator. A newline goes only where a
+  //    tool block sits between two runs of text. Joining every block with
+  //    "\n" put raw newlines inside JSON string values wherever the model
+  //    cited mid-string: Sonnet 5 does, and 10 of 22 briefs failed to parse.
+  let joined = "";
+  let prevText = false;
+  for (const b of blocks) {
+    if (b.type === "text" && typeof b.text === "string") {
+      if (joined && !prevText) joined += "\n";
+      joined += b.text;
+      prevText = true;
+    } else {
+      prevText = false;
+    }
+  }
+  const text = stripCiteMarkup(joined.trim());
 
   // 2. Citations come from two places:
   //    - inline `citations` arrays on text blocks, and

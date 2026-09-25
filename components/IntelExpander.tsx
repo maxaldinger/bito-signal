@@ -67,8 +67,9 @@ export function IntelExpander({
   // Closing a card-attached brief fully collapses the record to its slim row
   // (Max, Aug 28) — "close brief" and "collapse" are one gesture. Framed
   // (searched/orphan) briefs have no card to collapse, so they just close.
-  // The error close below stays a plain close: collapsing a failed brief's
-  // card would bury the Retry button.
+  // That includes a FAILED brief's Close (Max, Sep 25: closing the brief in
+  // the feed has to collapse the account the way Signal 2000 does); Retry
+  // stays on the error box for anyone who wants another pass.
   const closeFully = () => {
     if (!framed) collapseCard(company);
     close();
@@ -91,7 +92,7 @@ export function IntelExpander({
               company={company}
               error={error || "No brief returned."}
               onRetry={onRetry}
-              onClose={close}
+              onClose={closeFully}
             />
           ) : (
             <>

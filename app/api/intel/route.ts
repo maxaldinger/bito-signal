@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callClaudeWithWebSearch, extractJSON } from "@/lib/anthropic";
+import { callClaudeWithWebSearch, diagnoseJSON, extractJSON } from "@/lib/anthropic";
 import { bitoContextFor, type BitoProduct } from "@/lib/bito";
 import { apolloOrgFacts } from "@/lib/enrich/apollo";
 import { apolloOrgLookup } from "@/lib/githubProspect/enrich";
@@ -305,9 +305,10 @@ export async function GET(req: NextRequest) {
       // brief" has several distinct causes (the model answered in prose, it
       // returned only tool blocks, it emitted JSON we mis-sliced) and the
       // message alone can't tell them apart.
+      const diag = diagnoseJSON(result.text);
       console.error(
         `[intel] ${company} unparseable: stop=${result.stopReason} truncated=${result.truncated} ` +
-          `searches=${result.searchCount} textLen=${result.text.length} ` +
+          `searches=${result.searchCount} textLen=${result.text.length} json=${diag.detail} ` +
           `head=${JSON.stringify(result.text.slice(0, 200))} tail=${JSON.stringify(result.text.slice(-200))}`,
       );
       // THE MODEL ANSWERED IN PROSE. Not a parse failure and emphatically not
@@ -320,7 +321,11 @@ export async function GET(req: NextRequest) {
       //
       // The explanation is the most useful thing the call produced, so it is
       // what gets shown.
-      const prose = !result.truncated && !parsed && result.text.trim().length > 0;
+      // A text that CONTAINS a brief-sized JSON object is not an explanation:
+      // the model wrote the brief and it failed to parse (Sep 25: ten Sonnet 5
+      // briefs were reported as "an explanation instead" while each one ended
+      // in a complete JSON block).
+      const prose = !result.truncated && !parsed && result.text.trim().length > 0 && !diag.attempted;
       if (prose) {
         return NextResponse.json(
           {
@@ -337,7 +342,9 @@ export async function GET(req: NextRequest) {
         ? `the response was cut off (stop_reason: ${result.stopReason})`
         : !result.text.trim()
           ? "the model returned no text at all (only search calls)"
-          : "the brief came back without a complete ICP score";
+          : !parsed && diag.attempted
+            ? "the brief came back malformed and could not be read"
+            : "the brief came back without a complete ICP score";
       return NextResponse.json(
         {
           // Don't call a truncation transient — retrying an over-budget brief

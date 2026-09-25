@@ -12,6 +12,9 @@
 //     output_config, cache_control) is retried once without that field only
 //   - usage (input / cache write / cache read / output / searches) is read
 //     from the response and logged as one line with the think/effort flags
+//   - text blocks split at citations rejoin with no separator (a citation
+//     inside a JSON string must not become a raw newline), and extractJSON
+//     repairs raw control characters and trailing commas
 //
 // Usage: npx tsx scripts/anthropic-client-check.mts
 
@@ -20,7 +23,7 @@ delete process.env.ANTHROPIC_MODEL;
 delete process.env.ANTHROPIC_MODEL_FAST;
 delete process.env.ANTHROPIC_EFFORT;
 
-const { callClaudeWithWebSearch, FAST_MODEL } = await import("../lib/anthropic");
+const { callClaudeWithWebSearch, FAST_MODEL, extractJSON, diagnoseJSON } = await import("../lib/anthropic");
 
 type Body = Record<string, unknown>;
 const sent: Body[] = [];
@@ -134,6 +137,42 @@ script = [() => err400("max_tokens: must be positive")];
 let threw = "";
 try { await callClaudeWithWebSearch({ system: "s", user: "u" }); } catch (e) { threw = String((e as Error).message); }
 check(sent.length === before6 + 1 && /Anthropic 400/.test(threw), "unrelated 400 is not retried and surfaces", threw.slice(0, 80));
+
+// 7. Citation-split text blocks (the Sep 25 Sonnet 5 brief failures). Web
+//    search always cites, and the API splits the answer into consecutive text
+//    blocks at each cited span. Contiguous blocks must join with NO separator,
+//    or a citation inside a JSON string value becomes a raw newline and the
+//    brief fails to parse. A tool block between two runs still gets a newline.
+const briefJson = (evidencePrefix: string) => ({
+  content: [
+    { type: "text", text: "UserTesting is now private. Let me get leadership signal." },
+    { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: { query: "usertesting cto" } },
+    { type: "web_search_tool_result", tool_use_id: "srvtoolu_1", content: [{ type: "web_search_result", url: "https://example.com/a", title: "A" }] },
+    { type: "text", text: 'I have enough to build the brief.\n\n```json\n{\n "name": "UserTesting",\n "evidence": "' + evidencePrefix },
+    { type: "text", text: "Neal Gottsacker was appointed CTO in April 2026", citations: [{ type: "web_search_result_location", url: "https://example.com/a", title: "A", cited_text: "..." }] },
+    { type: "text", text: ', per the announcement.",\n "icp": {"total": 71},\n}\n```' },
+  ],
+  stop_reason: "end_turn",
+  usage: { input_tokens: 8, output_tokens: 3454, server_tool_use: { web_search_requests: 5 } },
+});
+script = [() => reply(briefJson("Leadership: "))];
+const r7 = await callClaudeWithWebSearch({ system: "s", user: "u" });
+const p7 = extractJSON<{ name?: string; evidence?: string; icp?: { total?: number } }>(r7.text);
+check(p7?.name === "UserTesting" && p7?.icp?.total === 71, "a brief split by a mid-string citation parses", JSON.stringify(p7)?.slice(0, 90) ?? "null");
+check(p7?.evidence === "Leadership: Neal Gottsacker was appointed CTO in April 2026, per the announcement.",
+  "the cited span rejoins the string with no inserted newline", JSON.stringify(p7?.evidence));
+check(r7.text.startsWith("UserTesting is now private. Let me get leadership signal.\nI have enough"),
+  "text runs separated by a tool block still get a newline between them", JSON.stringify(r7.text.slice(0, 90)));
+
+// 8. The repair pass: raw control characters inside strings, trailing commas.
+check(extractJSON<{ a?: string }>('{"a": "line one\\nline two"}')?.a === "line one\nline two", "valid JSON is unchanged by the repair path");
+check(extractJSON<{ a?: string }>('{"a": "line one\nline two"}')?.a === "line one\nline two", "a raw newline inside a string value is repaired");
+check(JSON.stringify(extractJSON('{"a": [1, 2,], "b": {"c": 3,},}')) === '{"a":[1,2],"b":{"c":3}}', "trailing commas are repaired");
+check(extractJSON<{ a?: string }>('{"a": "x, }"}')?.a === "x, }", "a comma-brace inside a string is left alone");
+const broken = '{"name": "X", "evidence": "' + "y".repeat(300) + '" "missing": "comma"}';
+const d = diagnoseJSON(`Narration first. ${broken}`);
+check(d.attempted && /near/.test(d.detail), "diagnoseJSON reports a JSON attempt with the error position", d.detail.slice(0, 90));
+check(!diagnoseJSON("It was acquired by Disney in 2019; there is no standalone company.").attempted, "plain prose is not reported as a JSON attempt");
 
 console.log = origLog;
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
