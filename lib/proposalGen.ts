@@ -210,7 +210,8 @@ HARD RULES:
 - Use ONLY the account facts provided, and treat their ORDER as their priority. NEVER invent initiatives, names, numbers, quotes, services, technologies, or events for the company. If a fact you would like is missing, write around it in general terms for a company of their kind; never fill the gap.
 - Every paragraph must be usable by anyone at the account: never address one person, never assume a title or role.
 - No statistics other than these, verbatim if used: 47% lower token cost per task; up to 68% on individual tasks; $4.12 to $2.14 per task; $6.81 to $1.13 for a full session; 51.9% to 70.1% on SWE-Bench Pro. At most two figures total across everything you write.
-- Do not restate the ROI table's dollar figures; the document computes and prints those itself.`;
+- Do not restate the ROI table's dollar figures; the document computes and prints those itself.
+- Never propose, promise or imply an A/B test, controlled benchmark, bake-off, trial comparison or instrumented "with and without" measurement on the customer's workload. Bito does not currently offer one. Citing Bito's own published measurements is fine.`;
 
 function modePrompt(mode: PositioningMode, company: string): string {
   if (mode === "operational") {
@@ -225,7 +226,7 @@ Return ONLY JSON:
 - headline: 8-14 words, names ${company} or its platform, states the operational outcome. NO dollar figures, NO percentages, NO savings claims. Good shapes: "Reducing AI Agent Overhead Across <platform>'s Microservice Architecture", "Giving Coding Agents System-Level Context Across <company>'s <platform>", "Grounding Coding Agents in <company>'s Actual Service Architecture".
 - subtitle: one sentence, 15-30 words, what Governor changes for an agent working in their environment. No figures.
 - execSummary: exactly 3 paragraphs, 55-95 words each. Paragraph 1: their engineering environment and workflow, built from the research (architecture, services, clouds, repos, org spread), and the operational friction that creates for coding agents. Paragraph 2: why coding agents struggle there today (rediscovering service relationships, APIs, patterns and cross-repo dependencies before useful code) and how Governor changes that workflow (context up front, consistent routing). Paragraph 3: the expected engineering impact for them, with at most one approved figure. Economics may be mentioned in one clause, framed as an additional benefit.
-- cta: 40-70 words proposing an instrumented A/B on THEIR repositories and real tasks, framed around agent overhead and quality rather than the bill, ending with scheduling a brief technical kickoff.`;
+- cta: 40-70 words proposing to start with one team on THEIR repositories and real tasks (a base-URL change in the harness they already use), framed around agent overhead and quality rather than the bill, ending with scheduling a brief technical kickoff.`;
   }
   return `POSITIONING MODE: COST
 
@@ -235,13 +236,13 @@ Return ONLY JSON:
 {"execSummary": ["p1", "p2"], "environment": ["p1"], "cta": "..."}
 - execSummary: exactly 2 paragraphs, 50-90 words each. Paragraph 1: why AI development costs rise as coding agents scale at a company like theirs, tied to the provided facts (headcount, adoption signals, spend assumptions). Paragraph 2: how Governor reduces them, through context up front and model routing economics, with at most one approved figure.
 - environment: 1-2 paragraphs, 40-80 words each, on their relevant engineering and architecture context from the research only. If the research is thin, one short paragraph that states only what is known.
-- cta: 40-70 words proposing the controlled A/B benchmark on THEIR codebase and tasks to replace the modeled assumptions with measured numbers, ending with scheduling a brief technical kickoff.`;
+- cta: 40-70 words proposing to start with one team on THEIR codebase and real tasks, with the modeled assumptions above revisited against their actual spend once Governor is running, ending with scheduling a brief technical kickoff.`;
 }
 
 export function buildSystemPrompt(mode: PositioningMode, company: string): string {
   return `${BITO_CONTEXT}
 
-You write the personalized sections of a Bito GOVERNOR proposal document. Governor is Bito's context-driven model router: a transparent layer between a team's coding harness (Claude Code, Cursor, Codex, Copilot) and the models — the Code Context Engine injects the right code up front (−47% token cost per task, up to −68%), and the Model Router sends each request to the lowest-cost model that clears the quality bar. Drop-in: point the harness's base URL at Governor, nothing else changes. The document's fixed sections (how Governor works, rollout, proof points, validation, why Bito) and its ROI table are written by the system; you write only the fields requested below.
+You write the personalized sections of a Bito GOVERNOR proposal document. Governor is Bito's context-driven model router: a transparent layer between a team's coding harness (Claude Code, Cursor, Codex, Copilot) and the models — the Code Context Engine injects the right code up front (−47% token cost per task, up to −68%), and the Model Router sends each request to the lowest-cost model that clears the quality bar. Drop-in: point the harness's base URL at Governor, nothing else changes. The document's fixed sections (how Governor works, rollout, proof points, why Bito) and its ROI table are written by the system; you write only the fields requested below.
 
 ${SHARED_RULES}
 

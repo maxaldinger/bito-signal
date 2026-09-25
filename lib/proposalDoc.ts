@@ -222,10 +222,9 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
         )
         .join("");
       const spendLine = r.spendConfirmed
-        ? `Uses the ${usd(r.allowanceMo)} per engineer per month in agent tokens your team shared;
-      the instrumented A/B below replaces it with your measured per-task numbers.`
+        ? `Uses the ${usd(r.allowanceMo)} per engineer per month in agent tokens your team shared.`
         : `Assumes ${usd(r.allowanceMo)} per engineer per month in agent tokens — an assumption to make the
-      math concrete; the instrumented A/B below replaces it with your measured per-task numbers.`;
+      math concrete, not a measurement of your spend.`;
       return `
       <table class="cs">
         <thead><tr><th>Engineers on coding agents</th><th class="num">Token spend / yr</th><th class="num">Saved at −47%</th><th class="num">Saved at −83%</th></tr></thead>
@@ -257,8 +256,7 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
           </tr>
         </tbody>
       </table>
-      <p class="note">The allowance is an assumption to make the math concrete — the instrumented A/B below replaces
-      it with your real per-task numbers.</p>`;
+      <p class="note">The allowance is an assumption to make the math concrete, not a measurement of your spend.</p>`;
   };
 
   // ---- Headline ------------------------------------------------------------
@@ -334,8 +332,9 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
         needing frontier-grade reasoning, so each one is routed to the lowest-cost model that clears the quality bar —
         and frontier models are never pulled off the work that needs them.</li>
       </ul>
-      <p class="body">Quality doesn&rsquo;t pay for it. In our customer A/B, task success was 100% in both arms; in
-      independent SWE-Bench Pro testing the same context engine lifted task success from <b>51.9% to 70.1%</b>.</p>`;
+      <p class="body">Quality doesn&rsquo;t pay for it. In the controlled customer measurement, task success was 100%
+      with and without Governor; in independent SWE-Bench Pro testing the same context engine lifted task success
+      from <b>51.9% to 70.1%</b>.</p>`;
   // The operational reader cares about what changes for an agent working in
   // their codebase, so the same mechanics are framed as workflow, not bill.
   const solutionInnerOperational = `
@@ -353,8 +352,9 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
         quality bar — and frontier models are never pulled off the work that needs them. One place to govern which
         models do which work, instead of a per-developer guess.</li>
       </ul>
-      <p class="body">Quality doesn&rsquo;t pay for it. In our customer A/B, task success was 100% in both arms; in
-      independent SWE-Bench Pro testing the same context engine lifted task success from <b>51.9% to 70.1%</b>.</p>`;
+      <p class="body">Quality doesn&rsquo;t pay for it. In the controlled customer measurement, task success was 100%
+      with and without Governor; in independent SWE-Bench Pro testing the same context engine lifted task success
+      from <b>51.9% to 70.1%</b>.</p>`;
 
   const milestonesInner = `
       <div class="milestone"><h4>Day 1 — drop-in endpoint</h4><p>Update the base URL in your existing harness
@@ -363,22 +363,17 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
       <div class="milestone"><h4>Week 2 — codebase mapping</h4><p>AI Architect indexes your repositories into a
       continuously updated map of services, architectural patterns, and dependencies — deeper than vector search, and
       inside your security and compliance guardrails. Governor starts injecting that context up front.</p></div>
-      <div class="milestone"><h4>Month 2 — instrumented A/B on your own workload</h4><p>The same work runs with and
-      without Governor. You get a telemetry report showing the exact reduction in reasoning turns, tool calls, task
-      time, and token cost — your benchmark, on your codebase, not ours.</p></div>`;
-
-  const validationInner = `
-      <p class="body">Nothing in this document asks you to take a benchmark on faith. The validation is an instrumented
-      A/B on your own repositories: the same set of real tasks runs with and without Governor, on the same model and
-      the same caching, and every run is measured on reasoning turns, tool calls, tokens through the model, task time,
-      cost per task, and task success. You keep the telemetry. If the numbers on your codebase don&rsquo;t hold, the
-      conversation ends there.</p>`;
+      <div class="milestone"><h4>Month 2 — expand across teams</h4><p>With the first team running through Governor,
+      additional teams point their harness at the same endpoint. Model policy stays in one place, and the codebase
+      map extends to their repositories as they are indexed.</p></div>`;
 
   const proofInner = `
       <ul class="plain">
-        <li>Controlled customer A/B, identical tasks on Claude Code: cost per task <b>$4.12 → $2.14 (−48%)</b>,
-        reasoning turns halved (47.6 → 23.6), tool calls −53%, tasks 36% faster. Task success 100% in both arms.</li>
-        <li>Full ten-ask working session, five runs per arm, same model and caching: <b>$6.81 → $1.13 (−83%)</b>,
+        <li>Controlled customer measurement, identical tasks on Claude Code with and without Governor: cost per task
+        <b>$4.12 → $2.14 (−48%)</b>, reasoning turns halved (47.6 → 23.6), tool calls −53%, tasks 36% faster. Task
+        success 100% both ways.</li>
+        <li>Full ten-ask working session, five runs each with and without Governor, same model and caching:
+        <b>$6.81 → $1.13 (−83%)</b>,
         tokens through the model 5.3M → 1.4M, 10/10 tasks vs 9/10 for the baseline.</li>
         <li>SWE-Bench Pro (independent, The Context Lab): task success <b>51.9% → 70.1%</b> with Governor&rsquo;s code
         context.</li>
@@ -405,7 +400,7 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
     "Potential economic impact",
     `<p class="body">Secondary to the operational case above: solving the context problem also changes the bill.
       The figures below are modeled from the stated headcount and a per-engineer allowance assumption, not measured
-      spend, and the instrumented A/B replaces them with your own numbers.</p>`,
+      spend.</p>`,
   );
 
   let body: string;
@@ -422,7 +417,7 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
     ].join("");
   } else if (layout === "cost") {
     // Financial outcome → why costs rise → their environment → the economic
-    // model → how Governor works → proof → validation → next step.
+    // model → how Governor works → proof → next step.
     body = [
       execSection,
       environmentSection,
@@ -430,7 +425,6 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
       sec("How Governor works", solutionInner),
       sec("Rollout", milestonesInner),
       sec("Proof points", proofInner),
-      sec("Validation", validationInner),
       sec("Why Bito", whyBitoInner),
       nextSection,
     ].join("");
@@ -442,7 +436,6 @@ function renderPane(layout: Layout, n: ProposalNarrative, f: ProposalFields): Om
       sec("How Governor works", solutionInnerOperational),
       sec("Rollout", milestonesInner),
       sec("Proof points", proofInner),
-      sec("Validation", validationInner),
       roiOperational,
       sec("Why Bito", whyBitoInner),
       nextSection,

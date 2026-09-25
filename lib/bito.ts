@@ -34,14 +34,15 @@ const AI_ARCHITECT = `AI ARCHITECT — the cross-repo context engine (Governor's
 
 const PROOF = `PROOF POINTS (published; cite as real, never inflate — and say what each one MEASURES)
 Measured results. Every figure below was measured on the CONTEXT lever with the model held constant; none of them measures routing.
-- Controlled customer A/B, identical tasks on Claude Code: cost per task $4.12 to $2.14 (-48%), reasoning turns 47.6 to 23.6, tool calls -53%, tasks 36% faster, task success 100% in both arms.
-- Full ten-ask working session, five runs per arm, same model and caching: $6.81 to $1.13 (-83%), tokens through the model 5.3M to 1.4M, 10/10 tasks vs 9/10 for the baseline.
+- Controlled customer measurement, identical tasks on Claude Code with and without Governor's context: cost per task $4.12 to $2.14 (-48%), reasoning turns 47.6 to 23.6, tool calls -53%, tasks 36% faster, task success 100% both ways.
+- Full ten-ask working session, five runs each with and without Governor, same model and caching: $6.81 to $1.13 (-83%), tokens through the model 5.3M to 1.4M, 10/10 tasks vs 9/10 for the baseline.
 - SWE-Bench Pro (independent, The Context Lab): codebase context lifted coding-agent task success from 51.9% to 70.1% (~+35%), and cut token cost per task ~47% (up to ~68% on individual tasks), reasoning steps ~60%, and tool calls ~49%.
 Production results for AI Architect (context engine and review, not Governor benchmarks).
 - PubMatic: across 500+ repos / 450 engineers over an 8-week controlled evaluation, technical design per large epic went from a 2-week estimate to 3 days; indexed repos grew merge volume +48% (control +4%) and shipped 2x the work with no rise in reverts or incidents.
 - Privado shipped an enterprise SSO project in 5 hours against a 7-10 day estimate.
 - Design & scoping: collapses ~60-70% of an architect's week into a single session; code review: teams report saving ~30-35% of human review hours each week, many reviews dropping from ~an hour to 10-20 minutes.
-Modeled numbers (ROI tables, spend estimates) are assumptions until the instrumented A/B on the customer's own tasks replaces them. Keep MEASURED, MODELED and CUSTOMER ASSUMPTIONS visibly distinct; never present a modeled figure as a customer's known spend.
+Modeled numbers (ROI tables, spend estimates) are assumptions, not the customer's known spend. Keep MEASURED, MODELED and CUSTOMER ASSUMPTIONS visibly distinct; never present a modeled figure as a customer's known spend.
+Bito does not currently offer prospects an A/B test, bake-off, or instrumented side-by-side comparison on their own workload. Never propose, promise or imply one; the ask is to start with one team on its real tasks.
 Enterprise: no code stored or used to train models; deploy on-prem or in Bito cloud; SOC 2 Type II, end-to-end encrypted.`;
 
 const ICP = `Who Bito sells to (ICP)
@@ -67,7 +68,7 @@ Buying motions to consider per account
 - PLG: point one harness at Governor (or connect the IDE plugin) → team adopts → expand across teams and repos.
 - Top-down: CTO/VPE pitch around cost per successful task, task time, and model governance at scale.
 - Champion-led: find a staff/architect engineer or platform lead steering agents through cross-repo work, and arm them.
-- Land-and-expand: instrumented A/B on one team's real tasks, then expand across the org.`;
+- Land-and-expand: one team points its harness at Governor on its real tasks, then expand across the org.`;
 
 /** Product context with the requested product leading. Governor is the
  *  default for every prospecting prompt; AI Architect leads only for work
