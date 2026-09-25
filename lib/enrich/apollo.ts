@@ -8,6 +8,7 @@
 // Auth: x-api-key header.
 
 import { accountExcluded, classifyProfiles, hardExclude } from "../icpClassifier";
+import { isMergerEvent, type ApolloEvent } from "../sweepEvents";
 import type { ApolloData, EnrichContact, ProviderResult } from "./types";
 import { pickAiDevTools } from "./types";
 import type { RegionId } from "../data";
@@ -36,6 +37,12 @@ interface ApolloOrg {
   total_funding?: number;
   latest_funding_stage?: string;
   latest_funding_round_date?: string;
+  /** Every round Apollo knows, newest usually first: date, type ("Series E",
+   *  "Merger / Acquisition", …), printed amount, investors, source article. */
+  funding_events?: { date?: string; type?: string; amount?: string; investors?: string; news_url?: string }[];
+  /** Company-wide headcount growth as a fraction (0.21 = +21%). */
+  organization_headcount_six_month_growth?: number;
+  organization_headcount_twelve_month_growth?: number;
   technology_names?: string[];
   current_technologies?: { name?: string }[];
 }
@@ -904,6 +911,12 @@ export interface IcpSweepOrg {
   engineeringCount?: number;
   /** Short "what the company does" blurb from Apollo, when present. */
   about?: string;
+  /** Company-wide headcount growth (fraction) from the search record. */
+  growth6m?: number;
+  growth12m?: number;
+  /** From the per-company lookup: latest funding round and latest M&A event. */
+  funding?: ApolloEvent;
+  acquisition?: ApolloEvent;
 }
 
 /** LinkedIn-derived headcount facts from the FREE organizations/enrich call.
@@ -916,6 +929,30 @@ export interface OrgFacts {
   employees?: number;
   engineering?: number;
   informationTechnology?: number;
+  /** Company-wide headcount growth (fraction). */
+  growth6m?: number;
+  growth12m?: number;
+  /** Latest round that is not a merger/acquisition, and the latest M&A event. */
+  funding?: ApolloEvent;
+  acquisition?: ApolloEvent;
+}
+
+/** Apollo's funding events, newest first, in the shape sweepEvent() reads. */
+function fundingEvents(org: ApolloOrg): ApolloEvent[] {
+  const out: ApolloEvent[] = [];
+  for (const e of org.funding_events ?? []) {
+    const date = str(e?.date);
+    const type = str(e?.type);
+    if (!date || !type || !Number.isFinite(Date.parse(date))) continue;
+    out.push({ date, type, amount: str(e.amount), investors: str(e.investors), newsUrl: str(e.news_url) });
+  }
+  // Older payloads carry only the latest-round summary fields.
+  if (out.length === 0) {
+    const date = str(org.latest_funding_round_date);
+    const type = str(org.latest_funding_stage);
+    if (date && type && Number.isFinite(Date.parse(date))) out.push({ date, type });
+  }
+  return out.sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
 }
 
 export async function apolloOrgFacts(domain: string): Promise<OrgFacts | null> {
@@ -932,14 +969,68 @@ export async function apolloOrgFacts(domain: string): Promise<OrgFacts | null> {
     if (!org) return null;
     const dept = org.departmental_head_count ?? {};
     const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
+    const events = fundingEvents(org);
     return {
       employees: num(org.estimated_num_employees),
       engineering: num(dept.engineering),
       informationTechnology: num(dept.information_technology),
+      growth6m: num(org.organization_headcount_six_month_growth),
+      growth12m: num(org.organization_headcount_twelve_month_growth),
+      funding: events.find((e) => !isMergerEvent(e.type)),
+      acquisition: events.find((e) => isMergerEvent(e.type)),
     };
   } catch {
     return null;
   }
+}
+
+/** One org from a search by domain list: canonical name, HQ country and
+ *  company-wide growth. */
+export interface DomainOrg {
+  name: string;
+  domain: string;
+  country?: string;
+  growth6m?: number;
+  growth12m?: number;
+}
+
+/** Look up many companies at once by domain (mixed_companies/search with
+ *  q_organization_domains_list[]). Apollo bills 1 credit per page of up to
+ *  100 results, so 100 domains cost 1 credit. Never throws. */
+export async function apolloOrgsByDomains(domains: string[]): Promise<{ ok: boolean; error?: string; orgs: DomainOrg[] }> {
+  const key = process.env.APOLLO_API_KEY;
+  if (!key) return { ok: false, error: "APOLLO_API_KEY not set", orgs: [] };
+  const unique = [...new Set(domains.map((d) => d.trim().toLowerCase()).filter(Boolean))];
+  const orgs: DomainOrg[] = [];
+  const errors: string[] = [];
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    const qs = new URLSearchParams({ page: "1", per_page: "100" });
+    for (const d of chunk) qs.append("q_organization_domains_list[]", d);
+    try {
+      const { status, body } = await apolloJson(`${BASE}/mixed_companies/search?${qs}`, key, "POST");
+      if (status !== 200) {
+        errors.push(statusError(status, "Apollo domain lookup"));
+        continue;
+      }
+      const b = body as { accounts?: ApolloAccountRecord[]; organizations?: ApolloAccountRecord[] } | undefined;
+      for (const a of [...(b?.accounts ?? []), ...(b?.organizations ?? [])]) {
+        const name = str(a.name);
+        const domain = str(a.primary_domain) ?? str(a.domain);
+        if (!name || !domain) continue;
+        orgs.push({
+          name,
+          domain: domain.toLowerCase(),
+          country: str(a.organization_country) ?? str(a.country),
+          growth6m: num(a.organization_headcount_six_month_growth),
+          growth12m: num(a.organization_headcount_twelve_month_growth),
+        });
+      }
+    } catch (e) {
+      errors.push(isTimeout(e) ? "Apollo domain lookup timed out" : "Apollo domain lookup failed");
+    }
+  }
+  return { ok: errors.length === 0 || orgs.length > 0, error: errors[0], orgs };
 }
 
 export interface IcpSweepResult {
@@ -1007,6 +1098,11 @@ interface ApolloAccountRecord {
   estimated_num_employees?: number;
   short_description?: string;
   industry?: string;
+  country?: string;
+  organization_country?: string;
+  /** Company-wide headcount growth as a fraction (verified live, Sep 25). */
+  organization_headcount_six_month_growth?: number;
+  organization_headcount_twelve_month_growth?: number;
 }
 
 // organization_locations[] filter values per intel region (verified Apollo
@@ -1097,6 +1193,8 @@ export async function apolloIcpSweep(page = 1, region: RegionId = "us"): Promise
           employeeBand: batch.query.bandLabel,
           estimatedEmployees: num(a.estimated_num_employees),
           about: str(a.short_description) ?? str(a.industry),
+          growth6m: num(a.organization_headcount_six_month_growth),
+          growth12m: num(a.organization_headcount_twelve_month_growth),
         });
       }
     }

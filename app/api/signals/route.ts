@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { callClaudeWithWebSearch, extractJSON, FAST_MODEL } from "@/lib/anthropic";
 import { BITO_CONTEXT } from "@/lib/bito";
 import { apolloIcpSweep, apolloOrgFacts, SWEEP_PAGE_SIZE, type IcpSweepOrg } from "@/lib/enrich/apollo";
+import { sweepEvent } from "@/lib/sweepEvents";
+import { githubIntentSignals } from "@/lib/githubIntent";
 import { fetchHNItems } from "@/lib/sources/hn";
 import { fetchGitHubTrendingItems } from "@/lib/sources/github";
 import { fetchGdeltItems } from "@/lib/sources/gdelt";
@@ -35,9 +37,11 @@ export const dynamic = "force-dynamic";
 // The full pass can run past 90s — use the platform maximum.
 export const maxDuration = 300;
 
-const VALID_TYPES: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai", "icp"];
+const VALID_TYPES: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai", "layoffs", "github", "icp"];
 // Buckets the model searches for; "icp" is served by Apollo, not Anthropic.
-type SearchBucket = Exclude<SignalTypeId, "icp">;
+// icp (Apollo sweep) and github (GitHub-tab roll-up) are built from
+// structured data, not graded from free sources.
+type SearchBucket = Exclude<SignalTypeId, "icp" | "github">;
 const VALID_SEGMENTS: SegmentId[] = [
   "saas",
   "fintech",
@@ -116,6 +120,8 @@ const BUCKET_BRIEFS: Record<SearchBucket, string> = {
   funding:
     'Funding rounds with explicit engineering build-out language: rounds where the announcement specifically says "hire engineers", "scale platform", "build the team" — not generic "growth". Use TechCrunch, business wires.',
   ai: "AI tooling spend signals: public commentary (engineering blogs, podcasts, conference talks, Twitter/X threads) about AI dev-tool cost, adoption, or pain. Bonus if the company complains about Copilot/Cursor token cost.",
+  layoffs:
+    "Engineering layoffs: companies that cut software engineers or engineering / technical staff in the last 90 days. The item must say engineers, engineering, developers, or technical / product teams were affected; cuts that name only sales, support, recruiting, or operations do NOT qualify, and neither does a company-wide number with no sign engineering was hit. The company must still run a large software organization (roughly 50+ engineers after the cuts). Put the engineering detail (how many, which teams, the stated reason, e.g. AI) in the description. Why it matters to Bito: a team doing the same work with fewer engineers leans harder on coding agents, which puts cost per task and model policy on the table.",
 };
 
 // Region scoping — the whole feed is one region at a time.
@@ -243,6 +249,16 @@ async function fetchBucketItems(
             ? [fetchRssItems("https://inc42.com/feed/", { limit: 15 })]
             : [hnWithRetry("Cursor", { minPoints: 20, days: 21, limit: 6 })]),
           gd('("AI coding" OR "GitHub Copilot" OR "Cursor AI" OR "AI developer tools") (cost OR spend OR adoption OR rollout)', { limit: 20 }),
+        ];
+      case "layoffs":
+        return [
+          gd('(layoffs OR "laid off" OR "job cuts" OR "cutting jobs") (engineers OR engineering OR developers OR software)', { limit: 25 }),
+          // TechCrunch's layoffs tag (verified live Sep 25: 20 items); the
+          // category path 404s.
+          inIndia
+            ? fetchRssItems("https://inc42.com/feed/", { limit: 20 })
+            : fetchRssItems("https://techcrunch.com/tag/layoffs/feed/", { limit: 20 }),
+          hnWithRetry("layoffs", { minPoints: 20, days: 30, limit: 8 }),
         ];
     }
   })();
@@ -422,12 +438,40 @@ function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
     // Prefer a real "what the company does" blurb (Apollo short_description) for
     // the overview; fall back to the Apollo-match explainer when none exists.
     const about = org.about ? briefAbout(org.about) : undefined;
+    const base = modeledStrength(org.matchedKeyword, swe);
+    // Apollo's own data shows an event (recent funding or M&A, shrinking or
+    // fast-growing headcount): the row becomes that signal instead of a bare
+    // profile match, and its card skips the lazy web-search research.
+    const ev = sweepEvent({
+      growth6m: org.growth6m,
+      growth12m: org.growth12m,
+      funding: org.funding,
+      acquisition: org.acquisition,
+      engineering: org.engineeringCount,
+    });
+    if (ev) {
+      return {
+        id: `${ev.type}-sweep-${i}-${Date.now().toString(36)}`,
+        account: org.name,
+        segment: ICP_KEYWORD_SEGMENT[org.matchedKeyword] ?? "saas",
+        type: ev.type,
+        strength: Math.max(40, Math.min(95, base + ev.bump)),
+        title: ev.title,
+        description: [ev.detail, about].filter(Boolean).join(" "),
+        tags: [...ev.facts, org.matchedKeyword, org.employeeBand].slice(0, 6),
+        source: ev.source,
+        url: ev.url || org.linkedinUrl || org.websiteUrl,
+        date: ev.date ?? todayISO(),
+        sweEstimate: swe,
+        codebaseHint: undefined,
+      };
+    }
     return {
       id: `icp-${i}-${Date.now().toString(36)}`,
       account: org.name,
       segment: ICP_KEYWORD_SEGMENT[org.matchedKeyword] ?? "saas",
       type: "icp" as const,
-      strength: modeledStrength(org.matchedKeyword, swe),
+      strength: base,
       title: `Profile-fit match: ${org.matchedKeyword} · ${org.employeeBand}`,
       // Only a REAL company blurb (Apollo short_description). No blurb → no
       // description: the title + tags already say keyword/band/size, so the old
@@ -503,6 +547,15 @@ export async function GET(req: NextRequest) {
           const facts = await apolloOrgFacts(o.domain!);
           if (facts?.engineering) o.engineeringCount = facts.engineering;
           if (facts?.employees && !o.estimatedEmployees) o.estimatedEmployees = facts.employees;
+          // Same response, previously discarded: funding / M&A events and
+          // growth rates turn a bare profile match into a real event signal
+          // (see lib/sweepEvents). No extra Apollo call.
+          if (facts) {
+            o.funding = facts.funding;
+            o.acquisition = facts.acquisition;
+            o.growth6m ??= facts.growth6m;
+            o.growth12m ??= facts.growth12m;
+          }
         }
       }),
     );
@@ -528,6 +581,33 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // GitHub intent: the GitHub tab's activity rolled up by company (lib/
+  // githubIntent). Reads Supabase, plus one Apollo domain search for HQ
+  // regions; no Anthropic call.
+  if (bucket === "github") {
+    const gh = await githubIntentSignals(region);
+    if (!gh.configured) {
+      return NextResponse.json({ signals: [], skipped: gh.error }, { headers: { "Cache-Control": "no-store" } });
+    }
+    if (!gh.ok) {
+      return NextResponse.json(
+        { error: gh.error || "GitHub intent roll-up failed." },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    console.log(`[signals] github intent: ${gh.signals.length} for ${region} of ${gh.qualifying} qualifying companies`);
+    if (gh.signals.length === 0) {
+      return NextResponse.json(
+        { signals: [], empty: true, note: "No qualifying GitHub intent for this region.", updated: new Date().toISOString() },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    const persisted = supabaseConfigured() ? (await upsertSignals(gh.signals, region)).ok : false;
+    return NextResponse.json(
+      { signals: gh.signals, persisted, updated: new Date().toISOString() },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
   // ?deep=1 opts into the expensive web_search path; default is the free
   // structured-sources + grader pipeline.
   const deep = req.nextUrl.searchParams.get("deep") === "1";

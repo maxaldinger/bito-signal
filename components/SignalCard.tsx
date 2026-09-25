@@ -6,6 +6,8 @@ import {
   GitBranch,
   GitMerge,
   TrendingUp,
+  TrendingDown,
+  Github,
   Cpu,
   Crosshair,
   ChevronDown,
@@ -146,6 +148,8 @@ const TYPE_ICON: Record<SignalTypeId, LucideIcon> = {
   ma: GitMerge,
   funding: TrendingUp,
   ai: Cpu,
+  layoffs: TrendingDown,
+  github: Github,
   icp: Crosshair,
 };
 

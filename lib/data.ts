@@ -116,13 +116,27 @@ export const SIGNAL_TYPES: SignalType[] = [
     id: "hiring",
     label: "Engineering Hiring",
     color: "#10b981",
-    description: "Job posts, hiring sprees, eng team build-out language",
+    description: "Job posts, hiring sprees, eng team build-out language, or fast headcount growth (Apollo)",
+  },
+  {
+    id: "layoffs",
+    label: "Layoffs",
+    color: "#dc2626",
+    description:
+      "Engineering layoffs in the news, or company-wide headcount shrinking (Apollo) — doing the same work with fewer engineers",
   },
   {
     id: "oss",
     label: "OSS / GitHub Activity",
     color: "#8b5cf6",
     description: "Major releases, repo activity, OSS commentary",
+  },
+  {
+    id: "github",
+    label: "GitHub Intent",
+    color: "#4f46e5",
+    description:
+      "Engineers at the account active on code-context and AI-coding repos (rolled up from the GitHub tab)",
   },
   {
     id: "ma",
@@ -134,7 +148,7 @@ export const SIGNAL_TYPES: SignalType[] = [
     id: "funding",
     label: "Funding + Eng Build-out",
     color: "#0284c7",
-    description: "Rounds explicitly earmarked for engineering / platform",
+    description: "Recent rounds (Apollo) and rounds earmarked for engineering / platform (news)",
   },
   {
     id: "ai",

@@ -14,6 +14,8 @@ export type SignalTypeId =
   | "ma"       // M&A creating codebase complexity (merges, acquisitions)
   | "funding"  // funding rounds with explicit engineering build-out
   | "ai"       // AI tooling spend / public AI tooling commentary
+  | "layoffs"  // engineering layoffs (news-graded) or company-wide headcount shrinkage (Apollo)
+  | "github"   // engineers at the account active on code-context / AI-coding repos (GitHub tab)
   | "icp";     // Apollo org-search sweep — profile-fit match, no event
 
 // Company segment — what kind of SWE-heavy org this is. Deliberately wider

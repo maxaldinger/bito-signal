@@ -23,7 +23,7 @@ Proxycurl and Crunchbase.
 
 | Route | Method | Purpose |
 | --- | --- | --- |
-| `/api/signals?type=X` | GET | Bucket scan. Default: FREE discovery — structured sources (GDELT, Hacker News, GitHub, TechCrunch RSS, Apollo) fetch raw candidates, one no-search Claude call grades them (zero billed searches). `&deep=1` opts into the Sonnet + web_search deep scan. |
+| `/api/signals?type=X` | GET | Bucket scan. Default: FREE discovery — structured sources (GDELT, Hacker News, GitHub, TechCrunch RSS incl. the layoffs tag, Apollo) fetch raw candidates, one no-search Claude call grades them (zero billed searches). `type=icp` is the Apollo sweep; rows whose Apollo data shows a recent round, M&A, or headcount growth / shrinkage become funding / ma / hiring / layoffs signals. `type=github` rolls the GitHub tab's repo activity up by company. `&deep=1` opts into the Sonnet + web_search deep scan. |
 | `/api/intel?company=X` | GET | Full intel brief for one company |
 | `/api/assist` | POST | Sales assist chat (`{mode, tone, persona, messages}`) |
 | `/api/enrich?company=X[&domain=Y][&github=org][&linkedin=url]` | GET | Orchestrator — fans out to all configured providers, merges a rollup |

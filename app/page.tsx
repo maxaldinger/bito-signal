@@ -55,12 +55,13 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
   }
 }
 
-const BUCKETS: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai", "icp"];
+const BUCKETS: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai", "layoffs", "github", "icp"];
 const PAGE_SIZE = 50;
 
-// GDELT (used by the hiring/ma/funding/ai buckets' free fetchers) hard-limits
-// to ~1 request per 5s per IP — stagger those bucket launches so their GDELT
-// calls land ≥6s apart. icp/oss don't touch GDELT and start immediately.
+// GDELT (used by the hiring/ma/funding/ai/layoffs buckets' free fetchers)
+// hard-limits to ~1 request per 5s per IP — stagger those bucket launches so
+// their GDELT calls land ≥6s apart. icp/oss/github don't touch GDELT and start
+// immediately.
 const BUCKET_STAGGER_MS: Record<SignalTypeId, number> = {
   icp: 0,
   oss: 0,
@@ -68,6 +69,8 @@ const BUCKET_STAGGER_MS: Record<SignalTypeId, number> = {
   ma: 6000,
   funding: 12000,
   ai: 18000,
+  layoffs: 24000,
+  github: 0,
 };
 
 const toggleIn = <T,>(arr: T[], v: T): T[] =>
