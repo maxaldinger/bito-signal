@@ -165,6 +165,10 @@ export const SIGNAL_TYPES: SignalType[] = [
   },
 ];
 
+/** Cards per Signal Feed page — and the most one Pull More adds, so a pull
+ *  fills exactly one page (Max, Sep 30: "1 pull, 1 full page"). */
+export const FEED_PAGE_SIZE = 50;
+
 export const SIGNAL_TYPE_MAP: Record<string, SignalType> = Object.fromEntries(
   SIGNAL_TYPES.map((s) => [s.id, s])
 );

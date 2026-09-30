@@ -153,7 +153,7 @@ export function SignalFeed({
   totalPages: number;
   onPage: (p: number) => void;
   /** Outcome of the last "Pull More" — drives the post-pull feedback line. */
-  pullResult: { added: number; failed: SignalTypeId[] } | null;
+  pullResult: { added: number; refreshed?: number; failed: SignalTypeId[] } | null;
   onDismissPullResult: () => void;
   loading: boolean;
   pulling: boolean;
@@ -294,7 +294,8 @@ export function SignalFeed({
           <p className="min-w-0 flex-1 text-xs leading-relaxed text-ink-300">
             {pullResult.added > 0 ? (
               <span className="font-semibold text-neon-300">
-                Pulled {pullResult.added} new signal{pullResult.added === 1 ? "" : "s"}.
+                Pulled {pullResult.added} new signal{pullResult.added === 1 ? "" : "s"}
+                {pullResult.refreshed ? `, ${pullResult.refreshed} re-sighted` : ""}.
               </span>
             ) : (
               <span className="font-semibold text-ink-200">No new signals this pull.</span>

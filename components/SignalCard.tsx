@@ -20,6 +20,7 @@ import {
   Star,
   Eye,
   X,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { Signal, SignalTypeId } from "@/lib/types";
@@ -240,6 +241,19 @@ export function SignalCard({
   // is already covered by the orange Prospected badge, so `mine` suppresses.
   const teamSync = useCompanySyncEvent(signal.account);
   const teamChip = teamSync && !teamSync.mine ? teamSync : undefined;
+  // A signal that arrived after the company was prospected — by this rep or a
+  // teammate — still surfaces, flagged, so a worked account with fresh
+  // activity isn't mistaken for old news (Max, Sep 30). "Arrived" is when the
+  // row entered the feed or, for a re-sighted row, the date of its event.
+  const prospectTs = Math.max(prospectedAt ?? 0, teamSync ? new Date(teamSync.at).getTime() || 0 : 0);
+  const arrivedTs = Math.max(
+    signal.firstSeenAt ? Date.parse(signal.firstSeenAt) || 0 : 0,
+    /^\d{4}-\d{2}-\d{2}/.test(signal.date) ? Date.parse(signal.date.slice(0, 10)) || 0 : 0,
+  );
+  const newSinceProspect = prospectTs > 0 && arrivedTs > prospectTs;
+  const newSignalTitle = newSinceProspect
+    ? `New signal — arrived after this account was prospected on ${fmtDate(prospectTs)}`
+    : undefined;
   const lowPriority = useIsLowPriority(signal.account);
   const collapsed = useIsCollapsed(signal.account);
   const favorite = useIsFavorite(signal.account);
@@ -269,6 +283,14 @@ export function SignalCard({
           <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-ink-500">
             {lowPriority ? "low priority" : "collapsed"}
           </span>
+          {newSinceProspect && (
+            <span
+              title={newSignalTitle}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-neon-500/50 bg-neon-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide text-neon-300"
+            >
+              <Sparkles className="h-3 w-3" /> New signal
+            </span>
+          )}
           {prospected && (
             <span
               title={`Already prospected — sent to HubSpot${prospectedAt ? ` on ${fmtDate(prospectedAt)}` : ""}`}
@@ -331,6 +353,14 @@ export function SignalCard({
             : "border-ink-700 hover:border-ink-600"
       }`}
     >
+      {newSinceProspect && (
+        <div
+          title={newSignalTitle}
+          className="mb-2 inline-flex items-center gap-1.5 rounded-md border border-neon-500/50 bg-neon-500/15 px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wide text-neon-300"
+        >
+          <Sparkles className="h-3.5 w-3.5" /> New signal · since prospecting {fmtDate(prospectTs)}
+        </div>
+      )}
       {prospected && (
         <div className="mb-3 flex items-center gap-2 rounded-md border border-orange-500/40 bg-orange-500/15 px-3 py-2">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neon-500 text-ink-950">

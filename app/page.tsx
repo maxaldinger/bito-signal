@@ -31,6 +31,7 @@ import {
 import {
   SEGMENTS,
   SIGNAL_TYPES,
+  FEED_PAGE_SIZE,
   SWE_BANDS,
   sweBandOf,
   isRegionId,
@@ -56,7 +57,10 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
 }
 
 const BUCKETS: SignalTypeId[] = ["hiring", "oss", "ma", "funding", "ai", "layoffs", "github", "icp"];
-const PAGE_SIZE = 50;
+// One feed page, and the most one Pull More adds (Max, Sep 30).
+const PAGE_SIZE = FEED_PAGE_SIZE;
+// Event sources run first in a pull; the Apollo sweep fills what they leave.
+const EVENT_BUCKETS = BUCKETS.filter((b) => b !== "icp");
 
 // GDELT (used by the hiring/ma/funding/ai/layoffs buckets' free fetchers)
 // hard-limits to ~1 request per 5s per IP — stagger those bucket launches so
@@ -86,13 +90,18 @@ export default function Page() {
   //  - ephemeral mode (no Supabase): live scans append progressively, nothing
   //    persists between loads.
   const [signals, setSignals] = useState<Signal[]>([]);
+  // Read at pull start to tell new rows from re-sighted ones.
+  const signalsRef = useRef<Signal[]>([]);
+  useEffect(() => {
+    signalsRef.current = signals;
+  }, [signals]);
   const [cacheMode, setCacheMode] = useState<boolean>(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   // Mirror of `total` for stale-free reads inside long-lived callbacks.
   const totalRef = useRef(0);
   // Outcome of the last "Pull More" — drives the post-pull feedback line.
-  const [pullResult, setPullResult] = useState<{ added: number; failed: SignalTypeId[] } | null>(
+  const [pullResult, setPullResult] = useState<{ added: number; refreshed?: number; failed: SignalTypeId[] } | null>(
     null,
   );
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -136,14 +145,28 @@ export default function Page() {
 
   // ---- Live bucket scans (shared by both modes) -------------------------
   const scanBuckets = useCallback(
-    async (opts: { force: boolean; appendLive: boolean; reqId: number }): Promise<{
+    async (opts: {
+      force: boolean;
+      appendLive: boolean;
+      reqId: number;
+      /** Which buckets to scan (default: all). */
+      buckets?: SignalTypeId[];
+      /** Most rows the Apollo sweep may add this pull. */
+      sweepLimit?: number;
+      /** False keeps errors from an earlier phase of the same pull. */
+      clearErrors?: boolean;
+    }): Promise<{
       failed: SignalTypeId[];
+      /** Every signal the scanned buckets wrote (new or re-sighted). */
+      returned: Signal[];
     }> => {
-      setBucketErrors({});
-      setPendingBuckets([...BUCKETS]);
+      const list = opts.buckets ?? BUCKETS;
+      if (opts.clearErrors !== false) setBucketErrors({});
+      setPendingBuckets([...list]);
       const failed: SignalTypeId[] = [];
+      const returned: Signal[] = [];
       await Promise.allSettled(
-        BUCKETS.map(async (bucket) => {
+        list.map(async (bucket) => {
           try {
             const delay = BUCKET_STAGGER_MS[bucket] ?? 0;
             if (delay > 0) await new Promise((r) => setTimeout(r, delay));
@@ -151,7 +174,8 @@ export default function Page() {
             // pull fetches NEW orgs (not page 1 over and over).
             const sweepParam =
               bucket === "icp"
-                ? `&sweepPage=${getSweepPage(regionRef.current) ?? ""}`
+                ? `&sweepPage=${getSweepPage(regionRef.current) ?? ""}` +
+                  (typeof opts.sweepLimit === "number" ? `&limit=${opts.sweepLimit}` : "")
                 : "";
             const url =
               `/api/signals?type=${bucket}&region=${regionRef.current}` +
@@ -174,6 +198,7 @@ export default function Page() {
               if (bucket === "icp" && typeof data.nextSweepPage === "number") {
                 setSweepPage(regionRef.current, data.nextSweepPage);
               }
+              if (Array.isArray(data.signals)) returned.push(...(data.signals as Signal[]));
               if (opts.appendLive) {
                 const fresh = Array.isArray(data.signals)
                   ? (data.signals as Signal[])
@@ -196,7 +221,7 @@ export default function Page() {
           }
         }),
       );
-      return { failed };
+      return { failed, returned };
     },
     [],
   );
@@ -245,11 +270,31 @@ export default function Page() {
     setPulling(true);
     setPullResult(null);
     const before = totalRef.current;
+    const had = new Set(signalsRef.current.map((s) => `${s.account}\u0000${s.type}`));
     const reqId = ++feedReqId.current;
-    const { failed } = await scanBuckets({ force: true, appendLive: false, reqId });
+    // One pull fills one feed page (Max, Sep 30). Event sources first — news
+    // buckets, layoffs, GitHub intent — then the Apollo sweep fills whatever
+    // is left of the page. Every row a pull writes (new or re-sighted) moves
+    // to the top of the default order, so the pull lands as page 1.
+    const events = await scanBuckets({ force: true, appendLive: false, reqId, buckets: EVENT_BUCKETS });
+    const touched = new Set(events.returned.map((s) => `${s.account}\u0000${s.type}`));
+    const refreshed = [...touched].filter((k) => had.has(k)).length;
+    const room = Math.max(0, PAGE_SIZE - touched.size);
+    let failed = events.failed;
+    if (room > 0 && reqId === feedReqId.current) {
+      const sweep = await scanBuckets({
+        force: true,
+        appendLive: false,
+        reqId,
+        buckets: ["icp"],
+        sweepLimit: room,
+        clearErrors: false,
+      });
+      failed = [...failed, ...sweep.failed];
+    }
     if (reqId === feedReqId.current) {
       const { total: after } = await loadAll();
-      setPullResult({ added: Math.max(0, after - before), failed });
+      setPullResult({ added: Math.max(0, after - before), refreshed, failed });
       setPage(1);
       setPulling(false);
     }

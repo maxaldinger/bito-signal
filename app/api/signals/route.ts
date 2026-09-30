@@ -16,7 +16,9 @@ import {
   countSignalsByType,
 } from "@/lib/supabase";
 import type { Signal, SignalTypeId, SegmentId } from "@/lib/types";
-import { isRegionId, type RegionId } from "@/lib/data";
+import { FEED_PAGE_SIZE, isRegionId, type RegionId } from "@/lib/data";
+import { adminClient } from "@/lib/supabaseAuth";
+import { normCompany } from "@/lib/companyKey";
 
 // Live feed — we ask claude-sonnet-4 to search the public web for fresh
 // buying signals across the five Bito ICP categories, then return them
@@ -159,7 +161,7 @@ CATEGORY: ${BUCKET_BRIEFS[type]}
 Every signal's "type" field must be "${type}".
 ${
   exclude.length > 0
-    ? `\nALREADY TRACKED — do NOT return these companies again; search specifically for DIFFERENT ones:\n${exclude.join(", ")}\n`
+    ? `\nALREADY TRACKED — each shown with the date of the signal we already hold. Do NOT return these companies again unless you find a NEWER event than that date (a newer event on a tracked account is wanted); otherwise search for DIFFERENT companies:\n${exclude.join(", ")}\n`
     : ""
 }
 ${sharedRules(region)}`;
@@ -283,7 +285,7 @@ CATEGORY: ${BUCKET_BRIEFS[type]}
 For each item that genuinely fits the category AND names a real company (per the ACCOUNT RULES in the system prompt), emit one signal (type "${type}"). Extract the company from the headline/snippet (for GitHub repos, the org behind the repo). Skip items with no identifiable company, aggregators, listicles, individuals' side projects, sub-50-engineer companies, duplicates of the same story, and anything clearly outside the category. It is fine — expected — to return far fewer signals than items. Set "url" to the item's url and "date" to the item's date. Score honestly: these are headline-level candidates, so most belong in the 55-80 range; reserve 80+ for unambiguous, strong ICP fits. Always provide sweEstimate as a best-effort engineer-headcount estimate per the SWE ESTIMATE rule in the system prompt.
 ${
   exclude.length > 0
-    ? `\nALREADY TRACKED — skip these companies entirely:\n${exclude.join(", ")}\n`
+    ? `\nALREADY TRACKED — each shown with the date of the signal we already hold. Skip an item about one of these companies unless it reports a NEWER event than that date; a newer event on a tracked account is wanted (it may be an account we already work):\n${exclude.join(", ")}\n`
     : ""
 }
 RAW ITEMS (JSON):
@@ -423,6 +425,66 @@ function modeledSweFromOrg(org: IcpSweepOrg): number | undefined {
   return swe > 0 ? swe : undefined;
 }
 
+/** What the feed already holds, keyed by normalized company name: the
+ *  signal types each company has, the exact account string its rows use,
+ *  and the blacklist. (account, type) is unique across regions, so this
+ *  reads every region. Empty on a read failure, which only means fewer truly
+ *  new rows that pull. */
+async function knownCompanies(): Promise<{
+  types: Map<string, Set<string>>;
+  names: Map<string, string>;
+  blacklist: Set<string>;
+}> {
+  const types = new Map<string, Set<string>>();
+  const names = new Map<string, string>();
+  const blacklist = new Set<string>();
+  try {
+    const admin = adminClient();
+    for (let from = 0; from < 50_000; from += 1000) {
+      const { data, error } = await admin
+        .from("bito_signals")
+        .select("account,type")
+        .order("id")
+        .range(from, from + 999);
+      if (error || !data) break;
+      for (const r of data) {
+        const k = normCompany(String(r.account));
+        if (!k) continue;
+        const t = types.get(k) ?? new Set<string>();
+        t.add(String(r.type));
+        types.set(k, t);
+        if (!names.has(k)) names.set(k, String(r.account));
+      }
+      if (data.length < 1000) break;
+    }
+    const { data: bl } = await admin.from("bito_blacklist").select("company_key");
+    for (const r of bl ?? []) blacklist.add(normCompany(String(r.company_key)));
+  } catch (e) {
+    // Without this read every swept company looks new: it would be re-picked,
+    // re-enriched (credits) and only refreshed by the upsert.
+    console.error(`[signals] known-companies read failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return { types, names, blacklist };
+}
+
+/** Round-robin the sweep's orgs across its keyword x size-band queries, so a
+ *  capped pull is a cross-section rather than the first query's companies. */
+function interleaveByQuery(orgs: IcpSweepOrg[]): IcpSweepOrg[] {
+  const groups = new Map<string, IcpSweepOrg[]>();
+  for (const o of orgs) {
+    const k = `${o.matchedKeyword}|${o.employeeBand}`;
+    const g = groups.get(k);
+    if (g) g.push(o);
+    else groups.set(k, [o]);
+  }
+  const lists = [...groups.values()];
+  const out: IcpSweepOrg[] = [];
+  for (let i = 0; out.length < orgs.length; i++) {
+    for (const l of lists) if (l[i]) out.push(l[i]);
+  }
+  return out;
+}
+
 // Trim Apollo's company blurb to a single, brief "what they do" sentence.
 function briefAbout(text: string): string {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -430,7 +492,10 @@ function briefAbout(text: string): string {
   return firstSentence.length > 200 ? `${clean.slice(0, 197).trimEnd()}…` : firstSentence;
 }
 
-function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
+function icpSweepToSignals(
+  orgs: IcpSweepOrg[],
+  accountOf: (o: IcpSweepOrg) => string = (o) => o.name,
+): Signal[] {
   return orgs.map((org, i) => {
     // Modeled engineer-share of Apollo's total headcount (see modeledSweFromOrg)
     // — drives both the size filter and the fit score below. Rough by design.
@@ -452,7 +517,7 @@ function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
     if (ev) {
       return {
         id: `${ev.type}-sweep-${i}-${Date.now().toString(36)}`,
-        account: org.name,
+        account: accountOf(org),
         segment: ICP_KEYWORD_SEGMENT[org.matchedKeyword] ?? "saas",
         type: ev.type,
         strength: Math.max(40, Math.min(95, base + ev.bump)),
@@ -468,7 +533,7 @@ function icpSweepToSignals(orgs: IcpSweepOrg[]): Signal[] {
     }
     return {
       id: `icp-${i}-${Date.now().toString(36)}`,
-      account: org.name,
+      account: accountOf(org),
       segment: ICP_KEYWORD_SEGMENT[org.matchedKeyword] ?? "saas",
       type: "icp" as const,
       strength: base,
@@ -517,27 +582,86 @@ export async function GET(req: NextRequest) {
       Number.isFinite(clientPage) && clientPage >= 1
         ? Math.min(100, Math.floor(clientPage))
         : Math.min(100, Math.floor(cachedIcp / realisticYield) + 1);
-    const sweep = await apolloIcpSweep(sweepPage, region);
-    if (!sweep.configured) {
-      // Not an error — just absent. The client treats `skipped` as a quiet no-op
-      // so keyless deployments don't show a permanent failure banner.
+    // One pull fills one feed page (Max, Sep 30). The client sends how much
+    // of the page the event sources left (`limit`). The sweep keeps up to that
+    // many rows:
+    //  - companies NEW to the feed (they get the per-company lookup below, 1
+    //    Apollo credit each — it used to run on all ~300 swept orgs), and
+    //  - companies ALREADY in the feed, prospected or not, only when Apollo's
+    //    search data (free) shows a growth or shrink event they don't have a
+    //    row for yet. A repeat profile match is not a signal and is skipped.
+    // A page with unexamined companies left stays the cursor, so the next
+    // pull continues it instead of skipping them.
+    const limitParam = Number(req.nextUrl.searchParams.get("limit"));
+    const limit = Number.isFinite(limitParam) && limitParam >= 0 ? Math.min(100, Math.floor(limitParam)) : FEED_PAGE_SIZE;
+    if (limit === 0) {
       return NextResponse.json(
-        { signals: [], skipped: sweep.error },
+        { signals: [], empty: true, note: "The page is already full from event sources.", nextSweepPage: sweepPage },
         { headers: { "Cache-Control": "no-store" } },
       );
     }
-    if (!sweep.ok || sweep.orgs.length === 0) {
+    const known = await knownCompanies();
+    const picked: IcpSweepOrg[] = [];
+    const refound: IcpSweepOrg[] = [];
+    const feedName = new Map<IcpSweepOrg, string>();
+    const kept = () => picked.length + refound.length;
+    let page = sweepPage;
+    let pagesFetched = 0;
+    let sweepError: string | undefined;
+    while (kept() < limit && pagesFetched < 3 && page <= 100) {
+      const sweep = await apolloIcpSweep(page, region);
+      pagesFetched += 1;
+      if (!sweep.configured) {
+        // Not an error — just absent. The client treats `skipped` as a quiet
+        // no-op so keyless deployments don't show a permanent failure banner.
+        return NextResponse.json(
+          { signals: [], skipped: sweep.error },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      if (!sweep.ok || sweep.orgs.length === 0) {
+        sweepError = sweep.error || "Apollo ICP sweep returned no organizations.";
+        break;
+      }
+      let full = false;
+      for (const o of interleaveByQuery(sweep.orgs)) {
+        if (kept() >= limit) {
+          full = true;
+          break;
+        }
+        const key = normCompany(o.name);
+        if (!key || known.blacklist.has(key)) continue;
+        const types = known.types.get(key);
+        if (!types) {
+          picked.push(o);
+          known.types.set(key, new Set(["icp"]));
+          continue;
+        }
+        const ev = sweepEvent({ growth6m: o.growth6m, growth12m: o.growth12m });
+        if (ev && !types.has(ev.type)) {
+          refound.push(o);
+          feedName.set(o, known.names.get(key) ?? o.name);
+          types.add(ev.type);
+        }
+      }
+      if (full) break; // unexamined companies left: stay on this page
+      page += 1;
+    }
+    if (kept() === 0 && sweepError) {
       return NextResponse.json(
-        { error: sweep.error || "Apollo ICP sweep returned no organizations." },
+        { error: sweepError },
         { status: 502, headers: { "Cache-Control": "no-store" } },
       );
     }
+    console.log(
+      `[signals] icp sweep ${region}: ${picked.length} new + ${refound.length} re-found of ${limit} from page ${sweepPage}..${page} (${pagesFetched} fetched)`,
+    );
     // Tighter SWE: pull LinkedIn-derived engineering-department counts for the
-    // swept orgs (organizations/enrich, FREE) before turning them into
-    // signals — a measured engineering headcount beats the 35%/3% share model
-    // wherever it exists. Concurrency-limited; a miss leaves the model in
-    // charge for that org.
-    const enrichTargets = sweep.orgs.filter((o) => o.domain);
+    // NEW companies before turning them into signals — a measured engineering
+    // headcount beats the 35%/3% share model wherever it exists. The lookup
+    // costs 1 Apollo credit per company (docs, Sep 25). Concurrency-limited;
+    // a miss leaves the model in charge for that org.
+    const enrichTargets = picked.filter((o) => o.domain);
     let ei = 0;
     await Promise.all(
       Array.from({ length: 6 }, async () => {
@@ -559,8 +683,10 @@ export async function GET(req: NextRequest) {
         }
       }),
     );
-    const icpSignals = icpSweepToSignals(sweep.orgs);
-    const persisted = supabaseConfigured()
+    // Re-found companies keep the account name their feed rows already use,
+    // so every mark on the company (prospected, reviewed, score) lines up.
+    const icpSignals = icpSweepToSignals([...picked, ...refound], (o) => feedName.get(o) ?? o.name);
+    const persisted = supabaseConfigured() && icpSignals.length > 0
       ? (await upsertSignals(icpSignals, region)).ok
       : false;
     return NextResponse.json(
@@ -569,15 +695,12 @@ export async function GET(req: NextRequest) {
         persisted,
         updated: new Date().toISOString(),
         sweepPage,
-        // The client persists this and sends it back next pull, so the cursor
-        // marches forward regardless of how many rows dedup into the cache.
-        nextSweepPage: Math.min(100, sweepPage + 1),
+        // The client persists this and sends it back next pull: the page that
+        // still has unexamined companies, or the one after a drained page.
+        nextSweepPage: Math.min(100, page),
       },
-      {
-        headers: {
-          "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
-        },
-      },
+      // Depends on what is already in the feed, so never cached.
+      { headers: { "Cache-Control": "no-store" } },
     );
   }
 
@@ -602,9 +725,20 @@ export async function GET(req: NextRequest) {
         { headers: { "Cache-Control": "no-store" } },
       );
     }
-    const persisted = supabaseConfigured() ? (await upsertSignals(gh.signals, region)).ok : false;
+    // Only new accounts, or ones with newer activity, are written. Re-saving
+    // unchanged rows would bump them to the top of the feed on every pull and
+    // spend page slots on cards the rep has already seen.
+    let changed = gh.signals;
+    try {
+      const { data } = await adminClient().from("bito_signals").select("account,event_date").eq("type", "github");
+      const prev = new Map((data ?? []).map((r) => [String(r.account), r.event_date ? String(r.event_date) : ""]));
+      changed = gh.signals.filter((s) => !prev.has(s.account) || s.date > (prev.get(s.account) ?? ""));
+    } catch {
+      /* no service key: write them all */
+    }
+    const persisted = supabaseConfigured() && changed.length > 0 ? (await upsertSignals(changed, region)).ok : false;
     return NextResponse.json(
-      { signals: gh.signals, persisted, updated: new Date().toISOString() },
+      { signals: changed, persisted, updated: new Date().toISOString() },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -618,7 +752,7 @@ export async function GET(req: NextRequest) {
     // and dedupe makes pulls look like they "add nothing".
     const exclude =
       bucket && supabaseConfigured()
-        ? await fetchRecentAccounts(bucket, region, 60)
+        ? (await fetchRecentAccounts(bucket, region, 60)).map((r) => `${r.account} (${r.date ?? "undated"})`)
         : [];
 
     let result;

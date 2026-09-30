@@ -60,6 +60,7 @@ function rowToSignal(r: SignalRow): Signal {
     source: r.source,
     url: r.url ?? undefined,
     date: r.event_date ?? r.created_at.slice(0, 10),
+    firstSeenAt: r.created_at,
     sweEstimate: r.swe_estimate ?? undefined,
     codebaseHint: r.codebase_hint ?? undefined,
   };
@@ -159,18 +160,19 @@ export async function updateSignalRow(
   }
 }
 
-/** Most recently seen account names for one signal type — used to tell the
- * model which companies we already track so each pull hunts NEW ones. */
+/** Most recently seen accounts for one signal type, with the date of the
+ * signal we hold — so the model skips companies we already track UNLESS it
+ * finds a newer event (a new story on a prospected account must surface). */
 export async function fetchRecentAccounts(
   type: SignalTypeId,
   region: RegionId,
   limit = 60,
-): Promise<string[]> {
+): Promise<{ account: string; date?: string }[]> {
   const cfg = config();
   if (!cfg) return [];
   try {
     const res = await fetch(
-      `${cfg.url}/rest/v1/bito_signals?select=account&type=eq.${encodeURIComponent(type)}&region=eq.${region}&order=last_seen_at.desc&limit=${limit}`,
+      `${cfg.url}/rest/v1/bito_signals?select=account,event_date&type=eq.${encodeURIComponent(type)}&region=eq.${region}&order=last_seen_at.desc&limit=${limit}`,
       {
         headers: { apikey: cfg.key, Authorization: `Bearer ${cfg.key}` },
         signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -178,8 +180,8 @@ export async function fetchRecentAccounts(
       },
     );
     if (!res.ok) return [];
-    const rows = (await res.json()) as { account: string }[];
-    return rows.map((r) => r.account);
+    const rows = (await res.json()) as { account: string; event_date: string | null }[];
+    return rows.map((r) => ({ account: r.account, date: r.event_date ?? undefined }));
   } catch {
     return [];
   }

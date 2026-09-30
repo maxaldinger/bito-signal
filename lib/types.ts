@@ -67,6 +67,9 @@ export interface Signal {
   source: string;           // human-readable source (e.g. "TechCrunch")
   url?: string;             // primary citation
   date: string;             // ISO date of the underlying event
+  /** When this row first entered the feed (created_at). With `date`, decides
+   *  whether a signal on a prospected company is new since prospecting. */
+  firstSeenAt?: string;
 
   // Optional structured detail used by the card / brief.
   sweEstimate?: number;     // SWE headcount estimate when known
